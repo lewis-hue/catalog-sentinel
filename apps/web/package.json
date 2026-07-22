@@ -1,0 +1,26 @@
+{
+  "name": "@sentinel/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js app-router dashboard for Artist Catalog Sentinel.",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sentinel/shared-ui": "*",
+    "next": "^15.1.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "axe-core": "^4.12.1",
+    "eslint-config-next": "^15.5.20"
+  }
+}

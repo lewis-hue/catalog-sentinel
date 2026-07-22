@@ -1,0 +1,318 @@
+# Artist Catalog Sentinel — local integration stack using real services only.
+#
+#   docker compose up --build
+#
+# Then open:
+#   http://localhost:3000/connect   Connect & scan (Secure Distributor Link) wizard
+#   http://localhost:3000           dashboard
+#
+# Attended login always runs in Steel. PostgreSQL and Redis are mandatory; this file
+# contains no synthetic catalogue, fake login, or process-local persistence fallback.
+# For the externally managed production reference, see docker-compose.production.yml.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: sentinel
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sentinel']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Self-hosted SearXNG — INTERNAL metasearch for web verification of platforms with no
+  # official API. NOT published to the host: the API + worker reach it over the compose
+  # network at http://searxng:8080. Best-effort EVIDENCE only, never a source of truth.
+  # No Tor/Privoxy/proxy-rotation. See docs/searxng-provider.md.
+  searxng:
+    image: searxng/searxng:latest
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+    volumes:
+      - ./docker/searxng:/etc/searxng:ro
+    # No `ports:` — internal only.
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://localhost:8080/healthz']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # Self-hosted Keycloak (OIDC) — authentication + RBAC + per-tenant identity. Its own
+  # Postgres (keycloak-db). The imported realm contains roles, clients, identity-provider
+  # mappers, and a credentialless worker service account, but no interactive demo user.
+  # Auth is opt-in locally; provision human users through Google or the admin console.
+  keycloak-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD}
+      POSTGRES_DB: keycloak
+    volumes: [keycloakdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U keycloak']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ['start-dev', '--import-realm']
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD}
+      KC_HTTP_ENABLED: 'true'
+      KC_HEALTH_ENABLED: 'true'
+      # FIXED public issuer. Without this, a token minted over the internal backchannel
+      # (keycloak:8080) would carry iss=http://keycloak:8080/... while the browser + API expect
+      # http://localhost:8080/... — the classic issuer mismatch that rejects every token.
+      # KC_HOSTNAME pins the frontend/issuer URL; BACKCHANNEL_DYNAMIC still lets the API and the
+      # web BFF reach token/JWKS endpoints over the internal service name.
+      # PRODUCTION: set KC_HOSTNAME=https://auth.yourdomain.com.
+      KC_HOSTNAME: ${KC_HOSTNAME:-http://localhost:8080}
+      KC_HOSTNAME_STRICT: 'false'
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: 'true'
+      # Realm-import substitution (kept out of the git-tracked realm JSON):
+      #  - Google IdP credentials
+      #  - confidential client secrets (web BFF + worker service account)
+      #  - redirect/logout allow-lists + web origin
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET:?Set KEYCLOAK_WEB_CLIENT_SECRET}
+      KEYCLOAK_WORKER_CLIENT_SECRET: ${KEYCLOAK_WORKER_CLIENT_SECRET:?Set KEYCLOAK_WORKER_CLIENT_SECRET}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      WEB_REDIRECT_URIS: ${WEB_REDIRECT_URIS:-http://localhost:3000/*}
+      WEB_POST_LOGOUT_REDIRECT_URIS: ${WEB_POST_LOGOUT_REDIRECT_URIS:-http://localhost:3000/*}
+    volumes:
+      - ./docker/keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - '8080:8080' # published so the browser (later OIDC login) can reach it
+    depends_on: [keycloak-db]
+
+    # Not published to the host — the app reaches it over the compose network.
+
+  migrate:
+    image: sentinel-app
+    command: ['npm', 'run', '--workspace', '@sentinel/db', 'db:migrate:deploy']
+    environment:
+      DATABASE_URL: postgresql://sentinel:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/sentinel
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: 'no'
+
+  # Steel (the sole attended browser provider) is external by default. To use an
+  # operator-managed self-hosted Steel deployment, add the overlay:
+  #   docker compose -f docker-compose.yml -f docker-compose.steel.yml up -d
+  # (see docs/steel-local-development.md · steel-remote-linux-dev.md · steel-production.md)
+
+  # API (Fastify) serving the Secure Distributor Link + deep-scan flow.
+  scanner:
+    build: { context: ., dockerfile: Dockerfile.production }
+    image: sentinel-app
+    command: ['npm', 'run', 'api']
+    environment:
+      PORT: '4000'
+      LOG_LEVEL: info
+      NODE_ENV: development
+      FEATURE_BROWSER_ASSIST_ENABLED: 'true'
+      APP_BASE_URL: http://localhost:3000
+      DATABASE_URL: postgresql://sentinel:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/sentinel
+      BROWSER_LINK_PROVIDER: steel
+      # Attended real distributor login uses Steel (the browser the user logs into directly).
+      #   STEEL_CONNECTOR_MODE = cloud | external | self_hosted
+      #     cloud       → Steel's hosted service (steel.dev) via STEEL_API_KEY.
+      #                   Set STEEL_CONNECTOR_MODE=cloud + STEEL_API_KEY in your .env.
+      #     external     → tunnelled remote Linux Steel  (STEEL_API_URL=http://host.docker.internal:3900)
+      #     self_hosted  → private Steel service on Linux (STEEL_API_URL=http://steel:3000)
+      #   STEEL_REQUIRED = true  → readiness fails if Steel is not READY
+      STEEL_CONNECTOR_MODE: ${STEEL_CONNECTOR_MODE:-cloud}
+      STEEL_API_KEY: ${STEEL_API_KEY:-}
+      STEEL_API_URL: ${STEEL_API_URL:-}
+      STEEL_CDP_INTERNAL: ${STEEL_CDP_INTERNAL:-}
+      STEEL_REQUIRED: 'true'
+      STEEL_SESSION_TIMEOUT_MS: ${STEEL_SESSION_TIMEOUT_MS:-}
+      # Catalogue reads always use the six-stage network-first pipeline with durable checkpoints.
+      # Catalogue-read tuning (DistroKid dashboard is a heavy SPA). Tune via .env + recreate,
+      # no rebuild needed. Low concurrency + generous per-page timeout avoids goto timeouts.
+      CATALOG_READ_CONCURRENCY: ${CATALOG_READ_CONCURRENCY:-2}
+      CATALOG_READ_GOTO_TIMEOUT_MS: ${CATALOG_READ_GOTO_TIMEOUT_MS:-30000}
+      # 'commit' + a data-render wait handles DistroKid's SPA where domcontentloaded hangs.
+      CATALOG_READ_WAIT_UNTIL: ${CATALOG_READ_WAIT_UNTIL:-commit}
+      CATALOG_READ_CONTENT_TIMEOUT_MS: ${CATALOG_READ_CONTENT_TIMEOUT_MS:-30000}
+      CATALOG_READ_MAX_DURATION_MS: ${CATALOG_READ_MAX_DURATION_MS:-600000}
+      # Direct authenticated JSON reads are a GATED optimization: BOTH flags must be true, and
+      # legal review must actually have happened. Default = passive network capture only.
+      ENABLE_DISTROKID_DIRECT_JSON_READER: ${ENABLE_DISTROKID_DIRECT_JSON_READER:-false}
+      LEGAL_REVIEW_DISTROKID_DIRECT_JSON_APPROVED: ${LEGAL_REVIEW_DISTROKID_DIRECT_JSON_APPROVED:-false}
+      DISTROKID_REQUEST_MIN_DELAY_MS: ${DISTROKID_REQUEST_MIN_DELAY_MS:-750}
+      # Raw network debug artifacts: OFF by default; TTL'd + sample-capped + redacted when on.
+      ENABLE_DISTRIBUTOR_NETWORK_DEBUG: ${ENABLE_DISTRIBUTOR_NETWORK_DEBUG:-false}
+      DISTRIBUTOR_NETWORK_DEBUG_TTL_MINUTES: ${DISTRIBUTOR_NETWORK_DEBUG_TTL_MINUTES:-30}
+      DISTRIBUTOR_NETWORK_DEBUG_SAMPLE_LIMIT: ${DISTRIBUTOR_NETWORK_DEBUG_SAMPLE_LIMIT:-5}
+      # Steel is the only attended-browser path.
+      ENABLE_BROWSERLESS_PROVIDER: 'false'
+      # Store-scan APIs: Deezer + Apple need no key; the rest activate when these are
+      # set (passed through from your shell/.env). No rebuild needed to add them.
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      AUDIOMACK_CONSUMER_KEY: ${AUDIOMACK_CONSUMER_KEY:-}
+      AUDIOMACK_CONSUMER_SECRET: ${AUDIOMACK_CONSUMER_SECRET:-}
+      AUDIOMACK_PROFILE_URL: ${AUDIOMACK_PROFILE_URL:-}
+      SOUNDCLOUD_CLIENT_ID: ${SOUNDCLOUD_CLIENT_ID:-}
+      SOUNDCLOUD_CLIENT_SECRET: ${SOUNDCLOUD_CLIENT_SECRET:-}
+      SOUNDCLOUD_PROFILE_URL: ${SOUNDCLOUD_PROFILE_URL:-}
+      TIDAL_CLIENT_ID: ${TIDAL_CLIENT_ID:-}
+      TIDAL_CLIENT_SECRET: ${TIDAL_CLIENT_SECRET:-}
+      TIDAL_PROFILE_URL: ${TIDAL_PROFILE_URL:-}
+      # Web verification for no-API stores. Default backend is the internal SearXNG
+      # (self-hosted); Brave is an optional fallback. Missing platform API keys → those
+      # platforms auto-fall-through to this web backend. Never a source of truth.
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-searxng}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+      SEARXNG_TIMEOUT_MS: ${SEARXNG_TIMEOUT_MS:-8000}
+      SEARXNG_MAX_RPS: ${SEARXNG_MAX_RPS:-2}
+      SEARXNG_CACHE_TTL_SECONDS: ${SEARXNG_CACHE_TTL_SECONDS:-300}
+      SEARXNG_CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${SEARXNG_CIRCUIT_BREAKER_FAILURE_THRESHOLD:-5}
+      SEARXNG_CIRCUIT_BREAKER_RESET_SECONDS: ${SEARXNG_CIRCUIT_BREAKER_RESET_SECONDS:-30}
+      ENABLE_SEARXNG_PROVIDER: ${ENABLE_SEARXNG_PROVIDER:-true}
+      ENABLE_BRAVE_PROVIDER: ${ENABLE_BRAVE_PROVIDER:-false}
+      ENABLE_SEARCH_WEB_VERIFY: ${ENABLE_SEARCH_WEB_VERIFY:-true}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      ENABLE_WEB_SEARCH_STORES: ${ENABLE_WEB_SEARCH_STORES:-false}
+      # Brave is 1 query/sec, so the live web scan is bounded (full scan is the CLI).
+      CATALOG_SCAN_WEB_LIMIT: ${CATALOG_SCAN_WEB_LIMIT:-5}
+      # Background multi-platform deep scan: the API enqueues to Redis (BullMQ); the
+      # worker container consumes it. This development fixture uses Redis for shared scan state;
+      # production uses the one migration-owned DATABASE_URL as the durable source of truth.
+      REDIS_URL: redis://redis:6379
+      DEEP_SCAN_DISPATCH: bullmq
+      # Supports very large catalogues (labels with many artists → thousands of tracks).
+      DEEP_SCAN_MAX_TRACKS_PER_SCAN: ${DEEP_SCAN_MAX_TRACKS_PER_SCAN:-20000}
+      DEEP_SCAN_TRACK_CHUNK_SIZE: ${DEEP_SCAN_TRACK_CHUNK_SIZE:-25}
+      DEEP_SCAN_CHECKPOINT_INTERVAL: ${DEEP_SCAN_CHECKPOINT_INTERVAL:-25}
+      # Authentication (Keycloak/OIDC). The API verifies bearer tokens: RS256 signature + issuer
+      # + audience. KEYCLOAK_BASE_URL is INTERNAL (JWKS fetch over the compose network), but the
+      # token's `iss` is the PUBLIC issuer the browser used — so KEYCLOAK_ISSUER must be set
+      # explicitly or every token is rejected on an issuer mismatch.
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-http://keycloak:8080}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/sentinel}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-sentinel}
+      KEYCLOAK_API_CLIENT_ID: ${KEYCLOAK_API_CLIENT_ID:-sentinel-api}
+      ENABLE_KEYCLOAK_AUTH: 'true'
+      ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?Set ENCRYPTION_MASTER_KEY}
+    # Wait for HEALTHY, not merely started: Postgres rejects connections with FATAL 57P03
+    # ("the database system is starting up") during boot, which would crash this service on a
+    # cold `docker compose up`.
+    depends_on:
+      redis: { condition: service_healthy }
+      searxng: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+    # The API is reachable only through the web BFF. No local browser or VNC port is
+    # published; attended real-browser use always goes through a Steel session.
+
+  # Background deep-scan worker(s) — the Celery-equivalent (BullMQ on Redis). Consumes the
+  # multi-platform deep-scan queue and writes results to the SHARED Redis store. Scale with
+  # `docker compose up --scale worker=3` (keep DEEP_SCAN_MAX_CONCURRENCY=1 per worker while
+  # Brave is the search backend — it's a global 1 query/sec per key).
+  worker:
+    image: sentinel-app
+    command: ['npm', 'run', 'worker']
+    environment:
+      NODE_ENV: development
+      REDIS_URL: redis://redis:6379
+      DEEP_SCAN_DISPATCH: bullmq
+      # Supports very large catalogues (labels with many artists → thousands of tracks).
+      DEEP_SCAN_MAX_TRACKS_PER_SCAN: ${DEEP_SCAN_MAX_TRACKS_PER_SCAN:-20000}
+      DEEP_SCAN_TRACK_CHUNK_SIZE: ${DEEP_SCAN_TRACK_CHUNK_SIZE:-25}
+      DEEP_SCAN_CHECKPOINT_INTERVAL: ${DEEP_SCAN_CHECKPOINT_INTERVAL:-25}
+      DEEP_SCAN_MAX_CONCURRENCY: ${DEEP_SCAN_MAX_CONCURRENCY:-1}
+      DATABASE_URL: postgresql://sentinel:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/sentinel
+      BROWSER_LINK_PROVIDER: steel
+      # Steel (same key as the API) so the durable extraction pipeline can re-attach to the
+      # user's logged-in cloud browser and read the whole catalogue off the API request path.
+      STEEL_CONNECTOR_MODE: ${STEEL_CONNECTOR_MODE:-cloud}
+      STEEL_API_KEY: ${STEEL_API_KEY:-}
+      STEEL_SESSION_TIMEOUT_MS: ${STEEL_SESSION_TIMEOUT_MS:-}
+      # Same store-scan credentials as the API so the deep scan can hit every platform.
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      AUDIOMACK_CONSUMER_KEY: ${AUDIOMACK_CONSUMER_KEY:-}
+      AUDIOMACK_CONSUMER_SECRET: ${AUDIOMACK_CONSUMER_SECRET:-}
+      AUDIOMACK_PROFILE_URL: ${AUDIOMACK_PROFILE_URL:-}
+      SOUNDCLOUD_CLIENT_ID: ${SOUNDCLOUD_CLIENT_ID:-}
+      SOUNDCLOUD_CLIENT_SECRET: ${SOUNDCLOUD_CLIENT_SECRET:-}
+      SOUNDCLOUD_PROFILE_URL: ${SOUNDCLOUD_PROFILE_URL:-}
+      TIDAL_CLIENT_ID: ${TIDAL_CLIENT_ID:-}
+      TIDAL_CLIENT_SECRET: ${TIDAL_CLIENT_SECRET:-}
+      TIDAL_PROFILE_URL: ${TIDAL_PROFILE_URL:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      ENABLE_WEB_SEARCH_STORES: ${ENABLE_WEB_SEARCH_STORES:-false}
+      # Web-verification backend for the deep scan (same defaults as the API).
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-searxng}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+      SEARXNG_TIMEOUT_MS: ${SEARXNG_TIMEOUT_MS:-8000}
+      SEARXNG_MAX_RPS: ${SEARXNG_MAX_RPS:-2}
+      SEARXNG_CACHE_TTL_SECONDS: ${SEARXNG_CACHE_TTL_SECONDS:-300}
+      ENABLE_SEARXNG_PROVIDER: ${ENABLE_SEARXNG_PROVIDER:-true}
+      ENABLE_BRAVE_PROVIDER: ${ENABLE_BRAVE_PROVIDER:-false}
+      ENABLE_SEARCH_WEB_VERIFY: ${ENABLE_SEARCH_WEB_VERIFY:-true}
+      ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?Set ENCRYPTION_MASTER_KEY}
+    # Wait for HEALTHY, not merely started: Postgres rejects connections with FATAL 57P03
+    # ("the database system is starting up") during boot, which would crash this service on a
+    # cold `docker compose up`.
+    depends_on:
+      redis: { condition: service_healthy }
+      searxng: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    image: sentinel-app
+    command: ['npm', 'run', 'start', '--workspace', 'apps/web']
+    environment:
+      # `next start` only serves the app's routes with NODE_ENV=production — so keep it here.
+      NODE_ENV: production
+      # …but APP_ENV is the authoritative security-transport signal (see lib/auth/config.ts). For
+      # LOCAL testing it is "development", which permits plaintext http on the compose network
+      # (the web reaches Keycloak at the internal service name keycloak:8080, which can't be
+      # HTTPS). FOR A REAL DEPLOYMENT: set APP_ENV=production and use https:// URLs everywhere.
+      APP_ENV: ${APP_ENV:-development}
+      # The BFF (server-side) attaches the bearer token and proxies to the API. Browser API calls
+      # go through /bff/* → here → scanner:4000; the browser never holds a token.
+      API_PROXY_TARGET: http://scanner:4000
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      ENABLE_KEYCLOAK_AUTH: 'true'
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-sentinel}
+      # Internal (server→server token exchange + JWKS) vs public (browser authorize/logout).
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-http://keycloak:8080}
+      KEYCLOAK_PUBLIC_BASE_URL: ${KEYCLOAK_PUBLIC_BASE_URL:-http://localhost:8080}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/sentinel}
+      KEYCLOAK_WEB_CLIENT_ID: ${KEYCLOAK_WEB_CLIENT_ID:-sentinel-web}
+      KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET:?Set KEYCLOAK_WEB_CLIENT_SECRET}
+      KEYCLOAK_API_CLIENT_ID: ${KEYCLOAK_API_CLIENT_ID:-sentinel-api}
+    ports:
+      - '3000:3000'
+
+volumes:
+  pgdata:
+  redisdata:
+  keycloakdata:

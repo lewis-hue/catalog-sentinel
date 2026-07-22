@@ -1,0 +1,22 @@
+{
+  "name": "@sentinel/engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Orchestration: ingest, scan, match, detect issues, and generate support packets.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentinel/core": "*",
+    "@sentinel/matching": "*",
+    "@sentinel/adapters": "*",
+    "@sentinel/security": "*",
+    "@sentinel/reports": "*",
+    "@sentinel/db": "*"
+  },
+  "//optionalDependencies": "AWS S3 SDK packages are dynamically imported at runtime by src/object-store-factory.ts only when ARTIFACT_S3_BUCKET is set. Install them in the deployment image for S3 artifacts: npm i @aws-sdk/client-s3 @aws-sdk/s3-request-presigner.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -1,0 +1,50 @@
+# Test-only infrastructure.
+#
+# The problem this solves: the main Compose stack keeps Redis and Postgres on the internal network
+# with no published ports (correct — they must never be reachable from outside the host). But that
+# also made them unreachable from a host-run test suite, so every integration test
+# `describe.skipIf(!REDIS_URL)`d itself into a green tick that proved nothing. The important tests
+# were the ones being skipped.
+#
+# These are SEPARATE, throwaway containers on high ports, bound to LOOPBACK ONLY (127.0.0.1), so
+# they are reachable by `npm test` on this machine and by nothing else. They share no volume with
+# the real stack: a test that wipes a table cannot touch development data.
+#
+# Ports avoid the Windows excluded ranges that make 6379/5432 fail to bind here.
+#
+#   docker compose -f docker-compose.test.yml up -d
+#   npm run test:infra
+#   docker compose -f docker-compose.test.yml down -v
+
+name: sentinel-test-infra
+
+services:
+  redis-test:
+    image: redis:7-alpine
+    # 127.0.0.1 prefix is load-bearing: without it Docker publishes on 0.0.0.0 and an
+    # unauthenticated Redis is exposed to the whole network.
+    ports: ['127.0.0.1:6399:6379']
+    # No persistence: every run should start from a known-empty state.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 2s
+      retries: 15
+
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel
+      POSTGRES_DB: sentinel_test
+    ports: ['127.0.0.1:55432:5432']
+    # tmpfs, not a volume: the data is disposable by design, and this keeps a test run from
+    # leaving anything behind on disk.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sentinel -d sentinel_test']
+      interval: 3s
+      timeout: 2s
+      retries: 15

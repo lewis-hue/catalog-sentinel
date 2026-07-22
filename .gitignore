@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.npm-cache/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+.next/
+out/
+
+# Environment / secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Generated artifacts / evidence (may contain PII — keep out of git)
+/artifacts/
+/out/
+/reports-output/
+*.local.csv
+*.local.pdf
+
+# Real captured catalog data + browser session state (your account data — never commit)
+/captures/
+/.auth/
+
+# Prisma
+packages/db/prisma/dev.db
+packages/db/prisma/*.db-journal
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.claude/
+.vscode/*
+!.vscode/extensions.json
+
+# Test / coverage
+coverage/
+.vitest/
+playwright-report/
+test-results/
+
+# CI/local test reports (consumed by scripts/assert-infra-tests-ran.mjs)
+vitest-report*.json

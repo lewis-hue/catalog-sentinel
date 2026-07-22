@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  One-time security and release bootstrap for Artist Catalog Sentinel. Creates
+  the customer-managed key and empty runtime configuration secret plus an
+  immutable, scan-on-push ECR repository. No application workload is started.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedPattern: '[a-z0-9-]{2,24}'
+  GitHubRepository:
+    Type: String
+    Description: Exact owner/repository allowed to publish releases.
+    AllowedPattern: '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+  GitHubOidcProviderArn:
+    Type: String
+    Description: Existing account-level token.actions.githubusercontent.com OIDC provider ARN.
+    AllowedPattern: 'arn:[^:]+:iam::[0-9]{12}:oidc-provider/token.actions.githubusercontent.com'
+
+Resources:
+  ConfigurationKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub '${EnvironmentName} Sentinel bootstrap/configuration key'
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal: { AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+  ConfigurationKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${EnvironmentName}-sentinel-configuration'
+      TargetKeyId: !Ref ConfigurationKey
+
+  ApplicationConfiguration:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub '/${EnvironmentName}/sentinel/runtime'
+      Description: >-
+        Runtime configuration. Populate only through the approved secret
+        workflow after the foundation stack exposes database/Redis endpoints.
+      KmsKeyId: !Ref ConfigurationKey
+      SecretString: '{}'
+
+  ImageRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Sub '${EnvironmentName}/artist-catalog-sentinel'
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration: { ScanOnPush: true }
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: !GetAtt ConfigurationKey.Arn
+      LifecyclePolicy:
+        LifecyclePolicyText: >-
+          {"rules":[{"rulePriority":1,"description":"Retain the newest 100 immutable release images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":100},"action":{"type":"expire"}}]}
+
+  GitHubReleaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Digest-only Sentinel image publisher assumed from the protected GitHub environment.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProviderArn }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': sts.amazonaws.com
+                'token.actions.githubusercontent.com:sub': !Sub 'repo:${GitHubRepository}:environment:production-release'
+      Policies:
+        - PolicyName: publish-one-immutable-repository
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:ListImages
+                Resource: !GetAtt ImageRepository.Arn
+Outputs:
+  ApplicationSecretArn:
+    Value: !Ref ApplicationConfiguration
+  ApplicationSecretKmsKeyArn:
+    Value: !GetAtt ConfigurationKey.Arn
+  EcrRepositoryArn:
+    Value: !GetAtt ImageRepository.Arn
+  EcrRepositoryUri:
+    Value: !GetAtt ImageRepository.RepositoryUri
+  GitHubReleaseRoleArn:
+    Value: !GetAtt GitHubReleaseRole.Arn

@@ -1,0 +1,18 @@
+{
+  "name": "@sentinel/search-store",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Durable PostgreSQL scan history with an optional Redis hot cache and tenant-scoped manual-review derivation.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentinel/core": "*",
+    "ioredis": "^5.10.1",
+    "pg": "^8.13.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

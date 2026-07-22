@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@sentinel/core": ["../core/src/index.ts"],
+      "@sentinel/adapters": ["../adapters/src/index.ts"],
+      "@sentinel/security": ["../security/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

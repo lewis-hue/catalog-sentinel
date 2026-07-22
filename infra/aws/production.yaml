@@ -1,0 +1,1659 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Artist Catalog Sentinel production foundation and ECS services. Creates a
+  two-AZ private network, immutable ECR repository, KMS keys, Object-Locked
+  audit storage, encrypted artifact storage, Aurora PostgreSQL, encrypted
+  Redis failover, ECS Fargate services, TLS ALB, WAF, autoscaling, alarms, and
+  AWS Backup. Deploy only with an image pinned by sha256 digest.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedPattern: '[a-z0-9-]{2,24}'
+  ImageUri:
+    Type: String
+    Description: Immutable OCI reference, for example account.dkr.ecr.region.amazonaws.com/repo@sha256:...
+    AllowedPattern: '.+@sha256:[a-f0-9]{64}'
+  ApplicationSecretArn:
+    Type: String
+    Description: ARN of a Secrets Manager JSON secret containing the runtime keys documented in infra/aws/README.md.
+    AllowedPattern: 'arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+'
+  ApplicationSecretKmsKeyArn:
+    Type: String
+    Description: ARN of the customer-managed KMS key encrypting ApplicationSecretArn.
+    AllowedPattern: 'arn:[^:]+:kms:[^:]+:[0-9]{12}:key/.+'
+  KeycloakErasureClientSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing only the least-privilege Keycloak erasure client secret.
+    AllowedPattern: 'arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+'
+  ObservabilityErasureTokenSecretArn:
+    Type: String
+    Description: Secrets Manager ARN containing only the tenant-selective observability erasure token.
+    AllowedPattern: 'arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:.+'
+  GovernanceExternalSecretKmsKeyArn:
+    Type: String
+    Description: Customer-managed KMS key shared by the two governance integration secrets.
+    AllowedPattern: 'arn:[^:]+:kms:[^:]+:[0-9]{12}:key/.+'
+  CertificateArn:
+    Type: String
+    Description: ACM certificate ARN for the public HTTPS listener.
+    AllowedPattern: 'arn:[^:]+:acm:[^:]+:[0-9]{12}:certificate/.+'
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: Optional operations email. Subscription confirmation is required.
+  DeployServices:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Keep false for the foundation pass; set true only after migrations and secret validation pass.
+  VpcCidr:
+    Type: String
+    Default: 10.42.0.0/16
+  WebDesiredCount:
+    Type: Number
+    Default: 2
+    MinValue: 2
+  ApiDesiredCount:
+    Type: Number
+    Default: 2
+    MinValue: 2
+  WorkerDesiredCount:
+    Type: Number
+    Default: 2
+    MinValue: 2
+  RedisNodeType:
+    Type: String
+    Default: cache.r7g.large
+  AuditRetentionDays:
+    Type: Number
+    Default: 2555
+    MinValue: 365
+  ArtifactExpirationDays:
+    Type: Number
+    Default: 30
+    MinValue: 1
+  LogRetentionDays:
+    Type: Number
+    Default: 365
+    AllowedValues: [30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
+  OperationalRetentionDays:
+    Type: Number
+    Default: 90
+    MinValue: 7
+    MaxValue: 3650
+    Description: Maximum age for operational catalogue data, bounded again by the signed compliance approval.
+  DrBackupVaultArn:
+    Type: String
+    Default: ''
+    Description: Optional cross-region AWS Backup vault ARN from dr-region.yaml.
+    AllowedPattern: '^$|arn:[^:]+:backup:[^:]+:[0-9]{12}:backup-vault:.+'
+  DrArtifactBucketArn:
+    Type: String
+    Default: ''
+    Description: Optional cross-region artifact replica bucket ARN from dr-region.yaml.
+    AllowedPattern: '^$|arn:[^:]+:s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]'
+  DrArtifactKmsKeyArn:
+    Type: String
+    Default: ''
+    Description: Required with DrArtifactBucketArn; destination KMS key ARN.
+    AllowedPattern: '^$|arn:[^:]+:kms:[^:]+:[0-9]{12}:key/.+'
+
+Rules:
+  DrArtifactReplicationParameters:
+    Assertions:
+      - Assert: !Or
+          - !And
+            - !Equals [!Ref DrArtifactBucketArn, '']
+            - !Equals [!Ref DrArtifactKmsKeyArn, '']
+          - !And
+            - !Not [!Equals [!Ref DrArtifactBucketArn, '']]
+            - !Not [!Equals [!Ref DrArtifactKmsKeyArn, '']]
+        AssertDescription: Supply both DR artifact bucket and KMS key ARNs, or leave both empty.
+
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
+  ShouldDeployServices: !Equals [!Ref DeployServices, 'true']
+  HasDrBackupVault: !Not [!Equals [!Ref DrBackupVaultArn, '']]
+  HasDrArtifactBucket: !And
+    - !Not [!Equals [!Ref DrArtifactBucketArn, '']]
+    - !Not [!Equals [!Ref DrArtifactKmsKeyArn, '']]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - { Key: Name, Value: !Sub '${EnvironmentName}-sentinel' }
+        - { Key: Environment, Value: !Ref EnvironmentName }
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.42.0.0/24
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub '${EnvironmentName}-public-a' }]
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.42.1.0/24
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub '${EnvironmentName}-public-b' }]
+  AppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.42.10.0/23
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub '${EnvironmentName}-app-a' }]
+  AppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.42.12.0/23
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub '${EnvironmentName}-app-b' }]
+  DataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.42.20.0/24
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub '${EnvironmentName}-data-a' }]
+  DataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.42.21.0/24
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub '${EnvironmentName}-data-b' }]
+
+  NatEipA:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties: { Domain: vpc }
+  NatEipB:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties: { Domain: vpc }
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEipA.AllocationId
+      SubnetId: !Ref PublicSubnetA
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEipB.AllocationId
+      SubnetId: !Ref PublicSubnetB
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: { VpcId: !Ref Vpc }
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicRouteAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { RouteTableId: !Ref PublicRouteTable, SubnetId: !Ref PublicSubnetA }
+  PublicRouteAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { RouteTableId: !Ref PublicRouteTable, SubnetId: !Ref PublicSubnetB }
+
+  AppRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties: { VpcId: !Ref Vpc }
+  AppRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AppRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+  AppRouteAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { RouteTableId: !Ref AppRouteTableA, SubnetId: !Ref AppSubnetA }
+  AppRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties: { VpcId: !Ref Vpc }
+  AppRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AppRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayB
+  AppRouteAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { RouteTableId: !Ref AppRouteTableB, SubnetId: !Ref AppSubnetB }
+  DataRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: { VpcId: !Ref Vpc }
+  DataRouteAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { RouteTableId: !Ref DataRouteTable, SubnetId: !Ref DataSubnetA }
+  DataRouteAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { RouteTableId: !Ref DataRouteTable, SubnetId: !Ref DataSubnetB }
+
+  FlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsKeyId: !GetAtt DataKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+  FlowLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: vpc-flow-logs.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: write-flow-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogGroups, logs:DescribeLogStreams]
+                Resource:
+                  - !GetAtt FlowLogGroup.Arn
+                  - !Sub '${FlowLogGroup.Arn}:*'
+  VpcFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt FlowLogRole.Arn
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref FlowLogGroup
+      ResourceId: !Ref Vpc
+      ResourceType: VPC
+      TrafficType: ALL
+
+  DataKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub '${EnvironmentName} Sentinel application, database, Redis, logs, and artifact key'
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal: { AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: CloudWatchLogsEncryption
+            Effect: Allow
+            Principal: { Service: !Sub 'logs.${AWS::Region}.amazonaws.com' }
+            Action: [kms:Encrypt, kms:Decrypt, 'kms:ReEncrypt*', kms:GenerateDataKey, kms:DescribeKey]
+            Resource: '*'
+            Condition:
+              ArnLike:
+                'kms:EncryptionContext:aws:logs:arn': !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+  DataKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${EnvironmentName}-sentinel-data'
+      TargetKeyId: !Ref DataKey
+
+  AuditKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub '${EnvironmentName} Sentinel immutable audit export key'
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal: { AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+  AuditKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${EnvironmentName}-sentinel-audit'
+      TargetKeyId: !Ref AuditKey
+
+  AuditSigningKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub '${EnvironmentName} Sentinel audit-anchor signing key'
+      KeySpec: ECC_NIST_P256
+      KeyUsage: SIGN_VERIFY
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal: { AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+  AuditSigningKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${EnvironmentName}-sentinel-audit-signing'
+      TargetKeyId: !Ref AuditSigningKey
+
+  GovernanceHmacKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub '${EnvironmentName} Sentinel non-reversible governance pseudonym key'
+      KeySpec: HMAC_256
+      KeyUsage: GENERATE_VERIFY_MAC
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal: { AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+  GovernanceHmacKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${EnvironmentName}-sentinel-governance-hmac'
+      TargetKeyId: !Ref GovernanceHmacKey
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${AWS::AccountId}-${AWS::Region}-${EnvironmentName}-sntl-art'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt DataKey.Arn
+            BucketKeyEnabled: true
+      VersioningConfiguration: { Status: Enabled }
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: governed-expiration
+            Status: Enabled
+            NoncurrentVersionExpiration: { NoncurrentDays: 7 }
+            ExpirationInDays: !Ref ArtifactExpirationDays
+      ReplicationConfiguration: !If
+        - HasDrArtifactBucket
+        - Role: !GetAtt ArtifactReplicationRole.Arn
+          Rules:
+            - Id: cross-region-disaster-recovery
+              Priority: 1
+              Status: Enabled
+              DeleteMarkerReplication: { Status: Enabled }
+              Filter: { Prefix: '' }
+              SourceSelectionCriteria:
+                SseKmsEncryptedObjects: { Status: Enabled }
+              Destination:
+                Bucket: !Ref DrArtifactBucketArn
+                StorageClass: STANDARD_IA
+                EncryptionConfiguration:
+                  ReplicaKmsKeyID: !Ref DrArtifactKmsKeyArn
+        - !Ref AWS::NoValue
+  ArtifactReplicationRole:
+    Type: AWS::IAM::Role
+    Condition: HasDrArtifactBucket
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: s3.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: replicate-governed-artifacts
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetReplicationConfiguration, s3:ListBucket]
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${AWS::AccountId}-${AWS::Region}-${EnvironmentName}-sntl-art'
+              - Effect: Allow
+                Action: [s3:GetObjectVersionForReplication, s3:GetObjectVersionAcl, s3:GetObjectVersionTagging]
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${AWS::AccountId}-${AWS::Region}-${EnvironmentName}-sntl-art/*'
+              - Effect: Allow
+                Action: [s3:ReplicateObject, s3:ReplicateDelete, s3:ReplicateTags]
+                Resource: !Sub '${DrArtifactBucketArn}/*'
+              - Effect: Allow
+                Action: [kms:Decrypt, kms:DescribeKey]
+                Resource: !GetAtt DataKey.Arn
+              - Effect: Allow
+                Action: [kms:Encrypt, kms:GenerateDataKey, kms:DescribeKey]
+                Resource: !Ref DrArtifactKmsKeyArn
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt ArtifactBucket.Arn, !Sub '${ArtifactBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': false } }
+
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: COMPLIANCE
+            Days: !Ref AuditRetentionDays
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-audit-records-after-object-lock
+            Status: Enabled
+            ExpirationInDays: !Ref AuditRetentionDays
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 1
+          - Id: remove-expired-audit-delete-markers
+            Status: Enabled
+            ExpiredObjectDeleteMarker: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt AuditKey.Arn
+            BucketKeyEnabled: true
+      VersioningConfiguration: { Status: Enabled }
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt AuditBucket.Arn, !Sub '${AuditBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': false } }
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL from Sentinel tasks only
+      VpcId: !Ref Vpc
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Redis TLS from Sentinel tasks only
+      VpcId: !Ref Vpc
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Sentinel private ECS tasks
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+  DatabaseIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      SourceSecurityGroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+  RedisIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RedisSecurityGroup
+      SourceSecurityGroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub '${EnvironmentName} Sentinel private database subnets'
+      SubnetIds: [!Ref DataSubnetA, !Ref DataSubnetB]
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: aurora-postgresql
+      DatabaseName: sentinel
+      Port: 5432
+      MasterUsername: sentinel_admin
+      ManageMasterUserPassword: true
+      MasterUserSecret: { KmsKeyId: !GetAtt DataKey.Arn }
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VpcSecurityGroupIds: [!Ref DatabaseSecurityGroup]
+      StorageEncrypted: true
+      KmsKeyId: !GetAtt DataKey.Arn
+      BackupRetentionPeriod: 35
+      PreferredBackupWindow: 03:00-04:00
+      PreferredMaintenanceWindow: sun:04:30-sun:05:30
+      DeletionProtection: true
+      CopyTagsToSnapshot: true
+      EnableIAMDatabaseAuthentication: true
+      EnableCloudwatchLogsExports: [postgresql]
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 2
+        MaxCapacity: 32
+  DatabaseWriter:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref DatabaseCluster
+      Engine: aurora-postgresql
+      DBInstanceClass: db.serverless
+      AutoMinorVersionUpgrade: true
+      PubliclyAccessible: false
+      EnablePerformanceInsights: true
+      PerformanceInsightsKMSKeyId: !GetAtt DataKey.Arn
+      PerformanceInsightsRetentionPeriod: 7
+  DatabaseReader:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref DatabaseCluster
+      Engine: aurora-postgresql
+      DBInstanceClass: db.serverless
+      AutoMinorVersionUpgrade: true
+      PubliclyAccessible: false
+      EnablePerformanceInsights: true
+      PerformanceInsightsKMSKeyId: !GetAtt DataKey.Arn
+      PerformanceInsightsRetentionPeriod: 7
+      PromotionTier: 1
+
+  RedisSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsKeyId: !Ref DataKey
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: token
+        PasswordLength: 48
+        ExcludeCharacters: '"@/\\'
+        RequireEachIncludedType: true
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: !Sub '${EnvironmentName} Sentinel private Redis subnets'
+      SubnetIds: [!Ref DataSubnetA, !Ref DataSubnetB]
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      ReplicationGroupDescription: !Sub '${EnvironmentName} Sentinel Redis'
+      Engine: redis
+      EngineVersion: '7.1'
+      CacheNodeType: !Ref RedisNodeType
+      NumCacheClusters: 3
+      AutomaticFailoverEnabled: true
+      MultiAZEnabled: true
+      AutoMinorVersionUpgrade: true
+      AtRestEncryptionEnabled: true
+      KmsKeyId: !GetAtt DataKey.Arn
+      TransitEncryptionEnabled: true
+      TransitEncryptionMode: required
+      AuthToken: !Sub '{{resolve:secretsmanager:${RedisSecret}:SecretString:token}}'
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      SecurityGroupIds: [!Ref RedisSecurityGroup]
+      SnapshotRetentionLimit: 7
+      SnapshotWindow: 04:00-05:00
+      PreferredMaintenanceWindow: sun:05:30-sun:06:30
+
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BackupVaultName: !Sub '${EnvironmentName}-sentinel-vault'
+      EncryptionKeyArn: !GetAtt DataKey.Arn
+      LockConfiguration:
+        MinRetentionDays: 35
+        MaxRetentionDays: 3650
+        ChangeableForDays: 7
+  BackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: backup.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub '${EnvironmentName}-sentinel'
+        BackupPlanRule:
+          - RuleName: daily
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: cron(0 2 * * ? *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 360
+            Lifecycle: { DeleteAfterDays: 35 }
+            CopyActions: !If
+              - HasDrBackupVault
+              - - DestinationBackupVaultArn: !Ref DrBackupVaultArn
+                  Lifecycle: { DeleteAfterDays: 35 }
+              - !Ref AWS::NoValue
+          - RuleName: monthly
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: cron(0 1 1 * ? *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 720
+            Lifecycle: { MoveToColdStorageAfterDays: 90, DeleteAfterDays: 2555 }
+            CopyActions: !If
+              - HasDrBackupVault
+              - - DestinationBackupVaultArn: !Ref DrBackupVaultArn
+                  Lifecycle: { MoveToColdStorageAfterDays: 90, DeleteAfterDays: 2555 }
+              - !Ref AWS::NoValue
+  DatabaseBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: aurora-cluster
+        IamRoleArn: !GetAtt BackupRole.Arn
+        Resources:
+          - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:cluster:${DatabaseCluster}'
+
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Interface endpoints from Sentinel tasks
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref TaskSecurityGroup
+  EcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.api'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+  EcrDockerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+  SecretsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+  KmsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.kms'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref AppSubnetA, !Ref AppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref AppRouteTableA, !Ref AppRouteTableB, !Ref DataRouteTable]
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public TLS ingress to Sentinel web
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0 }
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          DestinationSecurityGroupId: !Ref TaskSecurityGroup
+  WebIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref TaskSecurityGroup
+      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+  ApiServiceConnectIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref TaskSecurityGroup
+      SourceSecurityGroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 4000
+      ToPort: 4000
+
+  LoadBalancerLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration: { Status: Enabled }
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-load-balancer-logs
+            Status: Enabled
+            ExpirationInDays: 365
+  LoadBalancerLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LoadBalancerLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAlbLogDelivery
+            Effect: Allow
+            Principal: { Service: logdelivery.elasticloadbalancing.amazonaws.com }
+            Action: s3:PutObject
+            Resource: !Sub '${LoadBalancerLogBucket.Arn}/alb/AWSLogs/${AWS::AccountId}/*'
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: [!GetAtt LoadBalancerLogBucket.Arn, !Sub '${LoadBalancerLogBucket.Arn}/*']
+            Condition: { Bool: { 'aws:SecureTransport': false } }
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: LoadBalancerLogBucketPolicy
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups: [!Ref LoadBalancerSecurityGroup]
+      Subnets: [!Ref PublicSubnetA, !Ref PublicSubnetB]
+      LoadBalancerAttributes:
+        - { Key: deletion_protection.enabled, Value: 'true' }
+        - { Key: routing.http.drop_invalid_header_fields.enabled, Value: 'true' }
+        - { Key: routing.http.desync_mitigation_mode, Value: strictest }
+        - { Key: access_logs.s3.enabled, Value: 'true' }
+        - { Key: access_logs.s3.bucket, Value: !Ref LoadBalancerLogBucket }
+        - { Key: access_logs.s3.prefix, Value: alb }
+  WebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref Vpc
+      TargetType: ip
+      Protocol: HTTP
+      Port: 3000
+      HealthCheckEnabled: true
+      HealthCheckPath: /health
+      HealthCheckProtocol: HTTP
+      Matcher: { HttpCode: '200-399' }
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: '30' }
+        - { Key: stickiness.enabled, Value: 'false' }
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig: { Protocol: HTTPS, Port: '443', StatusCode: HTTP_301 }
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates: [{ CertificateArn: !Ref CertificateArn }]
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTargetGroup
+
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Scope: REGIONAL
+      DefaultAction: { Allow: {} }
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub '${EnvironmentName}-sentinel-waf'
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: aws-common
+          Priority: 10
+          OverrideAction: { None: {} }
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig: { CloudWatchMetricsEnabled: true, MetricName: aws-common, SampledRequestsEnabled: true }
+        - Name: aws-known-bad-inputs
+          Priority: 20
+          OverrideAction: { None: {} }
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig: { CloudWatchMetricsEnabled: true, MetricName: aws-known-bad-inputs, SampledRequestsEnabled: true }
+        - Name: per-ip-rate-limit
+          Priority: 30
+          Action: { Block: {} }
+          Statement:
+            RateBasedStatement: { AggregateKeyType: IP, Limit: 1200 }
+          VisibilityConfig: { CloudWatchMetricsEnabled: true, MetricName: per-ip-rate-limit, SampledRequestsEnabled: true }
+  WebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Ref LoadBalancer
+      WebACLArn: !GetAtt WebAcl.Arn
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-sentinel'
+      ClusterSettings: [{ Name: containerInsights, Value: enabled }]
+      ServiceConnectDefaults:
+        Namespace: !Sub '${EnvironmentName}.sentinel.local'
+      CapacityProviders: [FARGATE, FARGATE_SPOT]
+      DefaultCapacityProviderStrategy:
+        - { CapacityProvider: FARGATE, Weight: 1, Base: 2 }
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: { KmsKeyId: !GetAtt DataKey.Arn, RetentionInDays: !Ref LogRetentionDays }
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: { KmsKeyId: !GetAtt DataKey.Arn, RetentionInDays: !Ref LogRetentionDays }
+  WebLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: { KmsKeyId: !GetAtt DataKey.Arn, RetentionInDays: !Ref LogRetentionDays }
+  MigrationLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: { KmsKeyId: !GetAtt DataKey.Arn, RetentionInDays: !Ref LogRetentionDays }
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: runtime-secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: [!Ref ApplicationSecretArn, !Ref RedisSecret, !GetAtt DatabaseCluster.MasterUserSecret.SecretArn]
+              - Effect: Allow
+                Action: [kms:Decrypt, kms:DescribeKey]
+                Resource: [!GetAtt DataKey.Arn, !Ref ApplicationSecretKmsKeyArn]
+  ApiTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: session-envelope-kms
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [kms:Encrypt, kms:Decrypt, kms:GenerateDataKey, kms:DescribeKey]
+                Resource: !GetAtt DataKey.Arn
+              - Effect: Allow
+                Action: [kms:GenerateMac, kms:DescribeKey]
+                Resource: !GetAtt GovernanceHmacKey.Arn
+
+  WorkerTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: session-envelope-kms
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [kms:Encrypt, kms:Decrypt, kms:GenerateDataKey, kms:DescribeKey]
+                Resource: !GetAtt DataKey.Arn
+              - Effect: Allow
+                Action: [s3:ListBucket, s3:ListBucketVersions, s3:GetBucketVersioning, s3:GetEncryptionConfiguration]
+                Resource:
+                  - !GetAtt ArtifactBucket.Arn
+                  - !If [HasDrArtifactBucket, !Ref DrArtifactBucketArn, !Ref AWS::NoValue]
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject, s3:DeleteObjectVersion]
+                Resource:
+                  - !Sub '${ArtifactBucket.Arn}/*'
+                  - !If [HasDrArtifactBucket, !Sub '${DrArtifactBucketArn}/*', !Ref AWS::NoValue]
+              - Effect: Allow
+                Action: [s3:ListBucket, s3:ListBucketVersions, s3:GetBucketVersioning, s3:GetBucketObjectLockConfiguration, s3:GetEncryptionConfiguration]
+                Resource: !GetAtt AuditBucket.Arn
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject, s3:DeleteObjectVersion]
+                Resource: !Sub '${AuditBucket.Arn}/*'
+              - Effect: Allow
+                Action: [kms:Encrypt, kms:Decrypt, kms:GenerateDataKey, kms:DescribeKey]
+                Resource: !GetAtt AuditKey.Arn
+              - Effect: Allow
+                Action: [kms:Sign, kms:Verify, kms:GetPublicKey, kms:DescribeKey]
+                Resource: !GetAtt AuditSigningKey.Arn
+              - Effect: Allow
+                Action: [kms:GenerateMac, kms:VerifyMac, kms:DescribeKey]
+                Resource: !GetAtt GovernanceHmacKey.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: [!Ref KeycloakErasureClientSecretArn, !Ref ObservabilityErasureTokenSecretArn]
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref GovernanceExternalSecretKmsKeyArn
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue, secretsmanager:DeleteSecret]
+                Resource: !Sub 'arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${EnvironmentName}/sentinel/tenant/*'
+                Condition:
+                  StringEquals:
+                    secretsmanager:ResourceTag/SentinelTenantManaged: 'true'
+              - Effect: Allow
+                Action: [backup:DescribeBackupVault, backup:ListRecoveryPointsByBackupVault]
+                Resource:
+                  - !GetAtt BackupVault.BackupVaultArn
+                  - !If [HasDrBackupVault, !Ref DrBackupVaultArn, !Ref AWS::NoValue]
+
+  WebTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+
+  MigrationTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+
+  ApiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-sentinel-api'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '1024'
+      Memory: '2048'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ApiTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      Volumes: [{ Name: scratch }]
+      ContainerDefinitions:
+        - Name: api
+          Image: !Ref ImageUri
+          Essential: true
+          Command: [npm, run, api]
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          LinuxParameters: { Capabilities: { Drop: [ALL] }, InitProcessEnabled: true }
+          StopTimeout: 30
+          PortMappings:
+            - { Name: api, ContainerPort: 4000, Protocol: tcp, AppProtocol: http }
+          MountPoints:
+            - { SourceVolume: scratch, ContainerPath: /tmp, ReadOnly: false }
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+            - { Name: DEPLOYMENT_ENV, Value: production }
+            - { Name: HOST, Value: 0.0.0.0 }
+            - { Name: PORT, Value: '4000' }
+            - { Name: ENABLE_KEYCLOAK_AUTH, Value: 'true' }
+            - { Name: DEEP_SCAN_DISPATCH, Value: bullmq }
+            - { Name: BROWSER_LINK_PROVIDER, Value: steel }
+            - { Name: STEEL_REQUIRED, Value: 'true' }
+            - { Name: KMS_KEY_ID, Value: !GetAtt DataKey.Arn }
+            - { Name: KMS_ENCRYPTION_CONTEXT, Value: '{"application":"artist-catalog-sentinel","environment":"production","purpose":"session-envelope"}' }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: DATA_RETENTION_DAYS, Value: !Ref OperationalRetentionDays }
+            - { Name: ARTIFACT_S3_BUCKET, Value: !Ref ArtifactBucket }
+            - { Name: ARTIFACT_KMS_KEY_ID, Value: !GetAtt DataKey.Arn }
+            - { Name: AUDIT_EXPORT_S3_BUCKET, Value: !Ref AuditBucket }
+            - { Name: AUDIT_EXPORT_KMS_KEY_ID, Value: !GetAtt AuditKey.Arn }
+            - { Name: AUDIT_SIGNING_KMS_KEY_ID, Value: !GetAtt AuditSigningKey.Arn }
+            - { Name: AUDIT_RETENTION_DAYS, Value: !Ref AuditRetentionDays }
+            - { Name: GOVERNANCE_HMAC_KMS_KEY_ID, Value: !GetAtt GovernanceHmacKey.Arn }
+            - { Name: ENABLE_HOSTED_CREDENTIAL_FORM, Value: 'false' }
+            - { Name: ENABLE_LEGACY_DOM_SCANNER, Value: 'false' }
+            - { Name: ENABLE_DISTRIBUTOR_NETWORK_DEBUG, Value: 'false' }
+          Secrets:
+            - { Name: APP_BASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:APP_BASE_URL::' }
+            - { Name: DATABASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:API_DATABASE_URL::' }
+            - { Name: REDIS_URL, ValueFrom: !Sub '${ApplicationSecretArn}:REDIS_URL::' }
+            - { Name: KEYCLOAK_BASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_BASE_URL::' }
+            - { Name: KEYCLOAK_ISSUER, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_ISSUER::' }
+            - { Name: KEYCLOAK_REALM, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_REALM::' }
+            - { Name: KEYCLOAK_API_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_API_CLIENT_ID::' }
+            - { Name: KEYCLOAK_API_AUDIENCE, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_API_AUDIENCE::' }
+            - { Name: KEYCLOAK_AUDIENCE, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_API_AUDIENCE::' }
+            - { Name: STEEL_CONNECTOR_MODE, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_CONNECTOR_MODE::' }
+            - { Name: STEEL_API_KEY, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_API_KEY::' }
+            - { Name: STEEL_API_URL, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_API_URL::' }
+            - { Name: STEEL_CDP_INTERNAL, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_CDP_INTERNAL::' }
+            - { Name: STEEL_VIEWER_ORIGINS, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_VIEWER_ORIGINS::' }
+            - { Name: STEEL_SESSION_TIMEOUT_MS, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_SESSION_TIMEOUT_MS::' }
+            - { Name: CATALOG_READ_MAX_RELEASES, ValueFrom: !Sub '${ApplicationSecretArn}:CATALOG_READ_MAX_RELEASES::' }
+            - { Name: CATALOG_READ_MAX_DURATION_MS, ValueFrom: !Sub '${ApplicationSecretArn}:CATALOG_READ_MAX_DURATION_MS::' }
+            - { Name: ENABLE_DISTROKID_LIVE_SCANNER, ValueFrom: !Sub '${ApplicationSecretArn}:ENABLE_DISTROKID_LIVE_SCANNER::' }
+            - { Name: LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED, ValueFrom: !Sub '${ApplicationSecretArn}:LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED::' }
+            - { Name: COMPLIANCE_APPROVAL_BUNDLE, ValueFrom: !Sub '${ApplicationSecretArn}:COMPLIANCE_APPROVAL_BUNDLE::' }
+            - { Name: COMPLIANCE_APPROVAL_KEY_ID, ValueFrom: !Sub '${ApplicationSecretArn}:COMPLIANCE_APPROVAL_KEY_ID::' }
+            - { Name: COMPLIANCE_APPROVAL_PUBLIC_KEY_PEM, ValueFrom: !Sub '${ApplicationSecretArn}:COMPLIANCE_APPROVAL_PUBLIC_KEY_PEM::' }
+            - { Name: COMPLIANCE_APPROVAL_ISSUER, ValueFrom: !Sub '${ApplicationSecretArn}:COMPLIANCE_APPROVAL_ISSUER::' }
+            - { Name: HISTORY_CURSOR_SIGNING_KEY, ValueFrom: !Sub '${ApplicationSecretArn}:HISTORY_CURSOR_SIGNING_KEY::' }
+            - { Name: SPOTIFY_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:SPOTIFY_CLIENT_ID::' }
+            - { Name: SPOTIFY_CLIENT_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:SPOTIFY_CLIENT_SECRET::' }
+            - { Name: YOUTUBE_API_KEY, ValueFrom: !Sub '${ApplicationSecretArn}:YOUTUBE_API_KEY::' }
+            - { Name: AUDIOMACK_CONSUMER_KEY, ValueFrom: !Sub '${ApplicationSecretArn}:AUDIOMACK_CONSUMER_KEY::' }
+            - { Name: AUDIOMACK_CONSUMER_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:AUDIOMACK_CONSUMER_SECRET::' }
+            - { Name: AUDIOMACK_PROFILE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:AUDIOMACK_PROFILE_URL::' }
+            - { Name: SOUNDCLOUD_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:SOUNDCLOUD_CLIENT_ID::' }
+            - { Name: SOUNDCLOUD_CLIENT_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:SOUNDCLOUD_CLIENT_SECRET::' }
+            - { Name: SOUNDCLOUD_PROFILE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:SOUNDCLOUD_PROFILE_URL::' }
+            - { Name: TIDAL_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:TIDAL_CLIENT_ID::' }
+            - { Name: TIDAL_CLIENT_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:TIDAL_CLIENT_SECRET::' }
+            - { Name: TIDAL_PROFILE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:TIDAL_PROFILE_URL::' }
+          HealthCheck:
+            Command: [CMD-SHELL, "node -e \"fetch('http://127.0.0.1:4000/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+            Interval: 15
+            Timeout: 5
+            Retries: 5
+            StartPeriod: 60
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+
+  WorkerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-sentinel-worker'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '2048'
+      Memory: '4096'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt WorkerTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      Volumes: [{ Name: scratch }]
+      ContainerDefinitions:
+        - Name: worker
+          Image: !Ref ImageUri
+          Essential: true
+          Command: [npm, run, worker]
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          LinuxParameters: { Capabilities: { Drop: [ALL] }, InitProcessEnabled: true }
+          StopTimeout: 30
+          MountPoints:
+            - { SourceVolume: scratch, ContainerPath: /tmp, ReadOnly: false }
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+            - { Name: DEPLOYMENT_ENV, Value: production }
+            - { Name: ENABLE_KEYCLOAK_AUTH, Value: 'true' }
+            - { Name: DEEP_SCAN_DISPATCH, Value: bullmq }
+            - { Name: BROWSER_LINK_PROVIDER, Value: steel }
+            - { Name: STEEL_REQUIRED, Value: 'true' }
+            - { Name: KMS_KEY_ID, Value: !GetAtt DataKey.Arn }
+            - { Name: KMS_ENCRYPTION_CONTEXT, Value: '{"application":"artist-catalog-sentinel","environment":"production","purpose":"session-envelope"}' }
+            - { Name: AWS_REGION, Value: !Ref AWS::Region }
+            - { Name: AWS_ACCOUNT_ID, Value: !Ref AWS::AccountId }
+            - { Name: DATA_RETENTION_DAYS, Value: !Ref OperationalRetentionDays }
+            - { Name: ARTIFACT_S3_BUCKET, Value: !Ref ArtifactBucket }
+            - { Name: ARTIFACT_KMS_KEY_ID, Value: !GetAtt DataKey.Arn }
+            - { Name: AUDIT_EXPORT_S3_BUCKET, Value: !Ref AuditBucket }
+            - { Name: AUDIT_EXPORT_KMS_KEY_ID, Value: !GetAtt AuditKey.Arn }
+            - { Name: AUDIT_SIGNING_KMS_KEY_ID, Value: !GetAtt AuditSigningKey.Arn }
+            - { Name: AUDIT_RETENTION_DAYS, Value: !Ref AuditRetentionDays }
+            - { Name: AUDIT_SIGNING_ALGORITHM, Value: ECDSA_SHA_256 }
+            - { Name: GOVERNANCE_HMAC_KMS_KEY_ID, Value: !GetAtt GovernanceHmacKey.Arn }
+            - { Name: KEYCLOAK_ERASURE_CLIENT_SECRET_ARN, Value: !Ref KeycloakErasureClientSecretArn }
+            - { Name: OBSERVABILITY_ERASURE_TOKEN_SECRET_ARN, Value: !Ref ObservabilityErasureTokenSecretArn }
+            - { Name: GOVERNANCE_BULLMQ_QUEUES, Value: '["store-presence-deep-scan","distrokid-catalog-index","distrokid-plan-chunks","distrokid-release-chunk","distrokid-retry-failed","distrokid-reconcile","distrokid-finalize"]' }
+            - { Name: GOVERNANCE_MAINTENANCE_INTERVAL_MS, Value: '300000' }
+            - { Name: DEEP_SCAN_MAX_TRACKS_PER_SCAN, Value: '20000' }
+            - { Name: DEEP_SCAN_TRACK_CHUNK_SIZE, Value: '25' }
+            - { Name: DEEP_SCAN_MAX_DISTINCT_ARTISTS, Value: '5000' }
+            - { Name: DSP_CATALOG_MAX_TRACKS_PER_ARTIST, Value: '20000' }
+            - { Name: DSP_CATALOG_FETCH_CONCURRENCY, Value: '2' }
+            - { Name: ENABLE_HOSTED_CREDENTIAL_FORM, Value: 'false' }
+            - { Name: ENABLE_LEGACY_DOM_SCANNER, Value: 'false' }
+            - { Name: ENABLE_DISTRIBUTOR_NETWORK_DEBUG, Value: 'false' }
+          Secrets:
+            - { Name: APP_BASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:APP_BASE_URL::' }
+            - { Name: DATABASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:WORKER_DATABASE_URL::' }
+            - { Name: REDIS_URL, ValueFrom: !Sub '${ApplicationSecretArn}:REDIS_URL::' }
+            - { Name: KEYCLOAK_BASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_BASE_URL::' }
+            - { Name: KEYCLOAK_ISSUER, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_ISSUER::' }
+            - { Name: KEYCLOAK_REALM, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_REALM::' }
+            - { Name: KEYCLOAK_API_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_API_CLIENT_ID::' }
+            - { Name: KEYCLOAK_API_AUDIENCE, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_API_AUDIENCE::' }
+            - { Name: KEYCLOAK_AUDIENCE, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_API_AUDIENCE::' }
+            - { Name: STEEL_CONNECTOR_MODE, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_CONNECTOR_MODE::' }
+            - { Name: STEEL_API_KEY, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_API_KEY::' }
+            - { Name: STEEL_API_URL, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_API_URL::' }
+            - { Name: STEEL_CDP_INTERNAL, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_CDP_INTERNAL::' }
+            - { Name: STEEL_VIEWER_ORIGINS, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_VIEWER_ORIGINS::' }
+            - { Name: STEEL_SESSION_TIMEOUT_MS, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_SESSION_TIMEOUT_MS::' }
+            - { Name: CATALOG_READ_MAX_RELEASES, ValueFrom: !Sub '${ApplicationSecretArn}:CATALOG_READ_MAX_RELEASES::' }
+            - { Name: CATALOG_READ_MAX_DURATION_MS, ValueFrom: !Sub '${ApplicationSecretArn}:CATALOG_READ_MAX_DURATION_MS::' }
+            - { Name: ENABLE_DISTROKID_LIVE_SCANNER, ValueFrom: !Sub '${ApplicationSecretArn}:ENABLE_DISTROKID_LIVE_SCANNER::' }
+            - { Name: LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED, ValueFrom: !Sub '${ApplicationSecretArn}:LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED::' }
+            - { Name: COMPLIANCE_APPROVAL_BUNDLE, ValueFrom: !Sub '${ApplicationSecretArn}:COMPLIANCE_APPROVAL_BUNDLE::' }
+            - { Name: COMPLIANCE_APPROVAL_KEY_ID, ValueFrom: !Sub '${ApplicationSecretArn}:COMPLIANCE_APPROVAL_KEY_ID::' }
+            - { Name: COMPLIANCE_APPROVAL_PUBLIC_KEY_PEM, ValueFrom: !Sub '${ApplicationSecretArn}:COMPLIANCE_APPROVAL_PUBLIC_KEY_PEM::' }
+            - { Name: COMPLIANCE_APPROVAL_ISSUER, ValueFrom: !Sub '${ApplicationSecretArn}:COMPLIANCE_APPROVAL_ISSUER::' }
+            - { Name: SPOTIFY_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:SPOTIFY_CLIENT_ID::' }
+            - { Name: SPOTIFY_CLIENT_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:SPOTIFY_CLIENT_SECRET::' }
+            - { Name: YOUTUBE_API_KEY, ValueFrom: !Sub '${ApplicationSecretArn}:YOUTUBE_API_KEY::' }
+            - { Name: AUDIOMACK_CONSUMER_KEY, ValueFrom: !Sub '${ApplicationSecretArn}:AUDIOMACK_CONSUMER_KEY::' }
+            - { Name: AUDIOMACK_CONSUMER_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:AUDIOMACK_CONSUMER_SECRET::' }
+            - { Name: AUDIOMACK_PROFILE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:AUDIOMACK_PROFILE_URL::' }
+            - { Name: SOUNDCLOUD_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:SOUNDCLOUD_CLIENT_ID::' }
+            - { Name: SOUNDCLOUD_CLIENT_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:SOUNDCLOUD_CLIENT_SECRET::' }
+            - { Name: SOUNDCLOUD_PROFILE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:SOUNDCLOUD_PROFILE_URL::' }
+            - { Name: TIDAL_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:TIDAL_CLIENT_ID::' }
+            - { Name: TIDAL_CLIENT_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:TIDAL_CLIENT_SECRET::' }
+            - { Name: TIDAL_PROFILE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:TIDAL_PROFILE_URL::' }
+            - { Name: GOVERNANCE_BACKUP_VAULTS, ValueFrom: !Sub '${ApplicationSecretArn}:GOVERNANCE_BACKUP_VAULTS::' }
+            - { Name: GOVERNANCE_ARTIFACT_BUCKETS, ValueFrom: !Sub '${ApplicationSecretArn}:GOVERNANCE_ARTIFACT_BUCKETS::' }
+            - { Name: BACKUP_RETENTION_DAYS, ValueFrom: !Sub '${ApplicationSecretArn}:BACKUP_RETENTION_DAYS::' }
+            - { Name: BACKUP_LEGAL_BASIS_REFERENCE, ValueFrom: !Sub '${ApplicationSecretArn}:BACKUP_LEGAL_BASIS_REFERENCE::' }
+            - { Name: AUDIT_LEGAL_BASIS_REFERENCE, ValueFrom: !Sub '${ApplicationSecretArn}:AUDIT_LEGAL_BASIS_REFERENCE::' }
+            - { Name: KEYCLOAK_ADMIN_BASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_ADMIN_BASE_URL::' }
+            - { Name: KEYCLOAK_ERASURE_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_ERASURE_CLIENT_ID::' }
+            - { Name: OBSERVABILITY_ERASURE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:OBSERVABILITY_ERASURE_URL::' }
+            - { Name: OBSERVABILITY_ERASURE_READINESS_URL, ValueFrom: !Sub '${ApplicationSecretArn}:OBSERVABILITY_ERASURE_READINESS_URL::' }
+          HealthCheck:
+            Command: [CMD-SHELL, "node -e \"require('node:fs').stat('/tmp/sentinel-worker-ready',(e,s)=>process.exit(!e&&Date.now()-s.mtimeMs<45000?0:1))\""]
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WorkerLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: worker
+
+  WebTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-sentinel-web'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '512'
+      Memory: '1024'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt WebTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      Volumes: [{ Name: scratch }, { Name: next-cache }]
+      ContainerDefinitions:
+        - Name: web
+          Image: !Ref ImageUri
+          Essential: true
+          Command: [npm, run, start, --workspace, apps/web]
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          LinuxParameters: { Capabilities: { Drop: [ALL] }, InitProcessEnabled: true }
+          StopTimeout: 30
+          PortMappings:
+            - { Name: web, ContainerPort: 3000, Protocol: tcp, AppProtocol: http }
+          MountPoints:
+            - { SourceVolume: scratch, ContainerPath: /tmp, ReadOnly: false }
+            - { SourceVolume: next-cache, ContainerPath: /app/apps/web/.next/cache, ReadOnly: false }
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+            - { Name: DEPLOYMENT_ENV, Value: production }
+            - { Name: HOSTNAME, Value: 0.0.0.0 }
+            - { Name: NEXT_TELEMETRY_DISABLED, Value: '1' }
+            - { Name: API_PROXY_TARGET, Value: 'http://scanner:4000' }
+            - { Name: WEB_AUTH_MODE, Value: keycloak }
+            - { Name: ENABLE_KEYCLOAK_AUTH, Value: 'true' }
+          Secrets:
+            - { Name: APP_BASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:APP_BASE_URL::' }
+            - { Name: KEYCLOAK_BASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_BASE_URL::' }
+            - { Name: KEYCLOAK_PUBLIC_BASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_PUBLIC_BASE_URL::' }
+            - { Name: KEYCLOAK_ISSUER, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_ISSUER::' }
+            - { Name: KEYCLOAK_REALM, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_REALM::' }
+            - { Name: KEYCLOAK_WEB_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_WEB_CLIENT_ID::' }
+            - { Name: KEYCLOAK_WEB_CLIENT_SECRET, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_WEB_CLIENT_SECRET::' }
+            - { Name: KEYCLOAK_API_CLIENT_ID, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_API_CLIENT_ID::' }
+            - { Name: KEYCLOAK_API_AUDIENCE, ValueFrom: !Sub '${ApplicationSecretArn}:KEYCLOAK_API_AUDIENCE::' }
+            - { Name: STEEL_VIEWER_ORIGINS, ValueFrom: !Sub '${ApplicationSecretArn}:STEEL_VIEWER_ORIGINS::' }
+          HealthCheck:
+            Command: [CMD-SHELL, "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+            Interval: 15
+            Timeout: 5
+            Retries: 5
+            StartPeriod: 45
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WebLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: web
+
+  MigrationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-sentinel-migrate'
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: '512'
+      Memory: '1024'
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt MigrationTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      Volumes: [{ Name: scratch }]
+      ContainerDefinitions:
+        - Name: migrate
+          Image: !Ref ImageUri
+          Essential: true
+          Command: [npm, run, --workspace, '@sentinel/db', 'db:migrate:deploy']
+          User: '1000:1000'
+          ReadonlyRootFilesystem: true
+          LinuxParameters: { Capabilities: { Drop: [ALL] }, InitProcessEnabled: true }
+          MountPoints:
+            - { SourceVolume: scratch, ContainerPath: /tmp, ReadOnly: false }
+          Environment:
+            - { Name: NODE_ENV, Value: production }
+          Secrets:
+            - { Name: DATABASE_URL, ValueFrom: !Sub '${ApplicationSecretArn}:MIGRATION_DATABASE_URL::' }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref MigrationLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: migrate
+
+  ApiService:
+    Type: AWS::ECS::Service
+    Condition: ShouldDeployServices
+    DependsOn: [DatabaseWriter, DatabaseReader, RedisReplicationGroup]
+    Properties:
+      ServiceName: api
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref ApiTaskDefinition
+      DesiredCount: !Ref ApiDesiredCount
+      CapacityProviderStrategy: [{ CapacityProvider: FARGATE, Weight: 1, Base: 2 }]
+      EnableECSManagedTags: true
+      EnableExecuteCommand: false
+      PropagateTags: SERVICE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: [!Ref TaskSecurityGroup]
+          Subnets: [!Ref AppSubnetA, !Ref AppSubnetB]
+      ServiceConnectConfiguration:
+        Enabled: true
+        LogConfiguration:
+          LogDriver: awslogs
+          Options: { awslogs-group: !Ref ApiLogGroup, awslogs-region: !Ref AWS::Region, awslogs-stream-prefix: service-connect }
+        Services:
+          - PortName: api
+            DiscoveryName: scanner
+            ClientAliases: [{ DnsName: scanner, Port: 4000 }]
+  WorkerService:
+    Type: AWS::ECS::Service
+    Condition: ShouldDeployServices
+    DependsOn: [ApiService]
+    Properties:
+      ServiceName: worker
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref WorkerTaskDefinition
+      DesiredCount: !Ref WorkerDesiredCount
+      CapacityProviderStrategy: [{ CapacityProvider: FARGATE, Weight: 1, Base: 2 }]
+      EnableECSManagedTags: true
+      EnableExecuteCommand: false
+      PropagateTags: SERVICE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: [!Ref TaskSecurityGroup]
+          Subnets: [!Ref AppSubnetA, !Ref AppSubnetB]
+      ServiceConnectConfiguration: { Enabled: true }
+  WebService:
+    Type: AWS::ECS::Service
+    Condition: ShouldDeployServices
+    DependsOn: [HttpsListener, ApiService]
+    Properties:
+      ServiceName: web
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref WebTaskDefinition
+      DesiredCount: !Ref WebDesiredCount
+      CapacityProviderStrategy: [{ CapacityProvider: FARGATE, Weight: 1, Base: 2 }]
+      EnableECSManagedTags: true
+      EnableExecuteCommand: false
+      PropagateTags: SERVICE
+      HealthCheckGracePeriodSeconds: 90
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: [!Ref TaskSecurityGroup]
+          Subnets: [!Ref AppSubnetA, !Ref AppSubnetB]
+      LoadBalancers:
+        - ContainerName: web
+          ContainerPort: 3000
+          TargetGroupArn: !Ref WebTargetGroup
+      ServiceConnectConfiguration: { Enabled: true }
+
+  WebScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ShouldDeployServices
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Join ['/', [service, !Ref Cluster, !GetAtt WebService.Name]]
+      MinCapacity: !Ref WebDesiredCount
+      MaxCapacity: 20
+  WebCpuScaling:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ShouldDeployServices
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-sentinel-web-cpu'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref WebScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 55
+        ScaleInCooldown: 180
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+  ApiScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ShouldDeployServices
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Join ['/', [service, !Ref Cluster, !GetAtt ApiService.Name]]
+      MinCapacity: !Ref ApiDesiredCount
+      MaxCapacity: 30
+  ApiCpuScaling:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ShouldDeployServices
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-sentinel-api-cpu'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ApiScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 50
+        ScaleInCooldown: 180
+        ScaleOutCooldown: 45
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+  WorkerScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ShouldDeployServices
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Join ['/', [service, !Ref Cluster, !GetAtt WorkerService.Name]]
+      MinCapacity: !Ref WorkerDesiredCount
+      MaxCapacity: 50
+  WorkerCpuScaling:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ShouldDeployServices
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-sentinel-worker-cpu'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref WorkerScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 60
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 30
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      KmsMasterKeyId: alias/aws/sns
+  AlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+  Alb5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Sentinel ALB is returning elevated server errors
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_Target_5XX_Count
+      Dimensions: [{ Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName }]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+  AlbLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Sentinel p95 target latency is above two seconds
+      Namespace: AWS/ApplicationELB
+      MetricName: TargetResponseTime
+      Dimensions: [{ Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName }]
+      ExtendedStatistic: p95
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+  DatabaseCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Aurora writer CPU is sustained above 80 percent
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions: [{ Name: DBInstanceIdentifier, Value: !Ref DatabaseWriter }]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [!Ref AlarmTopic]
+  RedisCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Redis engine CPU is sustained above 75 percent
+      Namespace: AWS/ElastiCache
+      MetricName: EngineCPUUtilization
+      Dimensions: [{ Name: ReplicationGroupId, Value: !Ref RedisReplicationGroup }]
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 75
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [!Ref AlarmTopic]
+
+Outputs:
+  PublicUrl:
+    Value: !Sub 'https://${LoadBalancer.DNSName}'
+  LoadBalancerDnsName:
+    Value: !GetAtt LoadBalancer.DNSName
+  DataKmsKeyArn:
+    Value: !GetAtt DataKey.Arn
+  AuditKmsKeyArn:
+    Value: !GetAtt AuditKey.Arn
+  AuditSigningKmsKeyArn:
+    Value: !GetAtt AuditSigningKey.Arn
+  GovernanceHmacKmsKeyArn:
+    Value: !GetAtt GovernanceHmacKey.Arn
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucket
+  ArtifactReplicationRoleArn:
+    Condition: HasDrArtifactBucket
+    Value: !GetAtt ArtifactReplicationRole.Arn
+  AuditBucketName:
+    Value: !Ref AuditBucket
+  DatabaseWriterEndpoint:
+    Value: !GetAtt DatabaseCluster.Endpoint.Address
+  DatabaseReaderEndpoint:
+    Value: !GetAtt DatabaseCluster.ReadEndpoint.Address
+  DatabaseMasterSecretArn:
+    Value: !GetAtt DatabaseCluster.MasterUserSecret.SecretArn
+  RedisPrimaryEndpoint:
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+  RedisAuthSecretArn:
+    Value: !Ref RedisSecret
+  ClusterArn:
+    Value: !GetAtt Cluster.Arn
+  MigrationTaskDefinitionArn:
+    Value: !Ref MigrationTaskDefinition
+  AppSubnetIds:
+    Value: !Join [',', [!Ref AppSubnetA, !Ref AppSubnetB]]
+  TaskSecurityGroupId:
+    Value: !Ref TaskSecurityGroup
+  AlarmTopicArn:
+    Value: !Ref AlarmTopic

@@ -1,0 +1,17 @@
+{
+  "name": "@sentinel/reports",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Support-packet generation: CSV / HTML / JSON, templates, and email/ticket drafts.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentinel/core": "*",
+    "@sentinel/security": "*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

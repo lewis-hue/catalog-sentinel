@@ -1,0 +1,127 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Lint · Typecheck · Test · Build
+    runs-on: ubuntu-24.04
+
+    # Real Redis and Postgres.
+    #
+    # Without these, every integration test `describe.skipIf(!REDIS_URL)`s itself into a green
+    # tick that proves nothing — which is how a pipeline with no producer passed CI. The
+    # infrastructure tests are the ones that catch cross-process defects, so CI must provide the
+    # infrastructure.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentinel
+          POSTGRES_PASSWORD: sentinel
+          POSTGRES_DB: sentinel_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      REDIS_URL: redis://localhost:6379
+      DATABASE_URL: postgresql://sentinel:sentinel@localhost:5432/sentinel_test
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22.19.0
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # The workflow was named "Lint · …" while never running lint. It does now.
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck (packages + api + worker + web)
+        run: npm run typecheck
+
+      - name: Apply database migrations
+        run: npx prisma migrate deploy --schema packages/db/prisma/schema.prisma
+
+      # Pool concurrency is bounded in vitest.config.ts — Vitest's default (one thread per core)
+      # oversubscribed the runner and produced resource-starvation timeouts that read as flaky
+      # functional failures. Bounding concurrency fixes the cause; inflating timeouts hides it.
+      #
+      # One run, two reporters: `default` for the human log, `json` for the skip check below.
+      # Running the suite twice just to produce a report doubles CI time for no information.
+      - name: Unit & integration tests (real Redis + Postgres)
+        run: npm test -- --reporter=default --reporter=json --outputFile.json=vitest-report.json
+
+      - name: Assert infrastructure tests actually ran
+        # A skipped test and a passing test look identical in a summary line. Without this, the
+        # Redis/Postgres suites can silently skip and CI still reports a green tick — which is
+        # exactly how a pipeline with no producer passed every build.
+        if: always()
+        run: node scripts/assert-infra-tests-ran.mjs vitest-report.json
+
+      - name: Build web dashboard
+        run: npm run build --workspace apps/web
+
+      - name: Build production image (Steel-only runtime)
+        run: docker build --provenance=mode=max --sbom=true -f Dockerfile.production -t sentinel-production-ci:${{ github.sha }} .
+
+      - name: Inspect production image hardening
+        run: |
+          test "$(docker image inspect sentinel-production-ci:${{ github.sha }} --format '{{.Config.User}}')" = "node"
+          docker run --rm --entrypoint sh sentinel-production-ci:${{ github.sha }} -lc '
+            id -u | grep -qx 1000
+            for executable in chromium chromium-browser google-chrome Xvfb x11vnc websockify; do
+              ! command -v "$executable" >/dev/null 2>&1
+            done
+            ! find / -xdev -type f \( -name chrome -o -name chromium -o -name chrome-headless-shell \) -print -quit 2>/dev/null | grep -q .
+          '
+
+  security:
+    name: Dependency & secret scanning
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22.19.0
+
+      # Fails the build on high/critical known vulnerabilities. A scanner whose failure is
+      # swallowed (`|| true`) reports the same green tick whether it found nothing or found
+      # everything — which makes it worse than no scanner, because it looks like coverage.
+      - name: npm audit (high+)
+        run: npm audit --audit-level=high
+
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

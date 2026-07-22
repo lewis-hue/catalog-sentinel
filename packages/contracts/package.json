@@ -1,0 +1,16 @@
+{
+  "name": "@sentinel/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-application job contracts: queue names, job payload shapes, idempotent job ids. Depends on nothing — an app importing this must not drag in a browser, a database or another app.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

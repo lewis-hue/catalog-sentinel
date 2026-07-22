@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Lyrics status — DistroKid (fixture)</title>
+  </head>
+  <!-- Standalone lyrics-status page. In this build the scanner reads lyrics/synced
+       status from the release-detail track table; this fixture documents the
+       alternate per-track lyrics page shape for adapters that need it. -->
+  <body data-page="lyrics-status" data-authenticated="true">
+    <main>
+      <h1 data-field="track-title">Lagos City Nights</h1>
+      <dl>
+        <dt>Plain lyrics</dt><dd data-field="lyrics-status">Approved</dd>
+        <dt>Synced lyrics</dt><dd data-field="synced-status">Submitted</dd>
+      </dl>
+    </main>
+  </body>
+</html>

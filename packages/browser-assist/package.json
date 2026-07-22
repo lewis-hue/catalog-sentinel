@@ -1,0 +1,21 @@
+{
+  "name": "@sentinel/browser-assist",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only DistroKid extraction attached exclusively to user-authorized Steel browser sessions.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentinel/adapters": "*",
+    "@sentinel/contracts": "*",
+    "@sentinel/core": "*",
+    "@sentinel/security": "*",
+    "playwright": "^1.49.1",
+    "zod": "^3.25.76"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

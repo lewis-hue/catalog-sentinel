@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@sentinel/core": ["../core/src/index.ts"],
+      "@sentinel/matching": ["../matching/src/index.ts"],
+      "@sentinel/adapters": ["../adapters/src/index.ts"],
+      "@sentinel/security": ["../security/src/index.ts"],
+      "@sentinel/reports": ["../reports/src/index.ts"],
+      "@sentinel/db": ["../db/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"]
+}

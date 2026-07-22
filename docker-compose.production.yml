@@ -1,0 +1,287 @@
+# Production reference topology.
+#
+# This file intentionally defines only application processes. Postgres, Redis,
+# Keycloak, and Steel must be externally managed/private services. It publishes
+# only the web gateway on loopback by default; put it behind an HTTPS ingress.
+#
+# There is no alternate browser provider, local Chromium, VNC/noVNC, or inline fallback.
+# See docs/steel-production.md before using this reference.
+name: artist-catalog-sentinel-production
+
+x-app-environment: &app-environment
+  NODE_ENV: production
+  DEPLOYMENT_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  APP_BASE_URL: ${APP_BASE_URL:?Set APP_BASE_URL to the public HTTPS origin}
+
+  # Durable state and queues. Credentials are supplied by the deployment secret
+  # manager; this file contains no usable default credentials.
+  REDIS_URL: ${REDIS_URL:?Set the production Redis URL}
+  DEEP_SCAN_DISPATCH: bullmq
+  SEARCH_STORE_PREFIX: ${SEARCH_STORE_PREFIX:-sentinel:production:search}
+  CONNECT_SESSION_PREFIX: ${CONNECT_SESSION_PREFIX:-sentinel:production:connect-session}
+  CONNECT_CLAIM_VISIBILITY_TIMEOUT_MS: ${CONNECT_CLAIM_VISIBILITY_TIMEOUT_MS:-60000}
+  CONNECT_SESSION_RECOVERY_INTERVAL_MS: ${CONNECT_SESSION_RECOVERY_INTERVAL_MS:-15000}
+  CONNECT_SESSION_RECOVERY_BATCH_SIZE: ${CONNECT_SESSION_RECOVERY_BATCH_SIZE:-50}
+  CONNECT_CONSENT_CANCEL_BATCH_SIZE: ${CONNECT_CONSENT_CANCEL_BATCH_SIZE:-100}
+  CONSENT_REVOCATION_RECOVERY_INTERVAL_MS: ${CONSENT_REVOCATION_RECOVERY_INTERVAL_MS:-10000}
+  CONSENT_REVOCATION_RECOVERY_BATCH_SIZE: ${CONSENT_REVOCATION_RECOVERY_BATCH_SIZE:-50}
+  CONSENT_REVOCATION_LEASE_MS: ${CONSENT_REVOCATION_LEASE_MS:-30000}
+
+  # KMS-backed envelope encryption is mandatory. Use workload identity with
+  # kms:Encrypt/kms:Decrypt on this key; AWS CloudHSM custom key stores are
+  # transparent through the same KMS API. Static local master keys are rejected.
+  KMS_KEY_ID: ${KMS_KEY_ID:?Set the immutable production AWS KMS key ARN}
+  AWS_REGION: ${AWS_REGION:?Set the AWS region that owns KMS_KEY_ID}
+  KMS_ENCRYPTION_CONTEXT: ${KMS_ENCRYPTION_CONTEXT:?Set the stable production KMS encryption-context JSON}
+  KMS_REQUEST_TIMEOUT_MS: ${KMS_REQUEST_TIMEOUT_MS:-5000}
+  KMS_MAX_ATTEMPTS: ${KMS_MAX_ATTEMPTS:-3}
+  HISTORY_CURSOR_SIGNING_KEY: ${HISTORY_CURSOR_SIGNING_KEY:?Inject a separate 32-byte base64 HMAC key}
+
+  # Authentication is mandatory and tenant identity comes only from a verified JWT.
+  ENABLE_KEYCLOAK_AUTH: "true"
+  KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:?Set the private Keycloak base URL}
+  KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:?Set the canonical Keycloak realm issuer}
+  KEYCLOAK_REALM: ${KEYCLOAK_REALM:?Set the Keycloak realm}
+  KEYCLOAK_API_CLIENT_ID: ${KEYCLOAK_API_CLIENT_ID:?Set the API resource client ID}
+  KEYCLOAK_API_AUDIENCE: ${KEYCLOAK_API_AUDIENCE:?Set the required API token audience}
+  # Kept for the central startup validator while KEYCLOAK_API_AUDIENCE is the
+  # verifier's canonical setting.
+  KEYCLOAK_AUDIENCE: ${KEYCLOAK_API_AUDIENCE:?Set the required API token audience}
+
+  # Steel is the sole production browser/session provider. cloud requires an API
+  # key; external/self_hosted requires an API URL. The startup validator enforces
+  # the mode-specific half of this one-of requirement.
+  BROWSER_LINK_PROVIDER: steel
+  STEEL_REQUIRED: "true"
+  STEEL_CONNECTOR_MODE: ${STEEL_CONNECTOR_MODE:?Set cloud, external, or self_hosted}
+  STEEL_API_KEY: ${STEEL_API_KEY:-}
+  STEEL_API_URL: ${STEEL_API_URL:-}
+  STEEL_CDP_INTERNAL: ${STEEL_CDP_INTERNAL:-}
+  STEEL_VIEWER_ORIGINS: ${STEEL_VIEWER_ORIGINS:?Set the exact approved Steel live-view origin or origins}
+  # Steel cannot extend a live session lease. These values must be derived from
+  # a measured worst-case catalogue run; startup rejects missing/non-positive values.
+  STEEL_SESSION_TIMEOUT_MS: ${STEEL_SESSION_TIMEOUT_MS:?Set the tested Steel lease duration in milliseconds}
+  CATALOG_READ_MAX_RELEASES: ${CATALOG_READ_MAX_RELEASES:?Set the tested per-lease release capacity}
+  STEEL_API_REQUEST_TIMEOUT_MS: ${STEEL_API_REQUEST_TIMEOUT_MS:-10000}
+
+  # Redis-backed per-principal creation controls. An edge/WAF limit remains
+  # defense in depth, but is not the sole protection for billable Steel sessions.
+  STEEL_SESSION_START_RATE_LIMIT: ${STEEL_SESSION_START_RATE_LIMIT:-3}
+  STEEL_SESSION_START_RATE_WINDOW_MS: ${STEEL_SESSION_START_RATE_WINDOW_MS:-900000}
+  CONSENT_CREATE_RATE_LIMIT: ${CONSENT_CREATE_RATE_LIMIT:-20}
+  CONSENT_CREATE_RATE_WINDOW_MS: ${CONSENT_CREATE_RATE_WINDOW_MS:-3600000}
+  API_RATE_LIMIT_PREFIX: ${API_RATE_LIMIT_PREFIX:-sentinel:production:rate-limit}
+
+  # Hard-disable alternate browser and unsafe dispatch paths.
+  ENABLE_BROWSERLESS_PROVIDER: "false"
+  ENABLE_HYPERBEAM_PROVIDER: "false"
+  ENABLE_KASM_PROVIDER: "false"
+  ENABLE_LOCAL_HEADLESS_CONNECTOR: "false"
+  ENABLE_HOSTED_CREDENTIAL_FORM: "false"
+  ENABLE_LEGACY_DOM_SCANNER: "false"
+
+  # These two values must be explicitly supplied. Startup accepts only true/true;
+  # setting either false is the supported fail-closed state before legal approval.
+  ENABLE_DISTROKID_LIVE_SCANNER: ${ENABLE_DISTROKID_LIVE_SCANNER:?Explicitly set after approval}
+  LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED: ${LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED:?Record legal approval explicitly}
+  # The booleans above are operational switches, not approval evidence. Startup verifies this
+  # short-lived RS256 bundle against the separately controlled public key and signed limits.
+  COMPLIANCE_APPROVAL_BUNDLE: ${COMPLIANCE_APPROVAL_BUNDLE:?Inject the signed legal/privacy/security approval bundle}
+  COMPLIANCE_APPROVAL_KEY_ID: ${COMPLIANCE_APPROVAL_KEY_ID:?Set the signed approval key id}
+  COMPLIANCE_APPROVAL_PUBLIC_KEY_PEM: ${COMPLIANCE_APPROVAL_PUBLIC_KEY_PEM:?Inject the approval verification public key}
+  COMPLIANCE_APPROVAL_ISSUER: ${COMPLIANCE_APPROVAL_ISSUER:?Set the approved bundle issuer}
+  DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:?Set the approved operational retention period}
+  ENABLE_DISTROKID_DIRECT_JSON_READER: ${ENABLE_DISTROKID_DIRECT_JSON_READER:-false}
+  LEGAL_REVIEW_DISTROKID_DIRECT_JSON_APPROVED: ${LEGAL_REVIEW_DISTROKID_DIRECT_JSON_APPROVED:-false}
+  ENABLE_DISTRIBUTOR_NETWORK_DEBUG: "false"
+
+  CATALOG_READ_CONCURRENCY: ${CATALOG_READ_CONCURRENCY:-2}
+  CATALOG_READ_GOTO_TIMEOUT_MS: ${CATALOG_READ_GOTO_TIMEOUT_MS:-30000}
+  CATALOG_READ_CONTENT_TIMEOUT_MS: ${CATALOG_READ_CONTENT_TIMEOUT_MS:-30000}
+  CATALOG_READ_MAX_DURATION_MS: ${CATALOG_READ_MAX_DURATION_MS:?Set a measured worst-case duration that covers the full release cap plus retries}
+  CATALOG_READ_WAIT_UNTIL: ${CATALOG_READ_WAIT_UNTIL:-commit}
+  DEEP_SCAN_MAX_CONCURRENCY: ${DEEP_SCAN_MAX_CONCURRENCY:-1}
+  DEEP_SCAN_MAX_TRACKS_PER_SCAN: ${DEEP_SCAN_MAX_TRACKS_PER_SCAN:-20000}
+  DEEP_SCAN_TRACK_CHUNK_SIZE: ${DEEP_SCAN_TRACK_CHUNK_SIZE:-25}
+  DEEP_SCAN_MAX_DISTINCT_ARTISTS: ${DEEP_SCAN_MAX_DISTINCT_ARTISTS:-5000}
+  DSP_CATALOG_MAX_TRACKS_PER_ARTIST: ${DSP_CATALOG_MAX_TRACKS_PER_ARTIST:-20000}
+  DSP_CATALOG_FETCH_CONCURRENCY: ${DSP_CATALOG_FETCH_CONCURRENCY:-2}
+  DEEP_SCAN_CHECKPOINT_INTERVAL: ${DEEP_SCAN_CHECKPOINT_INTERVAL:-25}
+
+  # Optional official DSP/search credentials. Absence must yield unavailable or
+  # unverifiable results, never a fabricated not-live result.
+  SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+  SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+  YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+  AUDIOMACK_CONSUMER_KEY: ${AUDIOMACK_CONSUMER_KEY:-}
+  AUDIOMACK_CONSUMER_SECRET: ${AUDIOMACK_CONSUMER_SECRET:-}
+  AUDIOMACK_PROFILE_URL: ${AUDIOMACK_PROFILE_URL:-}
+  SOUNDCLOUD_CLIENT_ID: ${SOUNDCLOUD_CLIENT_ID:-}
+  SOUNDCLOUD_CLIENT_SECRET: ${SOUNDCLOUD_CLIENT_SECRET:-}
+  SOUNDCLOUD_PROFILE_URL: ${SOUNDCLOUD_PROFILE_URL:-}
+  TIDAL_CLIENT_ID: ${TIDAL_CLIENT_ID:-}
+  TIDAL_CLIENT_SECRET: ${TIDAL_CLIENT_SECRET:-}
+  TIDAL_PROFILE_URL: ${TIDAL_PROFILE_URL:-}
+  ENABLE_SEARCH_WEB_VERIFY: ${ENABLE_SEARCH_WEB_VERIFY:-false}
+  SEARCH_PROVIDER: ${SEARCH_PROVIDER:-brave}
+  ENABLE_BRAVE_PROVIDER: ${ENABLE_BRAVE_PROVIDER:-false}
+  BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+  ENABLE_SEARXNG_PROVIDER: "false"
+
+  # Durable artifact storage. Use workload identity; do not place cloud access keys here.
+  ARTIFACT_S3_BUCKET: ${ARTIFACT_S3_BUCKET:?Set the versioned production artifact bucket}
+  ARTIFACT_KMS_KEY_ID: ${ARTIFACT_KMS_KEY_ID:?Set the immutable artifact KMS key ARN}
+  ARTIFACT_S3_PREFIX: ${ARTIFACT_S3_PREFIX:-artifacts/}
+  OTEL_ENABLED: ${OTEL_ENABLED:-false}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+x-runtime-hardening: &runtime-hardening
+  init: true
+  user: "1000:1000"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=1777
+  restart: unless-stopped
+  stop_grace_period: 30s
+  pids_limit: 256
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  migrate:
+    image: ${SENTINEL_IMAGE:?Set SENTINEL_IMAGE to an immutable built image reference}
+    pull_policy: always
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=1777
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set the migration-only PostgreSQL URL}
+    command: ["npm", "run", "--workspace", "@sentinel/db", "db:migrate:deploy"]
+    restart: "no"
+    mem_limit: ${MIGRATE_MEMORY_LIMIT:-1g}
+    cpus: ${MIGRATE_CPU_LIMIT:-1.0}
+    profiles: [migrate]
+    networks: [private]
+
+  scanner:
+    <<: *runtime-hardening
+    image: ${SENTINEL_IMAGE:?Set SENTINEL_IMAGE to an immutable built image reference}
+    pull_policy: always
+    command: ["npm", "run", "api"]
+    environment:
+      <<: *app-environment
+      DATABASE_URL: ${API_DATABASE_URL:?Set the API least-privilege PostgreSQL URL}
+      GOVERNANCE_HMAC_KMS_KEY_ID: ${GOVERNANCE_HMAC_KMS_KEY_ID:?Set the immutable HMAC KMS key ARN}
+      PORT: "4000"
+      HOST: 0.0.0.0
+    expose: ["4000"]
+    mem_limit: ${SCANNER_MEMORY_LIMIT:-1g}
+    cpus: ${SCANNER_CPU_LIMIT:-1.0}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks: [private]
+
+  worker:
+    <<: *runtime-hardening
+    image: ${SENTINEL_IMAGE:?Set SENTINEL_IMAGE to an immutable built image reference}
+    pull_policy: always
+    command: ["npm", "run", "worker"]
+    environment:
+      <<: *app-environment
+      DATABASE_URL: ${WORKER_DATABASE_URL:?Set the worker/governance least-privilege PostgreSQL URL}
+      AWS_ACCOUNT_ID: ${AWS_ACCOUNT_ID:?Set the 12-digit AWS account ID}
+      GOVERNANCE_HMAC_KMS_KEY_ID: ${GOVERNANCE_HMAC_KMS_KEY_ID:?Set the immutable HMAC KMS key ARN}
+      AUDIT_SIGNING_KMS_KEY_ID: ${AUDIT_SIGNING_KMS_KEY_ID:?Set the immutable asymmetric audit-signing KMS key ARN}
+      AUDIT_EXPORT_S3_BUCKET: ${AUDIT_EXPORT_S3_BUCKET:?Set the Object-Locked audit bucket}
+      AUDIT_EXPORT_KMS_KEY_ID: ${AUDIT_EXPORT_KMS_KEY_ID:?Set the immutable audit-export KMS key ARN}
+      AUDIT_EXPORT_S3_PREFIX: ${AUDIT_EXPORT_S3_PREFIX:-sentinel-audit-anchors/}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:?Set the approved audit retention from 365 through 3650 days}
+      AUDIT_LEGAL_BASIS_REFERENCE: ${AUDIT_LEGAL_BASIS_REFERENCE:?Set the approved audit retention legal-basis reference}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:?Set the approved backup retention from 35 through 3650 days}
+      BACKUP_LEGAL_BASIS_REFERENCE: ${BACKUP_LEGAL_BASIS_REFERENCE:?Set the approved backup retention legal-basis reference}
+      GOVERNANCE_BACKUP_VAULTS: ${GOVERNANCE_BACKUP_VAULTS:?Set JSON inventory for every primary and DR backup vault}
+      GOVERNANCE_ARTIFACT_BUCKETS: ${GOVERNANCE_ARTIFACT_BUCKETS:?Set JSON inventory for every primary and DR artifact bucket and KMS key}
+      GOVERNANCE_BULLMQ_QUEUES: '["store-presence-deep-scan","distrokid-catalog-index","distrokid-plan-chunks","distrokid-release-chunk","distrokid-retry-failed","distrokid-reconcile","distrokid-finalize"]'
+      GOVERNANCE_MAINTENANCE_INTERVAL_MS: ${GOVERNANCE_MAINTENANCE_INTERVAL_MS:-300000}
+      KEYCLOAK_ADMIN_BASE_URL: ${KEYCLOAK_ADMIN_BASE_URL:?Set the private Keycloak administration base URL}
+      KEYCLOAK_ERASURE_CLIENT_ID: ${KEYCLOAK_ERASURE_CLIENT_ID:?Set the least-privilege Keycloak erasure client ID}
+      KEYCLOAK_ERASURE_CLIENT_SECRET_ARN: ${KEYCLOAK_ERASURE_CLIENT_SECRET_ARN:?Set its Secrets Manager ARN}
+      KEYCLOAK_ERASURE_CLIENT_SECRET_JSON_KEY: ${KEYCLOAK_ERASURE_CLIENT_SECRET_JSON_KEY:-}
+      OBSERVABILITY_ERASURE_URL: ${OBSERVABILITY_ERASURE_URL:?Set the tenant-selective observability erasure endpoint}
+      OBSERVABILITY_ERASURE_READINESS_URL: ${OBSERVABILITY_ERASURE_READINESS_URL:?Set the observability erasure capability endpoint}
+      OBSERVABILITY_ERASURE_TOKEN_SECRET_ARN: ${OBSERVABILITY_ERASURE_TOKEN_SECRET_ARN:?Set its Secrets Manager token ARN}
+      OBSERVABILITY_ERASURE_TOKEN_SECRET_JSON_KEY: ${OBSERVABILITY_ERASURE_TOKEN_SECRET_JSON_KEY:-}
+    mem_limit: ${WORKER_MEMORY_LIMIT:-2g}
+    cpus: ${WORKER_CPU_LIMIT:-2.0}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:fs').stat('/tmp/sentinel-worker-ready',(e,s)=>process.exit(!e&&Date.now()-s.mtimeMs<45000?0:1))"]
+      interval: 20s
+      timeout: 8s
+      retries: 6
+      start_period: 20s
+    networks: [private]
+
+  web:
+    <<: *runtime-hardening
+    image: ${SENTINEL_IMAGE:?Set SENTINEL_IMAGE to an immutable built image reference}
+    pull_policy: always
+    command: ["npm", "run", "start", "--workspace", "apps/web"]
+    environment:
+      NODE_ENV: production
+      DEPLOYMENT_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      API_PROXY_TARGET: http://scanner:4000
+      WEB_AUTH_MODE: keycloak
+      ENABLE_KEYCLOAK_AUTH: "true"
+      APP_BASE_URL: ${APP_BASE_URL:?Set APP_BASE_URL to the public HTTPS origin}
+      KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:?Set the private Keycloak base URL}
+      KEYCLOAK_PUBLIC_BASE_URL: ${KEYCLOAK_PUBLIC_BASE_URL:?Set the browser-reachable HTTPS Keycloak URL}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:?Set the canonical Keycloak realm issuer}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:?Set the Keycloak realm}
+      KEYCLOAK_WEB_CLIENT_ID: ${KEYCLOAK_WEB_CLIENT_ID:?Set the confidential BFF client ID}
+      KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET:?Set the confidential BFF client secret}
+      KEYCLOAK_API_CLIENT_ID: ${KEYCLOAK_API_CLIENT_ID:?Set the API resource client ID}
+      KEYCLOAK_API_AUDIENCE: ${KEYCLOAK_API_AUDIENCE:?Set the required API token audience}
+      # Exact origins only. Steel's live-view origin is a bearer-capability surface
+      # and must be reviewed for the selected Steel deployment.
+      STEEL_VIEWER_ORIGINS: ${STEEL_VIEWER_ORIGINS:?Set the exact approved Steel live-view origin or origins}
+      WEB_CSP_CONNECT_ORIGINS: ${WEB_CSP_CONNECT_ORIGINS:-}
+      WEB_CSP_FORM_ACTION_ORIGINS: ${WEB_CSP_FORM_ACTION_ORIGINS:-}
+      WEB_CSP_IMAGE_ORIGINS: ${WEB_CSP_IMAGE_ORIGINS:-}
+    depends_on:
+      scanner:
+        condition: service_healthy
+    mem_limit: ${WEB_MEMORY_LIMIT:-768m}
+    cpus: ${WEB_CPU_LIMIT:-1.0}
+    # Bind to loopback. An operator-owned TLS reverse proxy is the only public edge.
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=1777
+      - /app/apps/web/.next/cache:rw,noexec,nosuid,size=64m,uid=1000,gid=1000,mode=0700
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+    networks: [private]
+
+networks:
+  private:
+    driver: bridge

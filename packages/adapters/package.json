@@ -1,0 +1,16 @@
+{
+  "name": "@sentinel/adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Distributor and DSP adapter interfaces with real API and import implementations.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentinel/core": "*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

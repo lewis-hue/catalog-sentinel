@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Silent Waves — DistroKid (fixture)</title>
+  </head>
+  <body data-page="release-detail" data-authenticated="true">
+    <main>
+      <h1 data-field="release-title">Silent Waves</h1>
+      <div data-field="release-artist">Lewis KE Demo</div>
+      <dl class="release-meta">
+        <!-- Missing UPC on purpose (triggers UPC_MISSING). -->
+        <dt>Release date</dt><dd data-field="release-date">2024-01-10</dd>
+        <dt>Release ID</dt><dd data-field="release-id">DK-REL-2</dd>
+      </dl>
+
+      <section data-field="stores" aria-label="Store selection">
+        <h2>Stores</h2>
+        <ul>
+          <li data-store="Spotify" data-status="DELIVERED">Spotify — Delivered</li>
+          <li data-store="Apple Music" data-status="DELIVERED">Apple Music — Delivered</li>
+          <!-- Audiomack NOT selected (triggers NOT_SELECTED_FOR_AUDIOMACK). -->
+          <li data-store="Audiomack" data-status="NOT_SELECTED">Audiomack — Not selected</li>
+        </ul>
+      </section>
+
+      <table data-field="tracks">
+        <thead>
+          <tr><th>#</th><th>Title</th><th>ISRC</th><th>Lyrics</th><th>Synced lyrics</th><th>Credits</th></tr>
+        </thead>
+        <tbody>
+          <tr data-track-id="DK-TRK-2-1">
+            <td data-col="num">1</td>
+            <td data-col="title"><a href="#trk-1">Silent Skies</a></td>
+            <td data-col="isrc">USKE12310003</td>
+            <td data-col="lyrics">Missing</td>
+            <td data-col="synced">Missing</td>
+            <td data-col="credits">Missing</td>
+          </tr>
+          <tr data-track-id="DK-TRK-2-2">
+            <td data-col="num">2</td>
+            <td data-col="title"><a href="#trk-2">Alone Tonight</a></td>
+            <!-- Missing ISRC on purpose (triggers ISRC_MISSING). -->
+            <td data-col="isrc"></td>
+            <td data-col="lyrics">Approved</td>
+            <td data-col="synced">Missing</td>
+            <td data-col="credits">Displayed</td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+  </body>
+</html>

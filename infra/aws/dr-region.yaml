@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Cross-region disaster-recovery foundations for Artist Catalog Sentinel.
+  Deploy this stack in the designated secondary AWS Region before enabling
+  replication and backup copy actions in the primary production stack.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedPattern: '[a-z0-9-]{2,24}'
+  ArtifactExpirationDays:
+    Type: Number
+    Default: 365
+    MinValue: 35
+    MaxValue: 3650
+
+Resources:
+  RecoveryKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub '${EnvironmentName} Sentinel cross-region recovery key'
+      EnableKeyRotation: true
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+  RecoveryKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${EnvironmentName}-sentinel-recovery'
+      TargetKeyId: !Ref RecoveryKey
+
+  RecoveryArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${AWS::AccountId}-${AWS::Region}-${EnvironmentName}-dr-art'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt RecoveryKey.Arn
+            BucketKeyEnabled: true
+      VersioningConfiguration: { Status: Enabled }
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: governed-recovery-expiration
+            Status: Enabled
+            NoncurrentVersionExpiration: { NoncurrentDays: 7 }
+            ExpirationInDays: !Ref ArtifactExpirationDays
+  RecoveryArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RecoveryArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt RecoveryArtifactBucket.Arn
+              - !Sub '${RecoveryArtifactBucket.Arn}/*'
+            Condition: { Bool: { 'aws:SecureTransport': false } }
+
+  RecoveryBackupVault:
+    Type: AWS::Backup::BackupVault
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BackupVaultName: !Sub '${EnvironmentName}-sentinel-recovery-vault'
+      EncryptionKeyArn: !GetAtt RecoveryKey.Arn
+      LockConfiguration:
+        MinRetentionDays: 35
+        MaxRetentionDays: 3650
+        ChangeableForDays: 7
+
+Outputs:
+  RecoveryKmsKeyArn:
+    Value: !GetAtt RecoveryKey.Arn
+  RecoveryArtifactBucketArn:
+    Value: !GetAtt RecoveryArtifactBucket.Arn
+  RecoveryArtifactBucketName:
+    Value: !Ref RecoveryArtifactBucket
+  RecoveryBackupVaultArn:
+    Value: !GetAtt RecoveryBackupVault.BackupVaultArn

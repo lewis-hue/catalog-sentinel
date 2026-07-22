@@ -1,0 +1,229 @@
+name: Immutable production release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      release_reason:
+        description: Auditable reason for a manual release
+        required: true
+        type: string
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Verify exact revision
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sentinel
+          POSTGRES_PASSWORD: sentinel
+          POSTGRES_DB: sentinel_release
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      REDIS_URL: redis://localhost:6379
+      DATABASE_URL: postgresql://sentinel:sentinel@localhost:5432/sentinel_release
+    steps:
+      - name: Checkout immutable subject
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          # Keep release verification on the exact Node runtime in the
+          # digest-pinned Docker base image (validated by the image audit).
+          node-version: 22.23.1
+          cache: npm
+          package-manager-cache: true
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma client and apply every migration
+        run: |
+          npm run --workspace @sentinel/db db:generate
+          npx prisma migrate deploy --schema packages/db/prisma/schema.prisma
+
+      - name: Lint and typecheck
+        run: |
+          npm run lint
+          npm run typecheck
+
+      - name: Unit and real-infrastructure tests
+        run: npm test -- --reporter=default --reporter=json --outputFile.json=vitest-release-report.json
+
+      - name: Prove integration suites did not skip
+        if: always()
+        run: node scripts/assert-infra-tests-ran.mjs vitest-release-report.json
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Validate CloudFormation schemas offline
+        run: |
+          python -m pip install --disable-pip-version-check --no-input cfn-lint==1.41.0
+          cfn-lint infra/aws/bootstrap.yaml infra/aws/dr-region.yaml infra/aws/production.yaml
+
+  release:
+    name: Build, scan, sign, attest
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment: production-release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REPOSITORY_URI: ${{ vars.ECR_REPOSITORY_URI }}
+    steps:
+      - name: Checkout immutable subject
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Require protected release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${AWS_REGION}"
+          test -n "${ECR_REPOSITORY_URI}"
+          test -n "${{ vars.AWS_RELEASE_ROLE_ARN }}"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - name: Scan source filesystem for vulnerabilities and secrets
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: false
+          cache: true
+
+      - name: Scan CloudFormation and container configuration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          scan-type: config
+          scan-ref: .
+          scanners: misconfig
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: false
+          cache: true
+
+      - name: Assume least-privilege AWS release role
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+          unset-current-credentials: true
+
+      - name: Authenticate Docker to ECR
+        shell: bash
+        run: |
+          set -euo pipefail
+          registry="${ECR_REPOSITORY_URI%%/*}"
+          aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${registry}"
+
+      - name: Build and push digest-addressed image with SBOM and provenance
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="sha-${GITHUB_SHA}"
+          docker buildx create --name sentinel-release --driver docker-container --use
+          docker buildx build \
+            --platform linux/amd64 \
+            --file Dockerfile.production \
+            --tag "${ECR_REPOSITORY_URI}:${tag}" \
+            --provenance=mode=max \
+            --sbom=true \
+            --push \
+            --metadata-file build-metadata.json \
+            .
+          digest="$(jq -er '."containerimage.digest"' build-metadata.json)"
+          test "${digest#sha256:}" != "${digest}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "name=${ECR_REPOSITORY_URI}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${ECR_REPOSITORY_URI}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Scan the pushed immutable image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 / Trivy v0.70.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          scan-type: image
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: false
+          cache: true
+
+      - name: Install verified Cosign distribution
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+
+      - name: Keyless-sign the digest
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: cosign sign --yes "${IMAGE_REF}"
+
+      - name: Add GitHub/Sigstore provenance attestation
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Verify signature against this workflow identity
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "${EXPECTED_IDENTITY}" \
+            "${IMAGE_REF}"
+
+      - name: Record immutable deployment input
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        shell: bash
+        run: |
+          echo "### Production release candidate" >> "${GITHUB_STEP_SUMMARY}"
+          echo '\`SENTINEL_IMAGE='"${IMAGE_REF}"'\`' >> "${GITHUB_STEP_SUMMARY}"
+          echo "Commit: \`${GITHUB_SHA}\`" >> "${GITHUB_STEP_SUMMARY}"

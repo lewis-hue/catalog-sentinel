@@ -1,0 +1,16 @@
+{
+  "name": "@sentinel/matching",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic cross-platform matching engine with confidence scoring.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentinel/core": "*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

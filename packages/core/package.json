@@ -1,0 +1,14 @@
+{
+  "name": "@sentinel/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Domain model: entities, value objects, issue reason codes, severity, evidence, confidence bands.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "//optionalDependencies": "OpenTelemetry SDK packages are dynamically imported at runtime by src/telemetry.ts. Install them in the deployment image when OTEL is enabled: npm i @opentelemetry/api @opentelemetry/sdk-node @opentelemetry/auto-instrumentations-node @opentelemetry/exporter-trace-otlp-http. They are intentionally not declared here because telemetry support is assembled by the deployment artifact.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

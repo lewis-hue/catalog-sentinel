@@ -1,0 +1,13 @@
+{
+  "name": "@sentinel/steel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Steel Browser connector-mode resolution and credential-safe health probing.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

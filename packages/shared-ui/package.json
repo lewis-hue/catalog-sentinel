@@ -1,0 +1,16 @@
+{
+  "name": "@sentinel/shared-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared presentational React components (badges, stat cards, tables) for the dashboard.",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

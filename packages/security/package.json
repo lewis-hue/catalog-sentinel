@@ -1,0 +1,19 @@
+{
+  "name": "@sentinel/security",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Credential redaction, AWS KMS envelope encryption, RBAC, signed URLs, audit logging, PII/screenshot redaction.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./test-support": "./src/compliance-approval.test-support.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-kms": "^3.1093.0",
+    "@sentinel/core": "*",
+    "jose": "^5.9.6"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

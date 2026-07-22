@@ -1,0 +1,19 @@
+{
+  "name": "@sentinel/browser-link",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Steel attended-browser provider abstraction. The user logs in inside an isolated remote browser; we never receive the password.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sentinel/core": "*",
+    "@sentinel/security": "*",
+    "@sentinel/steel": "*",
+    "playwright": "^1.49.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

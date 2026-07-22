@@ -1,0 +1,45 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@sentinel/contracts": ["packages/contracts/src/index.ts"],
+      "@sentinel/queue-client": ["packages/queue-client/src/index.ts"],
+      "@sentinel/persistence": ["packages/persistence/src/index.ts"],
+      "@sentinel/search-store": ["packages/search-store/src/index.ts"],
+      "@sentinel/core": ["packages/core/src/index.ts"],
+      "@sentinel/matching": ["packages/matching/src/index.ts"],
+      "@sentinel/adapters": ["packages/adapters/src/index.ts"],
+      "@sentinel/security": ["packages/security/src/index.ts"],
+      "@sentinel/reports": ["packages/reports/src/index.ts"],
+      "@sentinel/db": ["packages/db/src/index.ts"],
+      "@sentinel/engine": ["packages/engine/src/index.ts"],
+      "@sentinel/browser-assist": ["packages/browser-assist/src/index.ts"],
+      "@sentinel/browser-link": ["packages/browser-link/src/index.ts"],
+      "@sentinel/steel": ["packages/steel/src/index.ts"],
+      "@sentinel/scanner": ["packages/scanner/src/index.ts"],
+      "@sentinel/worker": ["apps/worker/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/contracts/src/**/*",
+    "packages/queue-client/src/**/*",
+    "packages/persistence/src/**/*",
+    "packages/search-store/src/**/*",
+    "packages/core/src/**/*",
+    "packages/matching/src/**/*",
+    "packages/adapters/src/**/*",
+    "packages/security/src/**/*",
+    "packages/reports/src/**/*",
+    "packages/db/src/**/*",
+    "packages/engine/src/**/*",
+    "packages/browser-assist/src/**/*",
+    "packages/browser-link/src/**/*",
+    "packages/steel/src/**/*",
+    "packages/scanner/src/**/*",
+    "apps/api/src/**/*",
+    "apps/worker/src/**/*",
+    "scripts/**/*"
+  ]
+}
