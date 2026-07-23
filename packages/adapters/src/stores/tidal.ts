@@ -8,6 +8,15 @@ import {
   type StoreCatalogProvider,
   type StoreTrack,
 } from './types';
+import { fetchWithRetry, type HttpRetryOptions } from './http-retry';
+
+interface TidalOptions {
+  clientId?: string;
+  clientSecret?: string;
+  profileUrl?: string;
+  countryCode?: string;
+  retry?: HttpRetryOptions;
+}
 
 /**
  * TIDAL store-presence provider — official TIDAL API v2 (openapi.tidal.com, JSON:API),
@@ -27,10 +36,12 @@ export class TidalStoreProvider implements StoreCatalogProvider {
   private readonly clientSecret?: string;
   private readonly profileUrl?: string;
   private readonly country: string;
+  private readonly retry: HttpRetryOptions;
   private token: { value: string; expiresAt: number } | null = null;
+  private lastError: string | null = null;
 
   constructor(
-    opts: { clientId?: string; clientSecret?: string; profileUrl?: string; countryCode?: string } = {},
+    opts: TidalOptions = {},
     private readonly fetchImpl: FetchLike = defaultFetch,
     private readonly delayMs = 150,
   ) {
@@ -38,12 +49,19 @@ export class TidalStoreProvider implements StoreCatalogProvider {
     this.clientSecret = opts.clientSecret;
     this.profileUrl = opts.profileUrl;
     this.country = opts.countryCode ?? 'US';
+    this.retry = opts.retry ?? {};
     this.needsCredential = !(opts.clientId && opts.clientSecret);
   }
 
   static artistIdFromProfileUrl(url: string): string | null {
-    const m = url.match(/tidal\.com\/(?:browse\/)?artist\/(\d+)/i);
-    return m ? (m[1] ?? null) : null;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'https:' || !['tidal.com', 'www.tidal.com'].includes(parsed.hostname.toLowerCase())) return null;
+      const m = /^\/(?:browse\/)?artist\/(\d+)\/?$/.exec(parsed.pathname);
+      return m?.[1] ?? null;
+    } catch {
+      return null;
+    }
   }
 
   async listArtistCatalog(artistName: string, opts: { limit?: number } = {}): Promise<StoreArtistCatalog> {
@@ -57,24 +75,31 @@ export class TidalStoreProvider implements StoreCatalogProvider {
         warnings: ['TIDAL API credentials are not configured.'],
       };
     }
+    this.lastError = null;
     const warnings: string[] = [];
-    const artist = await this.resolveArtist(artistName);
-    if (!artist) return {
+    const resolvedArtist = await this.resolveArtist(artistName);
+    if (!resolvedArtist) return {
       store: this.store,
       method: this.method,
       artist: null,
       tracks: [],
       pagination: { total: null, fetched: 0, complete: false },
-      warnings: [`No exact TIDAL artist found for "${artistName}"; absence cannot be verified.`],
+      warnings: [this.lastError
+        ? `TIDAL API request failed (${this.lastError}); absence cannot be verified.`
+        : `No exact TIDAL artist found for "${artistName}"; absence cannot be verified.`],
     };
 
     const limit = normalizeStoreCatalogLimit(opts.limit);
+    const { profileAnchored, ...artist } = resolvedArtist;
     const tracks: StoreTrack[] = [];
     const seen = new Set<string>();
     let fetched = 0;
     let total: number | null = null;
     let complete = true;
-    let next: string | null = `${this.api}/artists/${encodeURIComponent(artist.id)}/relationships/tracks?countryCode=${this.country}&include=tracks&page[limit]=20`;
+    let unusableTrackResources = 0;
+    // TIDAL's current JSON:API contract requires collapseBy and exposes cursor pagination only.
+    // `NONE` returns every available item; deduplication below converges editions by ISRC/title.
+    let next: string | null = `${this.api}/artists/${encodeURIComponent(artist.id)}/relationships/tracks?collapseBy=NONE&countryCode=${this.country}&include=tracks`;
     const visited = new Set<string>();
     while (next && fetched < limit) {
       if (visited.has(next)) {
@@ -86,20 +111,31 @@ export class TidalStoreProvider implements StoreCatalogProvider {
       const page: TidalDoc | null = await this.getJson<TidalDoc>(next);
       if (!page) {
         complete = false;
-        warnings.push('TIDAL catalog page request failed; the catalog is incomplete.');
+        warnings.push(`TIDAL catalog page request failed${this.lastError ? ` (${this.lastError})` : ''}; the catalog is incomplete.`);
+        break;
+      }
+      if (!Array.isArray(page.data)) {
+        complete = false;
+        warnings.push('TIDAL catalog response omitted its relationship data array; the catalog is incomplete.');
         break;
       }
       const included = (page?.included ?? []).filter((resource) => resource.type === 'tracks');
-      const relationships = Array.isArray(page.data) ? page.data.filter((resource) => resource.type === 'tracks') : [];
+      const relationships = page.data.filter((resource) => resource.type === 'tracks');
       const selectedRelationships = relationships.slice(0, limit - fetched);
-      const selectedIds = new Set(selectedRelationships.map((resource) => String(resource.id)));
-      const selected = relationships.length
-        ? included.filter((resource) => selectedIds.has(String(resource.id)))
-        : included.slice(0, limit - fetched);
-      const examined = relationships.length ? selectedRelationships.length : selected.length;
+      const includedById = new Map(included.map((resource) => [String(resource.id), resource]));
+      const selected = selectedRelationships.flatMap((relationship) => {
+        const resource = includedById.get(String(relationship.id));
+        if (!resource?.attributes?.title?.trim()) {
+          unusableTrackResources++;
+          complete = false;
+          return [];
+        }
+        return [resource];
+      });
+      const examined = selectedRelationships.length;
       fetched += examined;
       if (typeof page.meta?.total === 'number') total = page.meta.total;
-      const pageTruncated = relationships.length > selectedRelationships.length || (!relationships.length && included.length > selected.length);
+      const pageTruncated = relationships.length > selectedRelationships.length;
       for (const r of selected) {
         const a = r.attributes ?? {};
         const title = a.title ?? '';
@@ -139,18 +175,34 @@ export class TidalStoreProvider implements StoreCatalogProvider {
       next = nl;
     }
     if (next || (total !== null && fetched < total)) complete = false;
+    if (unusableTrackResources > 0) {
+      warnings.push(`TIDAL omitted usable track metadata for ${unusableTrackResources} catalog relationship${unusableTrackResources === 1 ? '' : 's'}; the catalog is incomplete.`);
+    }
+    if (!profileAnchored) {
+      complete = false;
+      warnings.push('TIDAL artist identity was resolved by name only; the catalogue is incomplete for absence decisions until an exact TIDAL_PROFILE_URL is configured.');
+    }
     if (!complete && !warnings.some((warning) => /incomplete/i.test(warning))) warnings.push('TIDAL catalog was capped before every page was fetched; the catalog is incomplete.');
     if (tracks.length === 0 && complete) warnings.push('TIDAL returned the artist but no tracks.');
     return { store: this.store, method: this.method, artist, tracks, pagination: { total, fetched, complete }, warnings };
   }
 
-  private async resolveArtist(name: string): Promise<{ id: string; name: string; url: string } | null> {
+  private async resolveArtist(name: string): Promise<{ id: string; name: string; url: string; profileAnchored: boolean } | null> {
     const fromUrl = this.profileUrl ? TidalStoreProvider.artistIdFromProfileUrl(this.profileUrl) : null;
-    if (fromUrl) return { id: fromUrl, name, url: `https://tidal.com/browse/artist/${fromUrl}` };
+    if (fromUrl) {
+      const profile = await this.getJson<TidalDoc>(`${this.api}/artists/${encodeURIComponent(fromUrl)}?countryCode=${this.country}`);
+      const resource = profile?.data && !Array.isArray(profile.data) && profile.data.type === 'artists'
+        ? profile.data
+        : null;
+      const profileName = resource?.attributes?.name?.trim();
+      if (resource?.id && profileName && normalizeArtist(profileName) === normalizeArtist(name)) {
+        return { id: String(resource.id), name: profileName, url: `https://tidal.com/browse/artist/${resource.id}`, profileAnchored: true };
+      }
+    }
     const doc = await this.getJson<TidalDoc>(`${this.api}/searchResults/${encodeURIComponent(name)}?countryCode=${this.country}&include=artists`);
     const artists = (doc?.included ?? []).filter((r) => r.type === 'artists');
     const exact = artists.find((a) => normalizeArtist(a.attributes?.name ?? '') === normalizeArtist(name));
-    return exact?.id ? { id: String(exact.id), name: exact.attributes?.name ?? name, url: `https://tidal.com/browse/artist/${exact.id}` } : null;
+    return exact?.id ? { id: String(exact.id), name: exact.attributes?.name ?? name, url: `https://tidal.com/browse/artist/${exact.id}`, profileAnchored: false } : null;
   }
 
   private async getToken(): Promise<string | null> {
@@ -158,26 +210,50 @@ export class TidalStoreProvider implements StoreCatalogProvider {
     if (!this.clientId || !this.clientSecret) return null;
     const basic = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
     try {
-      const resp = await this.fetchImpl(this.authUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}` }, body: 'grant_type=client_credentials' });
-      if (!resp.ok) return null;
+      const resp = await fetchWithRetry(this.fetchImpl, this.authUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}` }, body: 'grant_type=client_credentials' }, this.retry);
+      if (!resp.ok) {
+        this.lastError = `OAuth HTTP ${resp.status}`;
+        return null;
+      }
       const j = (await resp.json()) as { access_token?: string; expires_in?: number };
-      if (!j.access_token) return null;
+      if (!j.access_token) {
+        this.lastError = 'OAuth response omitted access_token';
+        return null;
+      }
       this.token = { value: j.access_token, expiresAt: Date.now() + (j.expires_in ?? 3600) * 1000 };
       return this.token.value;
-    } catch {
+    } catch (error) {
+      this.lastError = `OAuth request ${error instanceof Error ? error.name : 'failed'}`;
       return null;
     }
   }
 
   private async getJson<T>(url: string): Promise<T | null> {
     const token = await this.getToken();
-    if (!token) return null;
+    if (!token) {
+      this.lastError ??= 'OAuth token unavailable';
+      return null;
+    }
     if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
     try {
-      const resp = await this.fetchImpl(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.api+json' } });
-      if (!resp.ok) return null;
+      let resp = await fetchWithRetry(this.fetchImpl, url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.api+json' } }, this.retry);
+      if (resp.status === 401) {
+        await resp.text().catch(() => '');
+        this.token = null;
+        const refreshed = await this.getToken();
+        if (!refreshed) {
+          this.lastError = 'OAuth token refresh failed after HTTP 401';
+          return null;
+        }
+        resp = await fetchWithRetry(this.fetchImpl, url, { headers: { Authorization: `Bearer ${refreshed}`, Accept: 'application/vnd.api+json' } }, this.retry);
+      }
+      if (!resp.ok) {
+        this.lastError = `HTTP ${resp.status}`;
+        return null;
+      }
       return (await resp.json()) as T;
-    } catch {
+    } catch (error) {
+      this.lastError = `request ${error instanceof Error ? error.name : 'failed'}`;
       return null;
     }
   }
@@ -189,8 +265,16 @@ interface TidalDoc { data?: TidalResource | TidalResource[]; included?: TidalRes
 function validatedTidalCursor(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
-    const url = new URL(value, 'https://openapi.tidal.com');
-    return url.protocol === 'https:' && url.hostname === 'openapi.tidal.com' ? url.toString() : null;
+    // TIDAL returns root-relative links such as `/artists/...`, even though the
+    // public API is mounted below `/v2`. Preserve the opaque cursor query while
+    // restoring that prefix, and reject any cursor that could leave the API.
+    const normalized = value.startsWith('/') && !value.startsWith('/v2/')
+      ? `/v2${value}`
+      : value;
+    const url = new URL(normalized, 'https://openapi.tidal.com/v2/');
+    return url.origin === 'https://openapi.tidal.com' && url.pathname.startsWith('/v2/')
+      ? url.toString()
+      : null;
   } catch {
     return null;
   }

@@ -135,9 +135,10 @@ export function normalizeStoreCatalogLimit(value: number | undefined, fallback =
 
 /** Injectable fetch so providers are unit-testable without the network. Supports
  *  method/body for token exchanges (Spotify); GET-only providers just pass a URL. */
-export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{
+export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{
   ok: boolean;
   status: number;
+  headers?: { get(name: string): string | null };
   json(): Promise<unknown>;
   text(): Promise<string>;
 }>;

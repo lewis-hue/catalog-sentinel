@@ -39,8 +39,9 @@ export function createStoreScanTargets(env: NodeJS.ProcessEnv = process.env, opt
     { catalog: itunes, title: itunes }, // Apple/iTunes has no ISRC → title+artist search
   ];
 
-  // Official artist-catalogue APIs win over web search (more precise). All of these are
-  // single-catalogue fetches (fast), so they belong in the fast path too.
+  // Official APIs win over web search (more precise). Their catalogue results provide a
+  // fast positive index; providers such as Spotify that cannot prove an exhaustive artist
+  // catalogue mark misses incomplete so the deep pass performs exact per-track checks.
   const covered = new Set<string>();
   if (env.SPOTIFY_CLIENT_ID && env.SPOTIFY_CLIENT_SECRET) {
     const spotify = new SpotifyStoreProvider({ clientId: env.SPOTIFY_CLIENT_ID, clientSecret: env.SPOTIFY_CLIENT_SECRET });

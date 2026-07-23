@@ -36,13 +36,34 @@ describe('SpotifyStoreProvider (real API shape, faked transport)', () => {
     const cat = await new SpotifyStoreProvider(opts).listArtistCatalog('Lewis KE');
     expect(cat.artist?.name).toBe('Lewis KE');
     expect(cat.tracks[0]).toMatchObject({ title: 'Icy Love', isrc: 'QZK6K2090500', url: 'https://open.spotify.com/track/636QXSQDPJjBi8PrvG77IO' });
-    expect(cat.pagination).toEqual({ total: 1, fetched: 1, complete: true });
+    expect(cat.pagination).toEqual({ total: 1, fetched: 1, complete: false });
+    expect(cat.warnings.join(' ')).toMatch(/non-exhaustive/i);
   });
 
   it('looks up by ISRC (exact) and by artist+title search, returning the track link', async () => {
     const p = new SpotifyStoreProvider(opts);
     expect((await p.lookupIsrc('QZK6K2090500'))).toMatchObject({ found: true, artist: 'Lewis KE', url: 'https://open.spotify.com/track/636QXSQDPJjBi8PrvG77IO' });
     expect((await p.searchTitle('Lewis KE', 'Icy Love'))).toMatchObject({ found: true, url: 'https://open.spotify.com/track/636QXSQDPJjBi8PrvG77IO' });
+  });
+
+  it('refreshes the client-credentials token once after an API 401', async () => {
+    let tokenRequests = 0;
+    let apiRequests = 0;
+    const fetchImpl: FetchLike = async (url) => {
+      if (url.includes('/api/token')) {
+        tokenRequests++;
+        return { ok: true, status: 200, json: async () => ({ access_token: `tok-${tokenRequests}` }), text: async () => '' };
+      }
+      apiRequests++;
+      return apiRequests === 1
+        ? { ok: false, status: 401, json: async () => ({}), text: async () => '' }
+        : { ok: true, status: 200, json: async () => ({ tracks: { items: [TRACK], total: 1, next: null } }), text: async () => '' };
+    };
+    const catalog = await new SpotifyStoreProvider({ clientId: 'id', clientSecret: 'secret', fetchImpl })
+      .listArtistCatalog('Lewis KE');
+    expect(tokenRequests).toBe(2);
+    expect(apiRequests).toBe(2);
+    expect(catalog.tracks).toHaveLength(1);
   });
 
   it('returns empty results (never throws) when unconfigured', async () => {
@@ -67,7 +88,7 @@ describe('SpotifyStoreProvider (real API shape, faked transport)', () => {
     expect(cat.warnings.join(' ')).toMatch(/incomplete/i);
   });
 
-  it('paginates beyond Spotify’s 50-track page size without truncating results', async () => {
+  it('paginates with Spotify’s current 10-track search limit without truncating results', async () => {
     const rows = Array.from({ length: 120 }, (_, index) => ({
       ...TRACK,
       name: `Track ${index}`,
@@ -82,7 +103,8 @@ describe('SpotifyStoreProvider (real API shape, faked transport)', () => {
       pageRequests++;
       const parsed = new URL(url);
       const offset = Number(parsed.searchParams.get('offset') ?? 0);
-      const limit = Number(parsed.searchParams.get('limit') ?? 50);
+      const limit = Number(parsed.searchParams.get('limit') ?? 10);
+      expect(limit).toBeLessThanOrEqual(10);
       const items = rows.slice(offset, offset + limit);
       const nextOffset = offset + items.length;
       return {
@@ -93,8 +115,9 @@ describe('SpotifyStoreProvider (real API shape, faked transport)', () => {
       };
     };
     const cat = await new SpotifyStoreProvider({ clientId: 'id', clientSecret: 'secret', fetchImpl }).listArtistCatalog('Lewis KE', { limit: 1_000 });
-    expect(pageRequests).toBe(3);
+    expect(pageRequests).toBe(12);
     expect(cat.tracks).toHaveLength(120);
-    expect(cat.pagination).toEqual({ total: 120, fetched: 120, complete: true });
+    expect(cat.pagination).toEqual({ total: 120, fetched: 120, complete: false });
+    expect(cat.warnings.join(' ')).toMatch(/exact per-track verification/i);
   });
 });
