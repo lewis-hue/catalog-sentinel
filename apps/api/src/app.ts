@@ -55,6 +55,8 @@ import {
   GovernanceAuthorizationError,
   GovernanceConflictError,
   GovernanceValidationError,
+  DistroKidRecoveryAlreadyTerminalError,
+  PostgresDistroKidRecoveryRepository,
   type GovernanceActor,
   type InvitationAcceptor,
   type InvitationAdministrator,
@@ -882,7 +884,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.log.info('Catalogue read dispatch: durable network-first pipeline');
   // Enqueues onto `distrokid-catalog-index`, which the worker's six-stage pipeline consumes. Via
   // @sentinel/queue-client so the API never imports the worker application to queue work.
-  const dkProducer = redis && redisUrl ? createDistroKidProducer(connectionFromUrl(redisUrl)) : null;
+  const dkRecovery = built.pgPool
+    ? new PostgresDistroKidRecoveryRepository(built.pgPool)
+    : null;
+  if (process.env.NODE_ENV !== 'test' && !dkRecovery) {
+    throw new Error('PostgreSQL DistroKid recovery authority is required outside the test runtime.');
+  }
+  const dkProducer = redis && redisUrl
+    ? createDistroKidProducer(connectionFromUrl(redisUrl), {
+        env: process.env,
+        ...(dkRecovery ? {
+          prepareJob: async (job) => {
+            try {
+              return await dkRecovery.prepare(job);
+            } catch (error) {
+              if (error instanceof DistroKidRecoveryAlreadyTerminalError) return null;
+              throw error;
+            }
+          },
+        } : {}),
+      })
+    : null;
   if (dkProducer) app.log.info('DistroKid network-first pipeline producer attached (queue "distrokid-catalog-index").');
 
   app.addHook('onClose', async () => {

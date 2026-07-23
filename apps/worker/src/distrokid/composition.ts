@@ -13,6 +13,11 @@ import {
   type ReleaseExtractionOutcome, type CandidateSink,
 } from '@sentinel/browser-assist';
 import { DK_QUEUE_NAMES, DISTROKID_REQUEST_MIN_DELAY_MS, type EndpointRegistryStore } from '@sentinel/contracts';
+import {
+  PostgresDistroKidRecoveryRepository,
+  type DistroKidRecoveryRepository,
+  type DistroKidRecoverySqlPool,
+} from '@sentinel/db';
 import { PostgresEndpointRegistryStore } from '@sentinel/persistence';
 import {
   TieredSnapshotCheckpointStore, RedisSnapshotStore, PostgresSnapshotCheckpointStore,
@@ -21,7 +26,12 @@ import {
 import { ConnectionLock, InMemoryConnectionLock, type LockRedis } from './locks';
 import { createDistroKidQueues, enqueuers, startDistroKidPipelineWorkers, type DistroKidQueues } from './pipeline-queue';
 import { InMemoryExtractionMetrics, extractionLog } from './metrics';
-import type { PipelineDeps, CatalogIndexJob, ReleaseChunkJob, FinalizeJob } from './pipeline';
+import {
+  PipelineDeadlineExceededError,
+  planDistroKidReleaseChunks,
+  terminalizeDistroKidFailure,
+  type PipelineDeps, type CatalogIndexJob, type ReleaseChunkJob, type FinalizeJob, type SnapshotRef,
+} from './pipeline';
 
 /**
  * DistroKid pipeline COMPOSITION ROOT.
@@ -49,6 +59,10 @@ export interface DistroKidCompositionOptions {
   /** Revalidate the durable consent before every browser-bound unit of work. */
   consentActive?(job: { tenantId: string; snapshotId: string; consentId: string; artistWorkspaceId: string; distributor: string }): Promise<boolean>;
   candidateSink?: CandidateSink;
+  /** API and worker normally construct the same PostgreSQL repository. Injectable for tests. */
+  recoveryRepository?: DistroKidRecoveryRepository;
+  /** Durable recovery sweep cadence. Defaults to 15 seconds. */
+  recoveryIntervalMs?: number;
   /** Chunk concurrency ACROSS accounts (the per-connection lock caps one account to 1). */
   chunkConcurrency?: number;
   log?: (msg: string) => void;
@@ -65,6 +79,8 @@ export interface DistroKidComposition {
   registryFor(tenantId: string): EndpointRegistry;
   /** The queues this composition CONSUMES — logged at boot so "workers started" is observable. */
   queueNames: string[];
+  /** Run the PostgreSQL recovery-envelope sweep immediately. */
+  recoverDurableSnapshots(): Promise<DurableSnapshotRecoveryStats>;
   /**
    * Start a snapshot directly, bypassing the queue. For admin tools and tests only — the
    * PRODUCT path is the API enqueuing onto `distrokid-catalog-index` via `@sentinel/queue-client`.
@@ -85,9 +101,98 @@ export interface BrowserSessionSource {
   /** Read the catalog index (release refs) over that session. */
   readIndex(conn: AutomationConnection, job: CatalogIndexJob): Promise<ReleaseRefRecord[]>;
   /** Release the one remote session after terminal snapshot persistence. */
-  release?(job: FinalizeJob): Promise<void>;
+  release?(job: SnapshotRef): Promise<void>;
   /** Disconnect process-local browser transports without releasing non-terminal remote sessions. */
   close?(): Promise<void>;
+}
+
+export interface DurableSnapshotRecoveryStats {
+  examined: number;
+  indexRequeued: number;
+  checkpointResumed: number;
+  finalizersRequeued: number;
+  expiredTerminalized: number;
+  cancelledReleased: number;
+  failed: number;
+}
+
+/**
+ * Reconstruct queue ownership from PostgreSQL after BullMQ/Redis loss.
+ *
+ * The envelope contains only an application-encrypted Steel handle plus immutable principal,
+ * consent, expiry, and deadline fields. Browser cookies remain inside Steel. Existing index and
+ * release checkpoints choose the resume path; expired work is terminalized so cleanup still runs.
+ */
+export async function recoverDurableDistroKidSnapshots(
+  recovery: DistroKidRecoveryRepository,
+  deps: PipelineDeps,
+  startSnapshot: (job: CatalogIndexJob) => Promise<void>,
+  releaseCancelled: (job: SnapshotRef) => Promise<void>,
+  options: { limit?: number; now?: () => number } = {},
+): Promise<DurableSnapshotRecoveryStats> {
+  const stats: DurableSnapshotRecoveryStats = {
+    examined: 0, indexRequeued: 0, checkpointResumed: 0, finalizersRequeued: 0,
+    expiredTerminalized: 0, cancelledReleased: 0, failed: 0,
+  };
+  const jobs = await recovery.list(options.limit ?? 100);
+  const now = options.now ?? Date.now;
+  for (const job of jobs) {
+    stats.examined += 1;
+    try {
+      await deps.store.bindSnapshot({
+        tenantId: job.tenantId,
+        connectionId: job.connectionId,
+        snapshotId: job.snapshotId,
+        distributor: job.distributor,
+      });
+      const terminal = await deps.store.getTerminal(job.snapshotId);
+      if (terminal?.kind === 'TERMINAL') {
+        await deps.enqueue.finalize(terminal.finalizeJob);
+        stats.finalizersRequeued += 1;
+        continue;
+      }
+      if (terminal?.kind === 'CANCELLED') {
+        await releaseCancelled(job);
+        await recovery.clear(job);
+        stats.cancelledReleased += 1;
+        continue;
+      }
+
+      const deadline = Date.parse(job.deadlineAt!);
+      const expiry = Date.parse(job.sessionExpiresAt!);
+      if (!Number.isFinite(deadline) || !Number.isFinite(expiry) || now() >= deadline || now() >= expiry) {
+        await terminalizeDistroKidFailure(
+          job,
+          'durable-recovery',
+          new PipelineDeadlineExceededError('durable DistroKid recovery envelope has exhausted its Steel lease'),
+          deps,
+        );
+        stats.expiredTerminalized += 1;
+        continue;
+      }
+
+      const index = await deps.store.getIndex(job.snapshotId);
+      const progress = await deps.store.getProgress(job.snapshotId);
+      // An empty index can be a valid, fully read catalogue. Durable progress distinguishes it
+      // from a snapshot that never completed the index stage before Redis was lost.
+      if (index.length === 0 && !progress) {
+        await startSnapshot(job);
+        stats.indexRequeued += 1;
+      } else {
+        // Run the cheap deterministic planner directly. This avoids a retained completed plan
+        // job masking a selectively lost downstream queue entry; extraction itself remains queued.
+        await planDistroKidReleaseChunks(job, deps);
+        stats.checkpointResumed += 1;
+      }
+    } catch (error) {
+      stats.failed += 1;
+      deps.log?.('durable DistroKid snapshot recovery failed', {
+        snapshotId: job.snapshotId,
+        error: error instanceof Error ? error.name : 'Error',
+      });
+    }
+  }
+  return stats;
 }
 /** Abort-aware pacing used immediately before each distributor navigation. */
 export function waitForBrowserPacing(signal: AbortSignal, delayMs = DISTROKID_REQUEST_MIN_DELAY_MS): Promise<void> {
@@ -154,6 +259,13 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
       : opts.redis
         ? new RedisSnapshotStore(opts.redis)
         : new InMemorySnapshotStore();
+  const recovery = opts.recoveryRepository
+    ?? (opts.pgPool
+      ? new PostgresDistroKidRecoveryRepository(opts.pgPool as unknown as DistroKidRecoverySqlPool)
+      : null);
+  if (!isTestEnvironment(opts.env) && (!recovery || !sessions.release)) {
+    throw new Error('Production DistroKid extraction requires durable PostgreSQL recovery authority and terminal Steel release.');
+  }
   reportDistroKidDurabilityDegradations({ redis: Boolean(opts.redis), postgres: Boolean(opts.pgPool) }, log);
 
   const lock = opts.redis ? new ConnectionLock(opts.redis) : new InMemoryConnectionLock();
@@ -205,7 +317,16 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
     async persistSnapshot(job, outcomes) {
       await opts.persistSnapshot(job, outcomes);
     },
-    async releaseSession(job) { await sessions.release?.(job); },
+    async releaseSession(job) {
+      if (!sessions.release) {
+        if (!isTestEnvironment(opts.env)) throw new Error('terminal Steel release is unavailable');
+      } else {
+        await sessions.release(job);
+      }
+      // Never clear first: if Steel release fails, the finalizer remains retryable with the same
+      // encrypted authority. A successful/404 release makes clearing safe and idempotent.
+      await recovery?.clear(job);
+    },
     async terminalFailure(job, stage, error) {
       log(`[distrokid] terminal stage failure: ${stage} (${error.name}); FAILED tombstone recorded.`);
     },
@@ -305,6 +426,47 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
   };
 
   const workers = startDistroKidPipelineWorkers({ connection: opts.connection, deps, ...(opts.chunkConcurrency ? { chunkConcurrency: opts.chunkConcurrency } : {}) });
+  let recoveryInFlight: Promise<DurableSnapshotRecoveryStats> | null = null;
+  const runRecovery = async (): Promise<DurableSnapshotRecoveryStats> => {
+    if (!recovery) {
+      return {
+        examined: 0, indexRequeued: 0, checkpointResumed: 0, finalizersRequeued: 0,
+        expiredTerminalized: 0, cancelledReleased: 0, failed: 0,
+      };
+    }
+    return recoverDurableDistroKidSnapshots(
+      recovery,
+      deps,
+      (job) => enq.startSnapshot(job),
+      async (job) => {
+        if (!sessions.release) throw new Error('cancelled Steel release is unavailable');
+        await sessions.release(job);
+      },
+    );
+  };
+  const triggerRecovery = (): void => {
+    if (recoveryInFlight) return;
+    const running = runRecovery()
+      .then((stats) => {
+        if (stats.indexRequeued || stats.checkpointResumed || stats.finalizersRequeued
+            || stats.expiredTerminalized || stats.cancelledReleased || stats.failed) {
+          log(`[distrokid] durable recovery sweep: examined=${stats.examined} index=${stats.indexRequeued} resumed=${stats.checkpointResumed} finalizers=${stats.finalizersRequeued} expired=${stats.expiredTerminalized} cancelled=${stats.cancelledReleased} failed=${stats.failed}`);
+        }
+        return stats;
+      })
+      .catch((error) => {
+        log(`[distrokid] durable recovery sweep unavailable: ${error instanceof Error ? error.name : 'Error'}`);
+        return {
+          examined: 0, indexRequeued: 0, checkpointResumed: 0, finalizersRequeued: 0,
+          expiredTerminalized: 0, cancelledReleased: 0, failed: 1,
+        };
+      })
+      .finally(() => { if (recoveryInFlight === running) recoveryInFlight = null; });
+    recoveryInFlight = running;
+  };
+  triggerRecovery();
+  const recoveryTimer = setInterval(triggerRecovery, Math.max(1_000, opts.recoveryIntervalMs ?? 15_000));
+  recoveryTimer.unref?.();
   const checkpointMode = opts.redis && opts.pgPool ? 'postgres+redis-hot-cache' : opts.pgPool ? 'postgres-only' : opts.redis ? 'REDIS-ONLY-NONPRODUCTION' : 'MEMORY';
   log(`[distrokid] network-first pipeline started (queues: catalog-index, plan-chunks, release-chunk, retry-failed, reconcile, finalize; checkpoints: ${checkpointMode})`);
 
@@ -315,8 +477,11 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
     registryStore,
     registryFor,
     queueNames: [...DK_QUEUE_NAMES],
+    recoverDurableSnapshots: runRecovery,
     async startSnapshot(job) { await enq.startSnapshot(job); },
     async close() {
+      clearInterval(recoveryTimer);
+      await recoveryInFlight?.catch(() => undefined);
       shutdownController.abort(new Error('DistroKid composition is shutting down'));
       await closeDistroKidCompositionResources(workers, queues, sessions);
     },

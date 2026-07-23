@@ -33,6 +33,21 @@ describe('DistroKid producer wall-clock budget', () => {
       env: { NODE_ENV: 'production', CATALOG_READ_MAX_DURATION_MS: '600000' }, now: () => now,
     })).toThrow(/full configured catalogue-read budget/i);
   });
+
+  it('preserves an existing recovery deadline without demanding a fresh full lease', () => {
+    const anchoredAt = 1_000_000;
+    const original = withDistroKidDeadline({
+      ...JOB, sessionExpiresAt: new Date(anchoredAt + 700_000).toISOString(),
+    }, {
+      env: { NODE_ENV: 'production', CATALOG_READ_MAX_DURATION_MS: '600000' },
+      now: () => anchoredAt,
+    });
+    const replayed = withDistroKidDeadline(original, {
+      env: { NODE_ENV: 'production', CATALOG_READ_MAX_DURATION_MS: '600000' },
+      now: () => anchoredAt + 30_000,
+    });
+    expect(replayed.deadlineAt).toBe(original.deadlineAt);
+  });
 });
 
 describe('BullMQ Redis URL transport', () => {

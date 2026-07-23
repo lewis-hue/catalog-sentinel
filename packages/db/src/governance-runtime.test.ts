@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createProductionGovernanceRuntime } from './governance-runtime';
+import {
+  createLocalTenantErasureRequestRuntime,
+  createProductionGovernanceRuntime,
+} from './governance-runtime';
+import type { GovernanceSqlPool } from './governance-types';
 
 const productionEnv = (): NodeJS.ProcessEnv => ({
   DATABASE_URL: 'postgresql://sentinel:secret@db.internal.example/sentinel?sslmode=verify-full',
@@ -48,5 +52,34 @@ describe('production governance runtime configuration', () => {
     expect(() => createProductionGovernanceRuntime({
       ...productionEnv(), DATABASE_URL: 'postgresql://sentinel:secret@db.internal.example/sentinel?sslmode=disable',
     })).toThrow(/sslmode=verify-full/);
+  });
+});
+
+describe('local tenant-erasure request runtime configuration', () => {
+  const pool = {
+    connect: async () => ({
+      query: async () => ({ rows: [], rowCount: 0 }),
+      release() {},
+    }),
+  } as unknown as GovernanceSqlPool;
+
+  it('uses real PostgreSQL state with a stable, dedicated HMAC pseudonymizer', async () => {
+    const runtime = createLocalTenantErasureRequestRuntime(pool, {
+      GOVERNANCE_HMAC_LOCAL_KEY: Buffer.alloc(32, 7).toString('base64'),
+      GOVERNANCE_HMAC_LOCAL_KEY_VERSION: 'manual-stack-v1',
+    });
+    expect(runtime.pseudonymizer.keyVersion).toBe('manual-stack-v1');
+    expect(await runtime.pseudonymizer.pseudonym('tenant', 'tenant-a')).toMatch(/^[a-f0-9]{64}$/);
+    await runtime.verifyReady();
+    await runtime.close();
+  });
+
+  it('rejects missing, malformed, or short local HMAC keys', () => {
+    expect(() => createLocalTenantErasureRequestRuntime(pool, {})).toThrow(/GOVERNANCE_HMAC_LOCAL_KEY/);
+    expect(() => createLocalTenantErasureRequestRuntime(pool, { GOVERNANCE_HMAC_LOCAL_KEY: 'not-base64' }))
+      .toThrow(/canonical base64/);
+    expect(() => createLocalTenantErasureRequestRuntime(pool, {
+      GOVERNANCE_HMAC_LOCAL_KEY: Buffer.alloc(16, 1).toString('base64'),
+    })).toThrow(/32 random bytes/);
   });
 });

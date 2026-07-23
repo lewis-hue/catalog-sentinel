@@ -1,11 +1,14 @@
 # DistroKid metadata extraction — audit
 
-> Historical diagnostic evidence, not current production certification. Release
-> evidence must be rerun against the immutable production image under the process
-> in [production-acceptance.md](production-acceptance.md).
+> Historical diagnostic notes, not current production certification. Their
+> reported account observations were not independently re-run as part of the
+> current review. Release evidence must be rerun against the immutable production
+> image under the process in
+> [production-acceptance.md](production-acceptance.md).
 
-Audit of the extraction path before the network-first rewrite. Evidence is from live scans of a
-real, user-authorized DistroKid account (98 releases / ~107 tracks).
+Audit of the extraction path before the network-first rewrite. The supplied
+historical notes reported 98 releases and about 107 tracks; this document does
+not treat those observations as a current authorized acceptance run.
 
 ## Root cause
 
@@ -98,7 +101,8 @@ No fixed sleep is on the metadata path.**
 5. Schema-versioned Zod parsers; drift → `DEGRADED` + alert, never silent partial data.
 6. Correct identifier modeling + separate coverage metrics.
 7. Field-level status (`NOT_CAPTURED` ≠ `ABSENT_AT_SOURCE`).
-8. Release-chunked, resumable BullMQ pipeline with retry-failed-only.
+8. Release-chunked, in-lease-resumable BullMQ pipeline that targets only releases
+   with retryable outcome or field-level gaps.
 9. Completeness reconciliation; no snapshot marked complete with an unresolved release.
 10. Sanitized capture: no cookies/headers/tokens/values/bodies in logs.
 

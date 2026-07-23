@@ -36,6 +36,7 @@ STEEL_CONNECTOR_MODE=cloud
 STEEL_API_KEY=<secret-manager-reference>
 STEEL_VIEWER_ORIGINS=https://api.steel.dev https://app.steel.dev
 STEEL_SESSION_TIMEOUT_MS=<tested-positive-lease-ms>
+CATALOG_READ_MAX_DURATION_MS=<tested-scan-deadline-ms>
 CATALOG_READ_MAX_RELEASES=<tested-per-lease-capacity>
 ```
 
@@ -49,6 +50,7 @@ STEEL_CONNECTOR_MODE=self_hosted
 STEEL_API_URL=https://steel.internal.example
 STEEL_VIEWER_ORIGINS=https://steel-viewer.example
 STEEL_SESSION_TIMEOUT_MS=<tested-positive-lease-ms>
+CATALOG_READ_MAX_DURATION_MS=<tested-scan-deadline-ms>
 CATALOG_READ_MAX_RELEASES=<tested-per-lease-capacity>
 ```
 
@@ -101,9 +103,30 @@ Steel's server-side timeout is a final backstop, not the primary cleanup method.
 
 Steel does not support extending an already-live session timeout. Sentinel sends
 the configured `STEEL_SESSION_TIMEOUT_MS` when creating the session, and production
-startup also requires an explicit `CATALOG_READ_MAX_RELEASES`. Choose the pair only
+startup also requires explicit `CATALOG_READ_MAX_DURATION_MS` and
+`CATALOG_READ_MAX_RELEASES` values. The immutable scan deadline must fit inside
+the Steel lease with the enforced terminal-cleanup reserve. Choose all three only
 from a worst-case load/soak test for the selected Steel plan, catalogue shape,
 network latency, and worker concurrency, with safety margin.
+
+Before publishing the first BullMQ job, the API persists a PostgreSQL recovery
+record containing the application-envelope-encrypted Steel session handle and
+only the tenant/principal, connection, consent, workspace, original lease expiry,
+and immutable scan deadline required to resume safely. Browser cookies and
+credentials remain inside Steel. The worker sweeps these records every 15
+seconds and reconstructs missing BullMQ work after an API restart, worker
+restart, CDP transport loss, or total Redis/BullMQ state loss. Existing
+PostgreSQL checkpoints select the first unfinished stage/release chunk, so
+already verified songs are retained.
+
+This recovery contract is deliberately bounded. It applies only while both the
+original Steel lease and immutable scan deadline remain valid. It neither extends
+the Steel timeout nor guarantees that DistroKid will not independently expire or
+challenge authentication. Once the lease/deadline is exhausted, the scan is
+terminalized truthfully and the session is released or treated as already
+expired; continuing requires a new user-attended session. Recovery authority is
+cleared only after successful/idempotent Steel release, and terminal/cancelled
+work cannot be repopulated by a delayed queue replay.
 
 A configured cap does **not** prove that arbitrary large catalogues are supported.
 Until continuation across a new attended session (or a reviewed renewal/re-auth
@@ -117,10 +140,14 @@ Required tests:
 
 1. create and attend a session;
 2. confirm login and attach from a worker;
-3. restart API and worker during a scan and resume the same session;
+3. restart API and worker, interrupt CDP, and delete all Redis/BullMQ state during
+   separate in-lease scans; prove the 15-second recovery sweep resumes each from
+   its PostgreSQL checkpoint without another login or duplicate songs;
 4. cancel and verify immediate release;
 5. force a terminal job failure and verify release;
-6. allow a session to expire and verify re-attachment is rejected;
+6. allow a session to expire and verify re-attachment is rejected, the scan is
+   terminalized truthfully, and no claim of post-expiry session persistence is
+   made;
 7. check Steel usage for orphan sessions after every case.
 8. load-test the maximum configured release count at adverse but supported latency
    and prove completion/release before the configured lease expires.

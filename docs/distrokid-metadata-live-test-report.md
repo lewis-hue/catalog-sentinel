@@ -1,14 +1,15 @@
 # DistroKid metadata — live test report
 
-> Historical, authorized development evidence. It is not a current end-to-end
-> acceptance run for the Steel-only production image. See
+> Historical development notes supplied to this project. Their reported
+> DOM-first observations were not independently re-run or accepted as a current
+> authorized end-to-end test for the Steel-only production image. See
 > [production-acceptance.md](production-acceptance.md).
 > Counts, migration totals, and implementation gaps in this report are a
 > 2026-07-22 snapshot. The reconciled current state is recorded in
 > [production-evaluation-2026-07-22.md](production-evaluation-2026-07-22.md).
 
-Status of the network-first extractor against the acceptance criteria.
-Customer data is redacted throughout; identifiers below are the account owner's own catalog.
+Status of the network-first extractor against the acceptance criteria. The
+historical notes are redacted; no raw customer identifiers are reproduced here.
 
 ## 1. Root cause
 
@@ -17,7 +18,8 @@ dashboard is a client-routed SPA that reloads its whole app per album and hydrat
 JSON asynchronously — so the page could be "loaded" while ISRC/UPC/artwork were still in flight,
 or while the component never mounted.
 
-Evidence from live scans of a real authorized account (98 releases / ~107 tracks):
+The historical notes reported DOM-first observations for 98 releases and about
+107 tracks; this review did not independently reproduce or authorize that run:
 
 | Configuration | Result |
 |---|---|
@@ -70,7 +72,7 @@ integration test (details endpoint + separate identifiers endpoint → merged re
 | Release UPC | conflated with ISRC | reported separately |
 | Artwork | not captured | release-level, reported separately |
 | Failure vs absence | indistinguishable (`null`) | `NOT_CAPTURED` ≠ `ABSENT_AT_SOURCE` |
-| Retry granularity | whole catalogue | failed releases only |
+| Retry granularity | whole catalogue | only releases with retryable outcome or field-level gaps |
 
 **Live re-verification is still required** to publish real after-numbers.
 
@@ -83,7 +85,7 @@ RATE_LIMITED · BUDGET_EXHAUSTED · UNKNOWN`) — no release is silently skipped
 ## 7. Tests run
 
 The then-current working tree was validated on 2026-07-22. The counts below are
-historical and have been superseded; they do not describe the 13-migration
+historical and have been superseded; they do not describe the 14-migration
 2026-07-23 tree and do not replace the missing authorized Steel→DistroKid run.
 
 | Suite | Count | Covers |
@@ -181,9 +183,11 @@ handlers proves nothing about the queue.** 390 green tests did not.
 5. **CI has not run on a real PR yet** — the workflow is verified locally (the exact command,
    including the skip-detector, was executed against real Redis + Postgres), but it has not
    executed on GitHub's runners.
-6. **Session handles still travel in job payloads.** `steelSessionId` is a handle rather than a
-   credential, but an encrypted, revocable reference resolved server-side would be better than
-   putting a provider-native id where queue-inspection tooling can read it.
+6. **Resolved after this historical report:** job payloads contain only an
+   application-envelope-encrypted Steel handle, and PostgreSQL stores the same
+   encrypted recovery authority with immutable tenant/principal, consent,
+   workspace, lease, and deadline bindings. The provider-native id is unwrapped
+   only at the worker's attach/release edge.
 
 ### The API no longer imports the worker
 
@@ -214,7 +218,7 @@ The historical disposable infrastructure run applied the **8 migrations that
 existed on 2026-07-22** to a fresh PostgreSQL database, exercised real
 Redis/BullMQ, and completed **88 test files / 707 passing tests**. These counts
 are retained only as historical evidence. The current release gate requires all
-13 migrations and the aggregate results recorded in
+14 migrations and the aggregate results recorded in
 [production-acceptance.md](production-acceptance.md). The historical run asserted:
 
 | Property | Why it is tested with real SQL |
@@ -226,10 +230,12 @@ are retained only as historical evidence. The current release gate requires all
 | Tenant isolation | Same fingerprint under two tenants → two rows with independent status. One tenant cannot read or overwrite another's profile. |
 | Schema enforces the allowlist | `information_schema` is queried to prove **no raw/payload/body column exists** on any catalog table, and that `DistributorTrackOutcome` has **no `upc`** — the model is checked, not just the code. |
 
-The current infrastructure run includes the **300-release/1,200-track**
-transactional persistence fixture, all six producer-to-worker BullMQ stages, and
-deterministic Redis/PostgreSQL traversal of **205 history records**. The only skip
-is the live Audiomack test, which needs an authorized account.
+The current Docker-backed infrastructure run applies all 14 migrations and
+completes **95/95 files and 752/752 tests with zero skips**. It includes the
+**300-release/1,200-track** transactional BullMQ path, exact 1,100-release resume
+after total Redis/BullMQ state loss, release-targeted metadata repair, and
+deterministic Redis/PostgreSQL traversal of **205 history records**. It does not
+include an authorized DistroKid or Audiomack account run.
 
 `scripts/assert-infra-tests-ran.mjs` was itself verified in both directions: it **fails** the build
 when the suites skip, and passes when they run. A guard that never fires is not a guard.

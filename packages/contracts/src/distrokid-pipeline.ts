@@ -154,6 +154,20 @@ export interface ExtractionCompleteness {
   releasesUpcNotCaptured: number;
   tracksIsrcNotCaptured: number;
 
+  /**
+   * Whole-model metadata audit. These fields are optional only for rolling-deploy compatibility
+   * with finalizer jobs produced before the post-extraction audit was introduced. Current
+   * producers always populate them. `metadataFieldsNotCaptured` counts extraction failures
+   * (retryable); `metadataFieldsAbsentAtSource` counts fields the distributor explicitly reported
+   * as empty (not something a retry may invent).
+   */
+  metadataFieldsAudited?: number;
+  metadataFieldsPresent?: number;
+  metadataFieldsAbsentAtSource?: number;
+  metadataFieldsNotCaptured?: number;
+  /** Releases containing at least one field our extractor failed to capture. */
+  metadataIncompleteReleaseIds?: string[];
+
   unresolvedReleaseIds: string[];
   failureReasons: Record<string, number>;
 }
@@ -191,6 +205,11 @@ const completenessSchema: z.ZodType<
   tracksWithIsrc: z.number(), tracksWithDistributorId: z.number(),
   releasesUpcAbsentAtSource: z.number(), tracksIsrcAbsentAtSource: z.number(),
   releasesUpcNotCaptured: z.number(), tracksIsrcNotCaptured: z.number(),
+  metadataFieldsAudited: z.number().int().nonnegative().optional(),
+  metadataFieldsPresent: z.number().int().nonnegative().optional(),
+  metadataFieldsAbsentAtSource: z.number().int().nonnegative().optional(),
+  metadataFieldsNotCaptured: z.number().int().nonnegative().optional(),
+  metadataIncompleteReleaseIds: z.array(z.string()).optional(),
   unresolvedReleaseIds: z.array(z.string()),
   failureReasons: z.record(z.number()),
 });

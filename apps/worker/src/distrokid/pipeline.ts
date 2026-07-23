@@ -1,5 +1,6 @@
 import {
-  reconcile, retryableReleaseIds, describeCompleteness,
+  reconcile, retryableReleaseIds, describeCompleteness, releaseNeedsMetadataRetry,
+  mergeCanonicalRelease,
   type ReleaseExtractionOutcome,
 } from '@sentinel/browser-assist';
 import type { SnapshotStatus, ExtractionCompleteness } from '@sentinel/contracts';
@@ -143,6 +144,31 @@ const refOf = (job: SnapshotRef): SnapshotRef => ({
   ...(job.deadlineAt ? { deadlineAt: job.deadlineAt } : {}),
   ...(job.schemaVersion ? { schemaVersion: job.schemaVersion } : {}),
 });
+
+const outcomeReleaseId = (outcome: ReleaseExtractionOutcome): string =>
+  outcome.kind === 'COMPLETED' ? outcome.release.distributorReleaseId : outcome.distributorReleaseId;
+
+/**
+ * Converge a targeted retry with its previous checkpoint without losing verified songs/fields.
+ * A transient retry failure never erases a previously completed (but field-incomplete) release;
+ * a successful retry is authoritative for current data and backfills only evidence it still could
+ * not capture from the previous attempt.
+ */
+export function convergeReleaseRetryOutcome(
+  previous: ReleaseExtractionOutcome | undefined,
+  incoming: ReleaseExtractionOutcome,
+): ReleaseExtractionOutcome {
+  if (!previous) return incoming;
+  if (previous.kind === 'COMPLETED' && incoming.kind !== 'COMPLETED') return previous;
+  if (incoming.kind !== 'COMPLETED' || previous.kind !== 'COMPLETED') return incoming;
+  return {
+    ...incoming,
+    release: mergeCanonicalRelease(incoming.release, previous.release),
+    ...(incoming.endpointFingerprint || previous.endpointFingerprint
+      ? { endpointFingerprint: incoming.endpointFingerprint ?? previous.endpointFingerprint }
+      : {}),
+  };
+}
 
 /** Bind before touching any checkpoint. The durable store rejects a queue replay that reuses a
  * snapshot id under another tenant or distributor connection. */
@@ -412,18 +438,29 @@ export async function extractDistroKidReleaseChunk(
     const byId = new Map(index.map((r) => [r.releaseId, r]));
     const refs = job.releaseIds.map((id) => byId.get(id)).filter((r): r is ReleaseRefRecord => !!r);
 
-    // Skip releases already done (idempotent resume within a chunk).
-    const existing = new Map((await deps.store.getOutcomes(job.snapshotId)).map((o) => [o.kind === 'COMPLETED' ? o.release.distributorReleaseId : o.distributorReleaseId, o]));
-    const todo = refs.filter((r) => existing.get(r.releaseId)?.kind !== 'COMPLETED');
+    // A fully complete release is an idempotent no-op. A COMPLETED release with extractor-owned
+    // field gaps is deliberately NOT skipped: retry passes target exactly those releases.
+    const existing = new Map((await deps.store.getOutcomes(job.snapshotId)).map((outcome) => [outcomeReleaseId(outcome), outcome]));
+    const todo = refs.filter((ref) => {
+      const prior = existing.get(ref.releaseId);
+      return prior?.kind !== 'COMPLETED' || releaseNeedsMetadataRetry(prior.release);
+    });
+    const converge = (batch: ReleaseExtractionOutcome[]): ReleaseExtractionOutcome[] => batch.map((incoming) => {
+      const releaseId = outcomeReleaseId(incoming);
+      const merged = convergeReleaseRetryOutcome(existing.get(releaseId), incoming);
+      existing.set(releaseId, merged);
+      return merged;
+    });
 
-    const outcomes = await deps.extractChunk(job, todo, async (batch) => {
+    const extractedOutcomes = await deps.extractChunk(job, todo, async (batch) => {
       await control.assertCanContinue();
-      await deps.store.putOutcomes(job.snapshotId, batch);
+      await deps.store.putOutcomes(job.snapshotId, converge(batch));
     }, control);
     // Work is checkpointed, so a re-run resumes rather than repeats. But we must not mark the
     // chunk complete or reconcile off a run we no longer had the right to be doing.
     await control.assertCanContinue();
     const pass = job.pass ?? INITIAL_PASS;
+    const outcomes = converge(extractedOutcomes);
     await deps.store.putOutcomes(job.snapshotId, outcomes);
     await control.assertCanContinue();
     await deps.store.markChunkComplete(job.snapshotId, pass, job.chunkIndex);

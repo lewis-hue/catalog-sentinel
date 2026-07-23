@@ -1,6 +1,7 @@
 import { startNodeTelemetry } from '@sentinel/core';
 import {
   envelopeEncryptorFromEnv,
+  isProductionEnvironment,
   PostgresAuditLogger,
   validateServerConfig,
   verifyEnvelopeEncryptor,
@@ -8,6 +9,7 @@ import {
 } from '@sentinel/security';
 import {
   createDistributorLinkRepository,
+  createLocalTenantErasureRequestRuntime,
   createProductionTenantErasureRequestRuntime,
   PostgresOrganizationRepository,
   type GovernanceSqlPool,
@@ -39,10 +41,10 @@ async function start(): Promise<void> {
   }
   const auditPool = createPgPool(process.env.DATABASE_URL);
   const audit = new PostgresAuditLogger(auditPool as unknown as AuditSqlClient);
-  const tenantErasureRuntime = createProductionTenantErasureRequestRuntime(
-    auditPool as unknown as GovernanceSqlPool,
-    process.env,
-  );
+  const governancePool = auditPool as unknown as GovernanceSqlPool;
+  const tenantErasureRuntime = isProductionEnvironment(process.env)
+    ? createProductionTenantErasureRequestRuntime(governancePool, process.env)
+    : createLocalTenantErasureRequestRuntime(governancePool, process.env);
   const organization = new PostgresOrganizationRepository(auditPool, tenantErasureRuntime.pseudonymizer);
   try {
     await tenantErasureRuntime.verifyReady();

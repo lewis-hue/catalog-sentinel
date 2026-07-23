@@ -92,6 +92,10 @@ export function mergePartial<T extends Record<string, unknown>>(base: T, extra: 
 }
 
 const cloneField = <T>(field: MetadataField<T>): MetadataField<T> => ({ ...field });
+const evidenceRank = (field: MetadataField<unknown>): number =>
+  field.status === 'PRESENT' ? 3 : field.status === 'ABSENT_AT_SOURCE' ? 2 : 1;
+const strongerEvidence = <T>(current: MetadataField<T>, alternative: MetadataField<T>): MetadataField<T> =>
+  evidenceRank(alternative) > evidenceRank(current) ? cloneField(alternative) : cloneField(current);
 const cloneTrack = (track: CanonicalDistributorTrack): CanonicalDistributorTrack => ({
   ...track,
   isrc: cloneField(track.isrc),
@@ -126,9 +130,9 @@ export function mergeCanonicalRelease(
   for (const key of ['upc', 'artworkUrl', 'releaseDate', 'label', 'uploadDate'] as const) {
     const current = merged[key];
     const alternative = extra[key];
-    if (current && alternative && current.status !== 'PRESENT' && alternative.status === 'PRESENT') {
-      merged[key] = cloneField(alternative);
-    }
+    if (!alternative) continue;
+    if (!current) merged[key] = cloneField(alternative);
+    else merged[key] = strongerEvidence(current, alternative);
   }
 
   if (merged.tracks.length === 0 && extra.tracks.length > 0) {
@@ -140,7 +144,8 @@ export function mergeCanonicalRelease(
   // response that cannot be correlated to a current row is never appended by guesswork.
   merged.tracks = merged.tracks.map((track) => {
     const alternative = extra.tracks.find((candidate) =>
-      (track.trackNumber !== undefined && candidate.trackNumber === track.trackNumber)
+      (!!track.distributorTrackId && candidate.distributorTrackId === track.distributorTrackId)
+      || (track.trackNumber !== undefined && candidate.trackNumber === track.trackNumber)
       || (!!track.title && !!candidate.title && candidate.title === track.title),
     );
     if (!alternative) return track;
@@ -156,9 +161,7 @@ export function mergeCanonicalRelease(
       ...(track.durationSec === undefined && alternative.durationSec !== undefined
         ? { durationSec: alternative.durationSec }
         : {}),
-      isrc: track.isrc.status !== 'PRESENT' && alternative.isrc.status === 'PRESENT'
-        ? cloneField(alternative.isrc)
-        : cloneField(track.isrc),
+      isrc: strongerEvidence(track.isrc, alternative.isrc),
     };
   });
 

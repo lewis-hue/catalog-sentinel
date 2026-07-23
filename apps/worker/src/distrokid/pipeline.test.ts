@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ReleaseExtractionOutcome, CanonicalDistributorRelease } from '@sentinel/browser-assist';
-import { present, absentAtSource } from '@sentinel/browser-assist';
+import { present, absentAtSource, notCaptured } from '@sentinel/browser-assist';
 import { InMemorySnapshotStore, type ReleaseRefRecord } from './snapshot-store';
 import { InMemoryConnectionLock, backoffWithJitter, startLockHeartbeat, type HeldLock } from './locks';
 import {
@@ -23,6 +23,14 @@ const mkRelease = (id: string, withIsrc = true): CanonicalDistributorRelease => 
   tracks: [{ title: `Track ${id}`, isrc: withIsrc ? present(`USKE1231${id.padStart(4, '0')}`, 'NETWORK_JSON', 'v1') : absentAtSource('NETWORK_JSON', 'v1') }],
 });
 const completed = (id: string): ReleaseExtractionOutcome => ({ kind: 'COMPLETED', release: mkRelease(id), source: 'NETWORK_JSON', elapsedMs: 5 });
+const completedWithArtworkGap = (id: string): ReleaseExtractionOutcome => ({
+  kind: 'COMPLETED',
+  release: {
+    ...mkRelease(id),
+    artworkUrl: notCaptured('REQUEST_FAILED', 'NETWORK_JSON', 'v1'),
+  },
+  source: 'NETWORK_JSON', elapsedMs: 5,
+});
 const failed = (id: string, reason: 'TIMEOUT' | 'NOT_AUTHORIZED' = 'TIMEOUT'): ReleaseExtractionOutcome => ({ kind: 'FAILED', distributorReleaseId: id, reason, detail: 'x', elapsedMs: 5 });
 
 function refs(n: number, offset = 0): ReleaseRefRecord[] {
@@ -219,6 +227,63 @@ describe('pipeline: retry FAILED releases only', () => {
     await retryFailedDistroKidReleases({ ...REF, attempt: 2 }, h.deps);
     expect(h.enqueued.chunk.length).toBe(1);
     expect(h.enqueued.chunk[0]!.releaseIds.sort()).toEqual(['R2', 'R3']);
+  });
+
+  it('targets a completed release whose artwork audit failed, without rereading complete releases', async () => {
+    const h = harness();
+    await h.store.putIndex('s1', refs(3));
+    await h.store.putOutcomes('s1', [completed('R0'), completedWithArtworkGap('R1'), completed('R2')]);
+    await retryFailedDistroKidReleases({ ...REF, attempt: 2 }, h.deps);
+    expect(h.enqueued.chunk).toHaveLength(1);
+    expect(h.enqueued.chunk[0]!.releaseIds).toEqual(['R1']);
+  });
+
+  it('actually re-extracts a completed-but-incomplete release and merges the distributor artwork', async () => {
+    const seen: string[] = [];
+    const h = harness({
+      async extractChunk(_job, releaseRefs) {
+        seen.push(...releaseRefs.map((ref) => ref.releaseId));
+        return releaseRefs.map((ref) => completed(ref.releaseId));
+      },
+    });
+    await h.store.putIndex('s1', refs(2));
+    await h.store.putOutcomes('s1', [completed('R0'), completedWithArtworkGap('R1')]);
+
+    await extractDistroKidReleaseChunk({
+      ...REF, pass: 2, chunkIndex: 0, passChunkCount: 1, releaseIds: ['R1'],
+    }, h.deps);
+
+    expect(seen).toEqual(['R1']);
+    const repaired = (await h.store.getOutcomes('s1')).find((outcome) =>
+      outcome.kind === 'COMPLETED' && outcome.release.distributorReleaseId === 'R1');
+    expect(repaired?.kind).toBe('COMPLETED');
+    if (repaired?.kind === 'COMPLETED') {
+      expect(repaired.release.artworkUrl).toMatchObject({
+        status: 'PRESENT', value: 'https://cdn/x.jpg', source: 'NETWORK_JSON',
+      });
+      expect(repaired.release.tracks).toHaveLength(1);
+    }
+    const reconciled = await reconcileDistroKidSnapshot({ ...REF, pass: 2 }, h.deps);
+    expect(reconciled.status).toBe('COMPLETE');
+    expect(h.enqueued.finalize).toHaveLength(1);
+    expect(h.enqueued.finalize[0]?.completeness.metadataIncompleteReleaseIds).toEqual([]);
+  });
+
+  it('never erases already verified songs when a targeted retry transiently fails', async () => {
+    const h = harness({ async extractChunk(_job, releaseRefs) { return releaseRefs.map((ref) => failed(ref.releaseId)); } });
+    await h.store.putIndex('s1', refs(1));
+    await h.store.putOutcomes('s1', [completedWithArtworkGap('R0')]);
+
+    await extractDistroKidReleaseChunk({
+      ...REF, pass: 2, chunkIndex: 0, passChunkCount: 1, releaseIds: ['R0'],
+    }, h.deps);
+
+    const retained = (await h.store.getOutcomes('s1'))[0];
+    expect(retained?.kind).toBe('COMPLETED');
+    if (retained?.kind === 'COMPLETED') {
+      expect(retained.release.tracks).toHaveLength(1);
+      expect(retained.release.artworkUrl.status).toBe('REQUEST_FAILED');
+    }
   });
 
   it('does not retry a non-retryable failure (NOT_AUTHORIZED)', async () => {

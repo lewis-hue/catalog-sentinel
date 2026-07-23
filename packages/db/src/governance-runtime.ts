@@ -18,7 +18,11 @@ import type { GovernanceSqlPool } from './governance-types';
 import { GovernanceValidationError } from './governance-types';
 import { PostgresOrganizationRepository } from './organization-repository';
 import { PostgresRetentionRepository } from './retention';
-import { PostgresTenantErasureRepository, type TenantPseudonymizer } from './tenant-erasure';
+import {
+  HmacTenantPseudonymizer,
+  PostgresTenantErasureRepository,
+  type TenantPseudonymizer,
+} from './tenant-erasure';
 import {
   AuditChainAnchorPublisher,
   PostgresAuditChainAppender,
@@ -280,11 +284,54 @@ export interface ProductionGovernanceRuntime {
   close(): Promise<void>;
 }
 
-export interface ProductionTenantErasureRequestRuntime {
-  readonly pseudonymizer: AwsKmsTenantPseudonymizer;
+export interface TenantErasureRequestRuntime {
+  readonly pseudonymizer: TenantPseudonymizer;
   readonly erasure: PostgresTenantErasureRepository;
   verifyReady(): Promise<void>;
   close(): Promise<void>;
+}
+
+export type ProductionTenantErasureRequestRuntime = TenantErasureRequestRuntime;
+
+/**
+ * Local integration composition for organization tombstones and owner erasure requests.
+ * It uses a stable, separately generated HMAC key and real PostgreSQL. Production callers
+ * must use the KMS-backed factory below; this function deliberately has no AWS/file/memory
+ * fallback and cannot process the production cross-service erasure workflow.
+ */
+export function createLocalTenantErasureRequestRuntime(
+  pool: GovernanceSqlPool,
+  env: NodeJS.ProcessEnv = process.env,
+): TenantErasureRequestRuntime {
+  const encodedKey = env.GOVERNANCE_HMAC_LOCAL_KEY?.trim();
+  if (!encodedKey) {
+    throw new GovernanceValidationError('GOVERNANCE_HMAC_LOCAL_KEY is required for the local integration runtime.');
+  }
+  const key = Buffer.from(encodedKey, 'base64');
+  if (key.byteLength !== 32 || key.toString('base64') !== encodedKey) {
+    key.fill(0);
+    throw new GovernanceValidationError('GOVERNANCE_HMAC_LOCAL_KEY must be canonical base64 for exactly 32 random bytes.');
+  }
+  const pseudonymizer = new HmacTenantPseudonymizer(
+    key,
+    env.GOVERNANCE_HMAC_LOCAL_KEY_VERSION?.trim() || 'local-v1',
+  );
+  key.fill(0);
+  const erasure = new PostgresTenantErasureRepository(pool, pseudonymizer);
+  return {
+    pseudonymizer,
+    erasure,
+    async verifyReady(): Promise<void> {
+      const client = await pool.connect();
+      try {
+        await client.query('SELECT 1 FROM "TenantErasureRequest" LIMIT 0');
+        await pseudonymizer.pseudonym('tenant', 'local-erasure-readiness-probe');
+      } finally {
+        client.release();
+      }
+    },
+    async close(): Promise<void> {},
+  };
 }
 
 /** API-side composition for owner erasure requests. It has only KMS GenerateMac capability;

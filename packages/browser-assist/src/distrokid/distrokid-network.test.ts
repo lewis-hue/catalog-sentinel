@@ -517,6 +517,42 @@ describe('completeness reconciliation', () => {
     expect(completeness.releasesUpcAbsentAtSource).toBe(0);
   });
 
+  it('audits artwork, dates, label, upload date and ISRC then targets only affected releases', () => {
+    const incomplete = rel('ART-GAP', 'PRESENT', ['PRESENT']);
+    incomplete.artworkUrl = notCaptured('REQUEST_FAILED', 'NETWORK_JSON', 'v1');
+    incomplete.uploadDate = notCaptured('NOT_CAPTURED', 'NETWORK_JSON', 'v1');
+    incomplete.label = absentAtSource('NETWORK_JSON', 'v1');
+    const complete = rel('OK', 'PRESENT', ['PRESENT']);
+    complete.uploadDate = present('2025-01-01', 'NETWORK_JSON', 'v1');
+    complete.label = present('Lewis Music', 'NETWORK_JSON', 'v1');
+
+    const { status, completeness } = reconcile({
+      expectedReleaseIds: ['OK', 'ART-GAP'],
+      outcomes: [done(complete), done(incomplete)],
+    });
+
+    expect(status).toBe('PARTIAL_RETRYABLE');
+    expect(completeness).toMatchObject({
+      metadataFieldsAudited: 12,
+      metadataFieldsPresent: 9,
+      metadataFieldsAbsentAtSource: 1,
+      metadataFieldsNotCaptured: 2,
+      metadataIncompleteReleaseIds: ['ART-GAP'],
+    });
+    expect(retryableReleaseIds({
+      expectedReleaseIds: ['OK', 'ART-GAP'], outcomes: [done(complete), done(incomplete)],
+    })).toEqual(['ART-GAP']);
+  });
+
+  it('does not fabricate artwork when the distributor explicitly reports none', () => {
+    const noArtwork = rel('NO-ART', 'PRESENT', ['PRESENT']);
+    noArtwork.artworkUrl = absentAtSource('NETWORK_JSON', 'v1');
+    const { status, completeness } = reconcile({ expectedReleaseIds: ['NO-ART'], outcomes: [done(noArtwork)] });
+    expect(status).toBe('COMPLETE_WITH_SOURCE_GAPS');
+    expect(completeness.metadataFieldsAbsentAtSource).toBe(1);
+    expect(retryableReleaseIds({ expectedReleaseIds: ['NO-ART'], outcomes: [done(noArtwork)] })).toEqual([]);
+  });
+
   it('schema change and reauth get their own terminal statuses', () => {
     expect(reconcile({ expectedReleaseIds: ['A'], outcomes: [{ kind: 'FAILED', distributorReleaseId: 'A', reason: 'SCHEMA_CHANGED', detail: 'x', elapsedMs: 1 }] }).status).toBe('FAILED_SCHEMA_CHANGED');
     expect(reconcile({ expectedReleaseIds: ['A'], outcomes: [{ kind: 'FAILED', distributorReleaseId: 'A', reason: 'REAUTH_REQUIRED', detail: 'x', elapsedMs: 1 }] }).status).toBe('PARTIAL_REAUTH_REQUIRED');

@@ -7,7 +7,7 @@ import { inferRole, mergeCanonicalRelease } from './endpoint-bundle';
 import { DirectJsonReader, isDirectReaderAllowed, type DirectReaderFlags } from './direct-reader';
 import { MIN_CATALOG_SCORE } from './candidate-scoring';
 import {
-  notCaptured,
+  isExtractionFailure, notCaptured,
   type CanonicalDistributorRelease, type MetadataSource,
   type ReleaseExtractionOutcome, type ReleaseFailureReason,
 } from './metadata-model';
@@ -331,6 +331,14 @@ export class NetworkFirstExtractor {
       };
     }
     const releaseTitle = release.title.trim() || ref.title?.trim() || '';
+    if (!releaseTitle) {
+      return {
+        kind: 'FAILED', distributorReleaseId: ref.releaseId, reason: 'PARSE_FAILED',
+        detail: 'correlated release metadata and catalog index contained no release title',
+        elapsedMs: Date.now() - started,
+        ...(endpointFingerprint ? { endpointFingerprint } : {}),
+      };
+    }
     const withId: CanonicalDistributorRelease = {
       ...release,
       distributorReleaseId: release.distributorReleaseId && release.distributorReleaseId !== 'unknown' ? release.distributorReleaseId : ref.releaseId,
@@ -391,10 +399,14 @@ export function isAllowedDistributorUrl(raw: string, origin: string): boolean {
  * wait for the rest of an endpoint bundle. A complete release short-circuits the wait.
  */
 export function hasGaps(r: CanonicalDistributorRelease): boolean {
-  if (r.upc.status !== 'PRESENT') return true;
-  if (r.artworkUrl.status !== 'PRESENT') return true;
+  if (!r.title.trim()) return true;
+  if (isExtractionFailure(r.upc)) return true;
+  if (isExtractionFailure(r.artworkUrl)) return true;
+  if (isExtractionFailure(r.releaseDate)) return true;
+  if (!r.uploadDate || isExtractionFailure(r.uploadDate)) return true;
+  if (!r.label || isExtractionFailure(r.label)) return true;
   if (r.tracks.length === 0) return true;
-  return r.tracks.some((t) => t.isrc.status !== 'PRESENT');
+  return r.tracks.some((track) => !track.title.trim() || isExtractionFailure(track.isrc));
 }
 
 /** A release that failed but must still carry a terminal outcome (never silently dropped). */

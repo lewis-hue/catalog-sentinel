@@ -18,3 +18,4 @@ export * from './audit-chain';
 export * from './governance-runtime';
 export * from './governance-service';
 export * from './governance-adapters';
+export * from './distrokid-recovery';

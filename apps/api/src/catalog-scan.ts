@@ -164,7 +164,9 @@ export async function scanReleasedCatalog(artist: string, released: ReleasedTrac
     metadata: r.track.metadata,
     perStore: r.perStore.map((p) => ({ store: p.store, status: p.status, foundArtist: p.foundArtist ?? null, url: p.url ?? null, confidence: p.confidence, needsManualReview: p.needsManualReview, reviewQuery: p.reviewQuery ?? null })),
   }));
-  await enrichArtworkByIsrc(tracks);
+  // Artwork on an authoritative distributor snapshot stays distributor-authored. A platform
+  // presence recheck must never replace a missing distributor field with a DSP image or a
+  // guessed high-resolution URL; that would destroy provenance and may attach the wrong edition.
   return {
     artist,
     stores: report.stores,
@@ -175,36 +177,4 @@ export async function scanReleasedCatalog(artist: string, released: ReleasedTrac
     warnings: [...report.warnings],
     note: `Read ${released.length} release(s) from your connected distributor account and compared against your ${report.stores.join(' + ')} catalogue${report.stores.length === 1 ? '' : 's'} (fast index compare). A deep pass adds wrong-profile detection and the web-verified platforms (Audiomack, Spotify, YouTube, …).`,
   };
-}
-
-/** Bump a store CDN cover URL to a high-res square variant (Deezer/Apple/imgix-style sizing). */
-function hiResArt(url: string): string {
-  return url
-    .replace(/\/\d{2,4}x\d{2,4}(bb|cc)?\.(jpg|jpeg|png|webp)/i, '/1000x1000$1.$2')
-    .replace(/(\/|-)\d{2,4}x\d{2,4}([.\-/])/g, '$11000x1000$2');
-}
-
-/**
- * Fill in EXACT cover art for tracks still missing it, via Deezer's public ISRC lookup
- * (`GET /track/isrc:{isrc}` → the exact recording's album cover). ISRC is a global fingerprint,
- * so this finds the cover even when the track isn't under a name-searchable artist profile.
- * Bounded + concurrency-limited so it never hammers Deezer or stalls a huge catalogue.
- */
-async function enrichArtworkByIsrc(tracks: CatalogScanTrack[]): Promise<void> {
-  const targets = tracks.filter((t) => !t.artworkUrl && t.isrc).slice(0, Number(process.env.CATALOG_ART_LOOKUP_LIMIT || 800));
-  if (!targets.length) return;
-  const deezer = new DeezerStoreProvider();
-  let i = 0;
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const idx = i++;
-      if (idx >= targets.length) return;
-      const t = targets[idx]!;
-      try {
-        const r = await deezer.lookupIsrc(t.isrc!);
-        if (r.found && r.artworkUrl) t.artworkUrl = hiResArt(r.artworkUrl);
-      } catch { /* leave art null → UI placeholder */ }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(6, targets.length) }, () => worker()));
 }

@@ -97,6 +97,11 @@ export interface CatalogExtractionCompletenessLike {
   tracksIsrcAbsentAtSource: number;
   releasesUpcNotCaptured: number;
   tracksIsrcNotCaptured: number;
+  metadataFieldsAudited?: number;
+  metadataFieldsPresent?: number;
+  metadataFieldsAbsentAtSource?: number;
+  metadataFieldsNotCaptured?: number;
+  metadataIncompleteReleaseIds?: string[];
   unresolvedReleaseIds: string[];
   failureReasons: Record<string, number>;
 }

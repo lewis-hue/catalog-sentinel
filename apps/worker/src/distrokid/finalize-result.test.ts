@@ -49,10 +49,14 @@ describe('projectFinalizedSnapshot', () => {
     const out = projectFinalizedSnapshot(record, job, outcomes, '2026-02-01T00:00:00.000Z');
     expect(out.result.warnings).not.toContain('__reading_in_progress__');
     expect(out.result.tracks).toHaveLength(1);
-    expect(out.result.tracks[0]).toMatchObject({ title: 'Song', isrc: null, upc: '123456789012', perStore: [] });
+    expect(out.result.tracks[0]).toMatchObject({
+      title: 'Song', isrc: null, upc: '123456789012',
+      artworkUrl: 'https://cdn.example/art.jpg', perStore: [],
+    });
     expect(out.result.tracks[0]?.metadata).toMatchObject({
       isrc: { status: 'TIMEOUT', source: 'NETWORK_JSON', parserVersion: 'v1' },
       upc: { value: '123456789012', status: 'PRESENT', source: 'NETWORK_JSON' },
+      artworkUrl: { value: 'https://cdn.example/art.jpg', status: 'PRESENT', source: 'NETWORK_JSON' },
       label: { status: 'ABSENT_AT_SOURCE', source: 'NETWORK_JSON' },
       uploadDate: { status: 'PARSE_FAILED', source: 'DOM', parserVersion: 'v2' },
     });

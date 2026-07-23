@@ -31,14 +31,14 @@ never enqueued anything.
 | Field-level status (`NOT_CAPTURED` ≠ `ABSENT_AT_SOURCE`) | LIB · FIXTURE · **WIRED**; **persisted** to `DistributorReleaseOutcome`/`DistributorTrackOutcome` |
 | Six-stage release-chunked pipeline | LIB · FIXTURE · **WIRED end-to-end** — API producer (`@sentinel/queue-client`) → real Redis → six workers, proven by `pipeline-e2e.integration.test.ts` |
 | API → pipeline producer | **WIRED**. Login confirmation always enqueues `distrokid-catalog-index`; no alternate catalogue reader exists |
-| Durable checkpoints | **WIRED** to PostgreSQL with Redis as disposable orchestration/cache state; Redis loss resumes from durable release records |
+| Durable checkpoints and recovery authority | **WIRED** to PostgreSQL with Redis as disposable orchestration/cache state; an application-envelope-encrypted recovery record and 15-second sweep reconstruct BullMQ work after API/worker/CDP/Redis loss while the original Steel lease and immutable deadline remain valid |
 | Durable outcomes (system of record) | **INFRA** — verified against real Postgres: idempotent, transactional, failures persisted with reason codes |
 | Endpoint-profile–constrained matching | **WIRED** — production matches ACTIVE profiles + correlates the release id; heuristic only during discovery/drift |
 | Endpoint registry / candidates | **INFRA** — `PostgresEndpointRegistryStore` + `PostgresCandidateStore`, tenant-isolated, verified against real Postgres |
 | CDP fallback | LIB · **WIRED**; POST/GraphQL identity fixed. Not yet fixture-tested |
 | Gated direct reader | LIB · FIXTURE · WIRED, **OFF** (2 flags + per-run policy) |
 | Legacy/inline catalogue readers | **REMOVED** from the runtime and configuration surface |
-| Redis-flush → PostgreSQL recovery | **VERIFIED** synthetically at 1,100 releases with exact counts and no duplicates; live Steel reconnect remains pending |
+| Redis-flush → PostgreSQL recovery | **VERIFIED** in the Docker-backed suite at 1,100 releases with exact counts and no duplicates; live Steel reconnect remains pending, and no recovery is promised after lease expiry |
 | Live coverage numbers | **NOT measured** — see the live-test report |
 
 ### Two defects the real-Redis end-to-end test caught immediately
@@ -135,7 +135,8 @@ Never assume one endpoint returns everything. Roles: `catalogIndex`, `releaseDet
 `trackIdentifiers`, `artwork`, `storeDeliveryStatus`, `lyricsStatus`, `creditsStatus`.
 `inferRole()` derives the role from schema shape. When the first response has gaps the extractor
 waits (event-driven) for a **sibling endpoint**, then merges — filling gaps without ever
-overwriting a `PRESENT` value.
+overwriting a `PRESENT` value. Artwork is accepted only from distributor-correlated
+`NETWORK_JSON` evidence; the extractor does not substitute DSP artwork or synthesize an image URL.
 
 ## Versioned parsers (`parser-v1.ts`, `parser-registry.ts`)
 
@@ -147,6 +148,9 @@ Add `distrokid-parser-v2` to `PARSER_VARIANTS`; **never delete v1** (rollback is
 ## Identifier modeling (`metadata-model.ts`)
 
 - **UPC → release-level.** **Artwork → release-level.** **ISRC → track-level.**
+- The post-scan field audit also covers release date, upload date, and label, plus
+  every track ISRC. Explicit `ABSENT_AT_SOURCE` is terminal truthful evidence;
+  every extractor-owned gap is retryable.
 - Coverage is reported separately — never a combined "ISRC/UPC" number:
 
 ```
@@ -183,7 +187,10 @@ extractDistroKidCatalogIndex → planDistroKidReleaseChunks → extractDistroKid
 Chunked by **release** (20), never by track. Idempotent job ids
 (`distrokid-release-chunk:tenant:conn:snapshot:idx`), a **distributed lock per connection**
 (1 concurrent read per account; concurrent across accounts), checkpoints every 10, exponential
-backoff **with full jitter**, batched writes, resume-after-crash, and **retry-failed-only**.
+backoff **with full jitter**, batched writes, resume-after-crash, and
+**retryable-release-only** processing. A completed release with a field-level
+capture failure is retried because track metadata is release-scoped; complete
+releases are not reread.
 
 ## Completeness (`completeness.ts`)
 
@@ -191,7 +198,11 @@ backoff **with full jitter**, batched writes, resume-after-crash, and **retry-fa
 FAILED_SCHEMA_CHANGED · FAILED`
 
 A snapshot is **never** COMPLETE while any indexed release lacks a terminal result, or while any
-gap is *our* failure rather than a source gap.
+gap is *our* failure rather than a source gap. Reconciliation audits UPC, artwork
+URL, release date, upload date, label, and each ISRC, merges stronger retry
+evidence without dropping verified tracks/fields, and never marks the result
+`COMPLETE` until all retryable gaps close. Exhausted work remains explicitly
+partial or failed.
 
 ## Security & privacy (`redaction.ts`)
 
@@ -222,4 +233,4 @@ endpointFingerprint (truncated hash), parserVersion, outcome, elapsedMs` — nev
 | `CATALOG_READ_WAIT_UNTIL` | `commit` | never wait on the hanging `domcontentloaded` |
 | `CATALOG_READ_CONTENT_TIMEOUT_MS` | 30000 | metadata **response** wait |
 | `CATALOG_READ_MAX_DURATION_MS` | 600000 | overall read budget |
-| Catalogue extraction | fixed | Network-first six-stage pipeline; release-chunked, durable, resumable, and retry-failed-only |
+| Catalogue extraction | fixed | Network-first six-stage pipeline; release-chunked, durable, in-lease resumable, and retryable-release-only |

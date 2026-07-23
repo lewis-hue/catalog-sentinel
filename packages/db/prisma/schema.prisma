@@ -1306,6 +1306,16 @@ model DistroKidSnapshotCheckpoint {
   chunksVersion   BigInt   @default(0)
   plansVersion    BigInt   @default(0)
   terminalVersion BigInt   @default(0)
+  /// Recovery authority is populated by the API before BullMQ submission and cleared only after
+  /// terminal Steel release. The handle is already application-envelope-encrypted; plaintext
+  /// provider ids, cookies, storage state, passwords, and 2FA values are rejected by the writer.
+  recoveryArtists                Json?     @db.JsonB
+  recoveryConsentId              String?
+  recoveryArtistWorkspaceId      String?
+  recoverySteelSessionIdEncrypted String?
+  recoverySessionExpiresAt       DateTime? @db.Timestamptz(3)
+  recoveryDeadlineAt             DateTime? @db.Timestamptz(3)
+  recoverySchemaVersion          Int?
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime @updatedAt @db.Timestamptz(3)
 

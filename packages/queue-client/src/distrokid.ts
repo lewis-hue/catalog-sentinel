@@ -36,7 +36,7 @@ export interface DistroKidProducer {
    * reports "created" for both. Rather than report that unreliably, we don't claim it: callers
    * want to know the work is queued, and that is exactly what this says.
    */
-  startSnapshot(job: CatalogIndexJob): Promise<{ jobId: string; accepted: true }>;
+  startSnapshot(job: CatalogIndexJob): Promise<{ jobId: string; accepted: true; alreadyTerminal?: true }>;
   close(): Promise<void>;
 }
 
@@ -45,6 +45,11 @@ export interface DistroKidProducerOptions {
   now?: () => number;
   /** Reserved lease time for durable terminal persistence and the Steel release call. */
   cleanupGraceMs?: number;
+  /**
+   * Persist and return the canonical recovery envelope before Redis submission. A replay may
+   * return the first durable ciphertext/deadline, which keeps randomized encryption idempotent.
+   */
+  prepareJob?: (job: CatalogIndexJob) => Promise<CatalogIndexJob | null>;
 }
 
 const isProduction = (env: NodeJS.ProcessEnv): boolean =>
@@ -72,7 +77,10 @@ export function withDistroKidDeadline(
   if (job.sessionExpiresAt && !Number.isFinite(sessionExpiry)) {
     throw new Error('invalid Steel session expiry on DistroKid job');
   }
-  if (Number.isFinite(sessionExpiry) && sessionExpiry - now < maxDurationMs + cleanupGraceMs) {
+  // A brand-new scan must have the full configured budget. A replay carrying the already
+  // anchored deadline only needs that original deadline to remain live; requiring a fresh full
+  // budget would make an idempotent retry fail merely because persistence consumed milliseconds.
+  if (!job.deadlineAt && Number.isFinite(sessionExpiry) && sessionExpiry - now < maxDurationMs + cleanupGraceMs) {
     throw new Error('Steel session does not have the full configured catalogue-read budget remaining');
   }
 
@@ -97,7 +105,25 @@ export function createDistroKidProducer(
       // Validate at the edge: a malformed job should fail in the API request that caused it,
       // not halfway through a catalogue read in a worker an hour later.
       const budgeted = withDistroKidDeadline(job, options);
-      const valid = parseJob(catalogIndexJobSchema, { schemaVersion: DISTROKID_JOB_SCHEMA_VERSION, ...budgeted }, DK_QUEUES.index);
+      const versioned = parseJob(
+        catalogIndexJobSchema,
+        { schemaVersion: DISTROKID_JOB_SCHEMA_VERSION, ...budgeted },
+        DK_QUEUES.index,
+      );
+      const prepared = options.prepareJob ? await options.prepareJob(versioned) : versioned;
+      if (prepared === null) {
+        // PostgreSQL already contains a terminal checkpoint and terminal cleanup has removed its
+        // reconnect authority. Treat the delayed/idempotent confirmation as durably handled;
+        // re-enqueuing after BullMQ retention expires could otherwise reopen a released session.
+        return { jobId: jobIds.index(versioned), accepted: true, alreadyTerminal: true };
+      }
+      // A durable replay returns the original immutable deadline. Re-validate it against the
+      // current clock so recovery cannot accidentally extend or revive an exhausted lease.
+      const valid = parseJob(
+        catalogIndexJobSchema,
+        withDistroKidDeadline(prepared, options),
+        DK_QUEUES.index,
+      );
       const jobId = jobIds.index(valid);
       await index.add('run', valid, { jobId });
       return { jobId, accepted: true };

@@ -18,8 +18,16 @@ The current working tree contains:
 - Steel-only user-attended browser access and a six-stage BullMQ catalogue path;
   runtime mock/demo, alternate-browser, legacy-DOM, inline, and single-job
   catalogue routes are removed;
-- durable PostgreSQL catalogue checkpoints and exact reconciliation, including
-  expected track counts when independently exposed by the release index;
+- durable PostgreSQL catalogue checkpoints plus an application-envelope-encrypted
+  recovery record and 15-second worker sweep that reconstructs missing BullMQ
+  work after API/worker/CDP interruption or total Redis loss, within the original
+  Steel lease and immutable scan deadline;
+- exact reconciliation, including expected track counts when independently
+  exposed by the release index, and a post-scan audit of UPC, artwork URL,
+  release date, upload date, label, and every track ISRC;
+- release-targeted retries for retryable field gaps, non-`COMPLETE` finalization
+  until those gaps close, explicit `ABSENT_AT_SOURCE`, and distributor-only
+  `NETWORK_JSON` artwork without DSP substitution or synthesized URLs;
 - truthful field-level status/provenance and fail-closed DSP pagination/capacity;
 - Keycloak/OIDC BFF enforcement plus durable organizations, personal first-login
   provisioning, invitation/member/workspace roles, selected-organization checks,
@@ -34,7 +42,8 @@ The current working tree contains:
   Object Lock anchors, and guarded audit expiry;
 - AWS KMS session envelope encryption, HMAC pseudonymization/receipts, distinct
   audit signing, endpoint-override rejection, and least-privilege API/worker IAM;
-- 13 ordered Prisma migrations, including split runtime database capabilities;
+- 14 ordered Prisma migrations, including split runtime database capabilities
+  and the encrypted DistroKid recovery envelope;
 - AWS CloudFormation for two-AZ ECS/Aurora/Redis, WAF/TLS, autoscaling, alarms,
   PITR, locked backups, cross-region restore inputs, artifact replication, and a
   secondary-region DR stack; and
@@ -66,22 +75,23 @@ These controls are described in
   registry-pushed, Trivy-passing, signed, digest-addressed image with retrievable
   SBOM/provenance and Cosign verification exists yet.
 - Steel lease/capacity and the bounded pre-registration orphan-session window
-  have not been accepted against the selected production service.
+  have not been accepted against the selected production service. Recovery does
+  not extend or recreate authentication after the original Steel lease expires.
 
 ## Current local evidence
 
-- The default repository run completed **85 passing files plus 8 expected
-  infrastructure-gated files (93 total)**, with **685 passing tests and 50
-  expected infrastructure-gated skips (735 total)**.
-- The disposable PostgreSQL/Redis run applied all **13 current migrations** to a
-  fresh database and completed **93/93 files and 735/735 tests with zero skips**.
-  It includes post-erasure receipt access, exact 1,100-release recovery after a
-  Redis flush, and the 1,200-track six-stage BullMQ path.
+- The full Docker-backed run applied all **14 current migrations** to a fresh
+  PostgreSQL database and completed **95/95 files and 752/752 tests with zero
+  skips** against real local PostgreSQL, Redis, and BullMQ services.
+- It includes post-erasure receipt access, 1,200-track six-stage BullMQ
+  completion, exact 1,100-release resume after total Redis/BullMQ state loss,
+  and targeted retry of only releases with retryable metadata gaps.
 - TypeScript, lint, focused security/auth/organization/governance/catalogue/DSP,
   and real-Chromium network-first suites passed during this review.
 - Synthetic tests cover more than 1,000 catalogue records, including exact
-  1,100-release checkpoint recovery after Redis loss and a 1,001-item DSP case.
-  This is not a real DistroKid/Steel throughput result.
+  1,100-release checkpoint recovery after Redis loss, the 1,200-track queue path,
+  targeted field-gap repair, and a 1,001-item DSP case. This is not a real
+  DistroKid/Steel throughput result.
 - The Steel capability probe returned `READY`; YouTube Data API accepted a live
   request; Google's OAuth endpoint recognized the configured client pair while
   rejecting a deliberately invalid grant. These probes did not validate a Google
@@ -89,8 +99,9 @@ These controls are described in
 - The AWS templates pass local CloudFormation lint. This is not deployment,
   backup, restore, DR, or load evidence.
 
-These counts describe the clean committed source revision. The protected release
-workflow and published digest must reproduce them before release.
+These counts describe the reviewed working tree. The eventual reviewed commit,
+protected release workflow, and published digest must reproduce them before
+release.
 
 ## Approval record
 
@@ -162,6 +173,13 @@ workflow and published digest must reproduce them before release.
 - [ ] Create, confirm, cancel, timeout, failure, API crash, worker crash,
   revocation, and normal completion release the Steel session, with provider-side
   orphan inventory reconciled.
+- [ ] API/worker restart, CDP transport failure, and total Redis/BullMQ loss resume
+  from the encrypted PostgreSQL recovery record and first unfinished checkpoint
+  within the original Steel lease and immutable scan deadline; the 15-second
+  recovery sweep never revives terminal or released work.
+- [ ] Lease/deadline expiry terminalizes the scan truthfully and releases or
+  recognizes expiry. No acceptance claim says that authentication or extraction
+  resumes after the original Steel lease has expired.
 - [ ] The selected Steel quotas, concurrency, regional capacity, and lease duration
   support the authorized maximum catalogue with adverse-latency safety margin.
 - [ ] Redis/application/WAF rate limits prevent a principal from exhausting paid
@@ -179,6 +197,16 @@ workflow and published digest must reproduce them before release.
 - [ ] Only an explicit captured source absence becomes `ABSENT_AT_SOURCE`; omitted,
   malformed, timeout, request, parse, authorization, and legacy-unknown values
   remain not captured/failed.
+- [ ] The post-scan audit checks UPC, artwork URL, release date, upload date,
+  label, and every track ISRC; any retryable field gap keeps finalization from
+  becoming `COMPLETE`.
+- [ ] Retries reread only the owning release because track metadata is
+  release-scoped, merge stronger evidence without discarding already verified
+  tracks/fields, and do not reread complete releases.
+- [ ] Every track receives its release's distributor-correlated artwork only when
+  supported by `NETWORK_JSON` evidence. DSP artwork substitution and synthesized
+  artwork URLs are absent; explicit distributor absence remains
+  `ABSENT_AT_SOURCE`.
 - [ ] Every enabled DSP proves identity, pagination, quotas, caps, retry behavior,
   and completeness using authorized credentials.
 - [ ] Truncation, cap, quota, timeout, provider error, missing credential, degraded
@@ -211,7 +239,7 @@ workflow and published digest must reproduce them before release.
 - [ ] KMS/HSM key creation, rotation, disable/recovery, throttling, CloudTrail
   alerting, and multi-replica behavior are rehearsed.
 - [ ] Migration, API, worker, and governance login roles target one database; only
-  migration owns schema changes and all **13 migrations** apply cleanly.
+  migration owns schema changes and all **14 migrations** apply cleanly.
 - [ ] Aurora TLS, writer/reader behavior, PITR, encrypted backups, restricted
   runtime roles, saturation alerts, and a timed restore pass.
 - [ ] Redis TLS/auth, private networking, multi-AZ failover, persistence/eviction,
@@ -249,8 +277,10 @@ workflow and published digest must reproduce them before release.
 - [ ] A specifically authorized non-customer account completes consent → attended
   Steel login/MFA → DistroKid index → release chunks → reconciliation → DSP checks
   → report → revocation with more than 1,000 tracks and exact truthful totals.
-- [ ] The scenario is repeated with API restart, worker restart, Redis loss, Steel
-  timeout, DSP quota failure, user cancellation, and provider failure; results
-  remain tenant-safe, resumable, truthful, and free of leaked sessions/secrets.
+- [ ] The scenario is repeated with API restart, worker restart, CDP interruption,
+  Redis loss, Steel timeout, DSP quota failure, user cancellation, and provider
+  failure. In-lease interruptions resume; lease expiry terminalizes truthfully
+  and requires a new attended session. Every result remains tenant-safe and free
+  of leaked sessions/secrets.
 - [ ] Engineering, security, privacy/DPA, and legal sign the approval record for
   the exact source commit, image digest, environment, and evidence bundle.

@@ -523,6 +523,12 @@ function sanitizeCompleteness(input: FinalizeJob['completeness']): FinalizeJob['
     'releasesUpcNotCaptured', 'tracksIsrcNotCaptured',
   ] as const;
   const counts = Object.fromEntries(countNames.map((name) => [name, nonNegativeInteger(input[name], `completeness ${name}`)]));
+  const optionalCountNames = [
+    'metadataFieldsAudited', 'metadataFieldsPresent',
+    'metadataFieldsAbsentAtSource', 'metadataFieldsNotCaptured',
+  ] as const;
+  const optionalCounts = Object.fromEntries(optionalCountNames.flatMap((name) =>
+    input[name] === undefined ? [] : [[name, nonNegativeInteger(input[name], `completeness ${name}`)]]));
   if (typeof input.expectedTracksKnown !== 'boolean') throw new Error('invalid expectedTracksKnown in terminal checkpoint');
   if (!Array.isArray(input.unresolvedReleaseIds) || input.unresolvedReleaseIds.length > MAX_RELEASES) {
     throw new Error('invalid unresolved release ids in terminal checkpoint');
@@ -532,10 +538,19 @@ function sanitizeCompleteness(input: FinalizeJob['completeness']): FinalizeJob['
     if (Object.keys(failureReasons).length >= 100) throw new Error('too many failure reasons in terminal checkpoint');
     failureReasons[textValue(reason, 'completeness failure reason', 128)] = nonNegativeInteger(count, 'failure reason count');
   }
+  if (input.metadataIncompleteReleaseIds !== undefined
+    && (!Array.isArray(input.metadataIncompleteReleaseIds) || input.metadataIncompleteReleaseIds.length > MAX_RELEASES)) {
+    throw new Error('invalid metadata-incomplete release ids in terminal checkpoint');
+  }
   return {
-    ...counts as Omit<FinalizeJob['completeness'], 'expectedTracksKnown' | 'unresolvedReleaseIds' | 'failureReasons'>,
+    ...counts as Pick<FinalizeJob['completeness'], (typeof countNames)[number]>,
+    ...optionalCounts,
     expectedTracksKnown: input.expectedTracksKnown,
     unresolvedReleaseIds: input.unresolvedReleaseIds.map((id) => textValue(id, 'unresolved release id', 512)),
+    ...(input.metadataIncompleteReleaseIds !== undefined ? {
+      metadataIncompleteReleaseIds: input.metadataIncompleteReleaseIds
+        .map((id) => textValue(id, 'metadata-incomplete release id', 512)),
+    } : {}),
     failureReasons,
   };
 }

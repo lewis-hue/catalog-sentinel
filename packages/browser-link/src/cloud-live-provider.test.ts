@@ -356,6 +356,66 @@ describe('CloudLiveBrowserProvider (Steel)', () => {
     expect(calls.filter((c) => c.includes('/v1/sessions/remote-1/release'))).toHaveLength(1);
   });
 
+  it('reconnects a dropped worker transport to the same remote session without losing login authority', async () => {
+    const connected: string[] = [];
+    const transportConnected: boolean[] = [];
+    let releases = 0;
+    let pagesOpened = 0;
+    const persistentContext = {
+      pages: () => [],
+      newPage: async () => ({
+        addInitScript: async () => undefined,
+        close: async () => undefined,
+        // This marker models state owned by Steel's persistent browser context, not by either
+        // Playwright transport. A reconnect must receive this same context rather than create a
+        // fresh unauthenticated one.
+        authenticatedAs: 'distrokid-user',
+      }),
+      close: async () => undefined,
+    };
+    const connect = async (cdpUrl: string): Promise<Browser> => {
+      const index = connected.length;
+      connected.push(cdpUrl);
+      transportConnected[index] = true;
+      return {
+        contexts: () => [persistentContext],
+        newContext: async () => persistentContext,
+        isConnected: () => transportConnected[index]!,
+        close: async () => { transportConnected[index] = false; },
+      } as unknown as Browser;
+    };
+    const http: HttpLike = async (url) => {
+      if (url.includes('/release')) releases += 1;
+      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+    };
+    const provider = new CloudLiveBrowserProvider({
+      service: 'steel', apiKey: 'key', encryptor: new EnvelopeEncryptor(), httpImpl: http, connect,
+    });
+
+    const first = await provider.attachRemoteSession('remote-authenticated', { releaseOnClose: false });
+    const firstPage = await first.newPage() as unknown as { authenticatedAs: string };
+    pagesOpened += 1;
+    expect(firstPage.authenticatedAs).toBe('distrokid-user');
+    await first.close();
+
+    // Model a worker/CDP network failure after one stage. The Steel browser and its cookies are
+    // still alive remotely; only this process's transport is gone.
+    transportConnected[0] = false;
+
+    const retry = await provider.attachRemoteSession('remote-authenticated', { releaseOnClose: false });
+    const retryPage = await retry.newPage() as unknown as { authenticatedAs: string };
+    pagesOpened += 1;
+    expect(retryPage.authenticatedAs).toBe('distrokid-user');
+    await retry.close();
+
+    expect(pagesOpened).toBe(2);
+    expect(connected).toEqual([
+      'wss://connect.steel.dev?sessionId=remote-authenticated&apiKey=key',
+      'wss://connect.steel.dev?sessionId=remote-authenticated&apiKey=key',
+    ]);
+    expect(releases).toBe(0);
+  });
+
   it('disconnects cached worker CDP transports on shutdown without releasing or closing the remote context', async () => {
     let browserCloses = 0;
     let contextCloses = 0;

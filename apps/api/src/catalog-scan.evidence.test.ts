@@ -54,4 +54,37 @@ describe('scanReleasedCatalog metadata evidence', () => {
     });
     expect(result.tracks[0]?.metadata?.label?.status).toBe('ABSENT_AT_SOURCE');
   });
+
+  it('never substitutes DSP artwork for missing distributor artwork', async () => {
+    const missingDistributorArtwork: ReleasedTrack = {
+      ...released,
+      isrc: 'QT6ED2521965',
+      artworkUrl: null,
+      metadata: {
+        ...released.metadata,
+        artworkUrl: {
+          status: 'REQUEST_FAILED', source: 'NETWORK_JSON',
+          capturedAt: '2026-01-01T00:00:00.000Z', parserVersion: 'network-v1',
+        },
+      },
+    };
+    mocks.scanStorePresence.mockResolvedValue({
+      expectedArtist: 'Evidence Artist', stores: ['Evidence Store'], warnings: [],
+      results: [{
+        track: missingDistributorArtwork,
+        perStore: [{
+          store: 'Evidence Store', status: 'unverifiable', matchedBy: null,
+          confidence: 0.3, needsManualReview: true, reviewQuery: 'Evidence Artist Evidence Song',
+        }],
+      }],
+      summary: { total: 1, live: 0, notLive: 0, wrongProfile: 0, unverifiable: 1, needsReview: 1 },
+    });
+
+    const result = await scanReleasedCatalog('Evidence Artist', [missingDistributorArtwork]);
+
+    expect(result.tracks[0]?.artworkUrl).toBeNull();
+    expect(result.tracks[0]?.metadata?.artworkUrl).toMatchObject({
+      status: 'REQUEST_FAILED', source: 'NETWORK_JSON',
+    });
+  });
 });
