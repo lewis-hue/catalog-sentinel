@@ -5,7 +5,7 @@ import { isProductionEnvironment } from '@sentinel/security';
  *
  * `Access-Control-Allow-Origin: *` was the fallback whenever `APP_BASE_URL` was unset. With bearer
  * auth that is an invitation: any website could call this API from a logged-in user's browser and
- * read the response. It was also silent — nothing in the config said "we are wide open".
+ * read the response. It was also silent, nothing in the config said "we are wide open".
  *
  * Rules:
  *  - A configured, valid `APP_BASE_URL` → echo its ORIGIN (scheme+host+port; never a path).

@@ -6,7 +6,7 @@ import type { PipelineMetrics, SnapshotRef } from './pipeline';
  *
  * Counters answer the questions the old logs couldn't: did we ATTEMPT every release, which
  * identifier coverage is failing (UPC vs ISRC vs artwork), is an endpoint drifting, and how long
- * a release takes. Labels carry ids only (tenant/connection/scan/release) — never secrets,
+ * a release takes. Labels carry ids only (tenant/connection/scan/release), never secrets,
  * bodies, or endpoint values.
  */
 
@@ -65,7 +65,7 @@ export class InMemoryExtractionMetrics implements PipelineMetrics {
     const d = this.snap.chunkDurationsMs;
     return d.length ? Math.round(d.reduce((a, b) => a + b, 0) / d.length) : 0;
   }
-  /** Endpoint success rate — the signal that an endpoint is drifting before it fully breaks. */
+  /** Endpoint success rate, the signal that an endpoint is drifting before it fully breaks. */
   endpointSuccessRate(fingerprint: string): number {
     const short = fingerprint.slice(0, 16);
     const ok = this.snap.endpointSuccess[short] ?? 0;
@@ -75,7 +75,7 @@ export class InMemoryExtractionMetrics implements PipelineMetrics {
   reset(): void { this.snap = emptySnapshot(); }
 }
 
-/** Structured extraction log line. Ids only — never endpoint values, bodies, cookies or tokens. */
+/** Structured extraction log line. Ids only, never endpoint values, bodies, cookies or tokens. */
 export interface ExtractionLogFields {
   tenantId: string;
   connectionId: string;

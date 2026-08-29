@@ -71,7 +71,14 @@ export function readKeycloakConfig(env: NodeJS.ProcessEnv = process.env): Keyclo
   return { enabled, issuer, jwksUri, audience };
 }
 
-/** Extract our identity from a verified Keycloak token payload. */
+/**
+ * Extract our identity from a verified Keycloak token payload.
+ *
+ * Locally registered users do not have a custom `tenant_id`, so the verified Keycloak subject is
+ * their canonical personal tenant. A signed tenant claim is retained as a candidate organization
+ * context for backwards-compatible deployments, but the API independently requires durable
+ * membership before it can use a value that differs from the subject.
+ */
 export function identityFromPayload(p: JWTPayload): AuthIdentity {
   const realmAccess = (p as { realm_access?: { roles?: string[] } }).realm_access;
   const claimedRoles = Array.isArray(realmAccess?.roles)
@@ -81,10 +88,9 @@ export function identityFromPayload(p: JWTPayload): AuthIdentity {
   // turn a token carrying only arbitrary/unknown roles into an authorized Sentinel principal.
   const roles = claimedRoles.filter((role): role is SentinelRole =>
     (SENTINEL_ROLES as readonly string[]).includes(role));
-  const tenantId = typeof p.tenant_id === 'string' ? p.tenant_id.trim() : '';
-  if (!tenantId) throw new Error('Authenticated token is missing the required nonempty tenant_id claim.');
   const sub = typeof p.sub === 'string' ? p.sub.trim() : '';
   if (!sub) throw new Error('Authenticated token is missing the required subject claim.');
+  const claimedTenantId = typeof p.tenant_id === 'string' ? p.tenant_id.trim() : '';
   if (roles.length === 0) {
     throw new Error('Authenticated token has no recognized Sentinel role.');
   }
@@ -103,7 +109,7 @@ export function identityFromPayload(p: JWTPayload): AuthIdentity {
     : undefined;
   return {
     sub,
-    tenantId,
+    tenantId: claimedTenantId || sub,
     roles,
     username: typeof p.preferred_username === 'string' ? p.preferred_username : undefined,
     ...(emailVerified ? { email: assertedEmail } : {}),
@@ -130,7 +136,7 @@ export class KeycloakVerifier {
   async verify(token: string): Promise<AuthIdentity> {
     if (!this.key) throw new Error('Keycloak auth is not configured (KEYCLOAK_BASE_URL missing).');
     const opts = { issuer: this.cfg.issuer!, audience: this.cfg.audience!, algorithms: ['RS256'] };
-    // jose has separate overloads for a key vs. a JWKS resolver function — narrow on type.
+    // jose has separate overloads for a key vs. a JWKS resolver function, narrow on type.
     const { payload } =
       typeof this.key === 'function'
         ? await jwtVerify(token, this.key as JWTVerifyGetKey, opts)

@@ -12,12 +12,12 @@ import type {
 import { applySearchMutation, DEFAULT_TENANT, ownerOf, revisionOf, searchRecordsEqual, toSummary, validateSearchPageOptions } from './search-store';
 
 /**
- * Durable Postgres store for scan records — the SOURCE OF TRUTH for final results.
+ * Durable Postgres store for scan records, the SOURCE OF TRUTH for final results.
  * Uses the canonical DATABASE_URL via node-postgres. Schema creation belongs exclusively to
  * the committed Prisma migration chain; the application runtime performs reads and DML only.
  * The record is stored as JSONB; a few columns are denormalized for listing/filtering.
  *
- * Writes are COARSE (per platform checkpoint / terminal state), never per search query —
+ * Writes are COARSE (per platform checkpoint / terminal state), never per search query -
  * the deep-scan job calls `update` ~once per platform, so Postgres sees ~N-platform writes
  * per scan, not thousands.
  */

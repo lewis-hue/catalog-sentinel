@@ -28,7 +28,7 @@ export type { NetworkCandidate, CandidateScope, CandidateSink, CorrelationKind }
 /**
  * Which release (if any) a REQUEST actually names.
  *
- * Correlation is derived from the request — its path, query values, POST body, GraphQL variables —
+ * Correlation is derived from the request, its path, query values, POST body, GraphQL variables -
  * and compared against the ids we already know, IN MEMORY. Only the resulting category is ever
  * recorded; the matched value is never persisted or logged, because a query value is exactly the
  * kind of thing the redaction policy forbids storing.
@@ -55,7 +55,7 @@ export function correlateRequest(
       return { kind: 'NO_CORRELATION', namesOtherRelease: true };
     }
   }
-  // The request names no release at all — a page-level or index payload. Legitimate, but not
+  // The request names no release at all, a page-level or index payload. Legitimate, but not
   // evidence of belonging to this release.
   return { kind: expectedReleaseId ? 'TEMPORAL_ASSOCIATION' : 'NO_CORRELATION', namesOtherRelease: false };
 }
@@ -69,11 +69,11 @@ export interface CapturedResponse {
   schemaKeys: string[];
   schemaHash: string;
   bodyBytes: number;
-  /** The release being navigated when this arrived. TEMPORAL only — see `correlation`. */
+  /** The release being navigated when this arrived. TEMPORAL only, see `correlation`. */
   releaseId?: string;
   /** Request-derived correlation. This, not `releaseId`, is what the match policy trusts. */
   correlation: CorrelationKind;
-  /** True when the REQUEST names a different known release — a hard reject. */
+  /** True when the REQUEST names a different known release, a hard reject. */
   namesOtherRelease?: boolean;
 }
 
@@ -81,8 +81,8 @@ export interface CapturedResponse {
  * How production picks WHICH captured response is this release's metadata.
  *
  * Score-only selection is a DISCOVERY heuristic: it answers "which endpoint here looks like
- * catalog data?". In production we already know the answer — the registry has an ACTIVE profile
- * — and asking the heuristic again lets an unrelated catalog-shaped response (a catalog index,
+ * catalog data?". In production we already know the answer, the registry has an ACTIVE profile
+ *, and asking the heuristic again lets an unrelated catalog-shaped response (a catalog index,
  * a sidebar's recommendations) outrank the release-details response and be parsed as this
  * release. Constraining to the known profile, and correlating the response to the release that
  * was actually requested, removes that whole class of mis-association.
@@ -94,7 +94,7 @@ export interface ResponseMatchPolicy {
   releaseId?: string;
   /**
    * Permit score-only selection when no ACTIVE profile matched. True during discovery and while
-   * a profile is DEGRADED (schema drift) — otherwise a drifted endpoint would strand extraction.
+   * a profile is DEGRADED (schema drift), otherwise a drifted endpoint would strand extraction.
    * False once a profile is ACTIVE: prefer a clean TIMEOUT over a confident wrong answer.
    */
   allowHeuristic: boolean;
@@ -106,10 +106,10 @@ export interface ResponseMatchPolicy {
  *
  * The ordering is by EVIDENCE, strongest first:
  *
- *   REQUEST_ID_MATCH + active profile   — the request named this release, from the known endpoint
- *   REQUEST_ID_MATCH                    — the request named this release
- *   PROFILE_MATCH_ONLY                  — known endpoint, request names no release
- *   TEMPORAL_ASSOCIATION                — it merely arrived during this release's window
+ *   REQUEST_ID_MATCH + active profile  , the request named this release, from the known endpoint
+ *   REQUEST_ID_MATCH                   , the request named this release
+ *   PROFILE_MATCH_ONLY                 , known endpoint, request names no release
+ *   TEMPORAL_ASSOCIATION               , it merely arrived during this release's window
  *
  * `TEMPORAL_ASSOCIATION` used to be scored as if it were correlation, because `releaseId` was
  * just a copy of whatever release the extractor was on when the response landed. That made a
@@ -155,12 +155,12 @@ export interface DiscoveryHandle {
   waitForDifferentEndpoint(excludeFingerprint: string, timeoutMs: number): Promise<CapturedResponse | null>;
   /** Highest-scoring payload seen since the last reset. */
   best(): CapturedResponse | null;
-  /** EVERY payload captured since the last reset — a release's data may be split across
+  /** EVERY payload captured since the last reset, a release's data may be split across
    *  several endpoints (a bundle), so callers must be able to merge from all of them. */
   all(): CapturedResponse[];
   /** Drop buffered payloads (called between releases so they never cross-contaminate). */
   resetCaptures(): void;
-  /** Automatic candidate report, ranked — no manual log reading. */
+  /** Automatic candidate report, ranked, no manual log reading. */
   report(): RankedCandidate[];
   dispose(): void;
 }
@@ -185,7 +185,7 @@ export interface DiscoveryOptions {
   /** Distributor origin allowlist, e.g. "distrokid.com". */
   origin: string;
   /**
-   * Release ids this run may attribute responses to — the current chunk's ids.
+   * Release ids this run may attribute responses to, the current chunk's ids.
    *
    * Used to CORRELATE a response to its request by looking for a known id in the request itself.
    * Matching against known ids beats guessing which URL segment is an identifier: we never have to
@@ -296,7 +296,7 @@ export function installDistributorNetworkDiscovery(context: BrowserContext, opts
         stats.set(fingerprint, stat);
 
         // Correlate from the REQUEST, not from whatever release we happen to be on. The values
-        // compared here never leave this function — only the category is kept.
+        // compared here never leave this function, only the category is kept.
         const { kind: correlation, namesOtherRelease } = correlateRequest(
           response.url(), request.postData(), responseRelease, opts.knownReleaseIds ?? EMPTY_IDS,
         );
@@ -329,7 +329,7 @@ export function installDistributorNetworkDiscovery(context: BrowserContext, opts
           if (w.epoch === epoch && w.match(captured)) { waiters.splice(i, 1); clearTimeout(w.timer); w.resolve(captured); }
         }
       } catch (error) {
-        // Category only — never a body, header, or token.
+        // Category only, never a body, header, or token.
         console.warn('[distrokid] network candidate processing failed', { error: redactError(error) });
       }
     })();
@@ -373,7 +373,7 @@ export function installDistributorNetworkDiscovery(context: BrowserContext, opts
         .filter((x): x is { c: CapturedResponse; r: number } => x.r !== null)
         .sort((a, b) => b.r - a.r);
       if (ranked[0]) return ranked[0].c;
-      // Nothing yet — wait for the first ACCEPTABLE one. This deliberately resolves on the first
+      // Nothing yet, wait for the first ACCEPTABLE one. This deliberately resolves on the first
       // match rather than waiting out the window for a possibly-better one: an active-profile
       // response correlated to this release is already the best answer available.
       return waitFor((c) => scoreAgainstPolicy(c, p) !== null, timeoutMs);

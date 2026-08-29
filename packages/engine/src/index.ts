@@ -1,5 +1,5 @@
 /**
- * @sentinel/engine — orchestration that composes core, matching, adapters,
+ * @sentinel/engine, orchestration that composes core, matching, adapters,
  * reports, security, and db into the runnable "Find Missing Audiomack Songs"
  * workflow.
  */

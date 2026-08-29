@@ -12,8 +12,8 @@ The core integrity rule of Artist Catalog Sentinel:
    TIDAL, YouTube (where keys/quota exist). ISRC/UPC exact match = highest confidence.
 2. **User-authorized distributor data** — the DistroKid catalogue read over the
    user-attended Steel session (the "expected" set).
-3. **Self-hosted SearXNG web verification** — best-effort evidence for platforms with no
-   API. Confidence-scored, on-page verified.
+3. **Serper web verification** (hosted Google SERP API) — best-effort evidence for platforms
+   with no API. Confidence-scored, on-page verified.
 4. **Manual review** — a human confirms low-confidence / unverifiable cases.
 
 ## Why an empty web result ≠ "missing"

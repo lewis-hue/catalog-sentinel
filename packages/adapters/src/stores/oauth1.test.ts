@@ -28,7 +28,7 @@ describe('oauth1', () => {
 
   // The base string is THE canonical OAuth 1.0a artifact. Matching Twitter's documented
   // base string byte-for-byte proves param collection, encoding, sorting, and joining
-  // are all correct. (Note: Twitter's docs publish a signature — hCtSmYh+… — that does
+  // are all correct. (Note: Twitter's docs publish a signature, hCtSmYh+…, that does
   // NOT match its own documented base string; the value below is the real HMAC of it.)
   it('reconstructs Twitter\'s documented signature base string byte-for-byte', () => {
     const allParams = {

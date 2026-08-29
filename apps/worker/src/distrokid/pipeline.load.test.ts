@@ -9,7 +9,7 @@ import {
 } from './pipeline';
 
 /**
- * SCALE test — the "definition of done" bar.
+ * SCALE test, the "definition of done" bar.
  *
  * 1,200 tracks across 300 releases, with a worker restart mid-extraction, a timed-out release,
  * a malformed response, and a parser schema-change fixture. Asserts:
@@ -69,7 +69,7 @@ function harness(opts: HarnessOpts = {}) {
         attempts.set(r.releaseId, n);
 
         if (opts.malformed?.has(r.releaseId)) {
-          // A malformed payload must go through the parser and surface as SCHEMA_CHANGED —
+          // A malformed payload must go through the parser and surface as SCHEMA_CHANGED -
           // never be silently coerced into a partial release.
           const parsed = parsers.parse({ totally: 'unexpected', shape: [1, 2] }, 'NETWORK_JSON');
           expect(parsed.ok).toBe(false);
@@ -149,7 +149,7 @@ describe('LOAD: 1,200 tracks / 300 releases', () => {
     const afterCrash = await h.store.getOutcomes(REF.snapshotId);
     expect(afterCrash.length).toBe(100); // 5 chunks × 20
 
-    // Restart: replan against the SAME store — completed chunks are skipped.
+    // Restart: replan against the SAME store, completed chunks are skipped.
     h.enqueued.chunk.length = 0;
     await planDistroKidReleaseChunks({ ...REF }, h.deps);
     expect(h.enqueued.chunk.length).toBe(1); // resume at the first unfinished chunk only
@@ -190,7 +190,7 @@ describe('LOAD: 1,200 tracks / 300 releases', () => {
     expect(h.attempts.get('R0')).toBe(1); // untouched by the retry
   }, 30_000);
 
-  it('a malformed response yields SCHEMA_CHANGED — an alert, not corrupt output', async () => {
+  it('a malformed response yields SCHEMA_CHANGED, an alert, not corrupt output', async () => {
     const h = harness({ malformed: new Set(['R42']) });
     await extractDistroKidCatalogIndex({ ...REF, artists: ['a'] }, h.deps);
     await planDistroKidReleaseChunks({ ...REF }, h.deps);
@@ -203,7 +203,7 @@ describe('LOAD: 1,200 tracks / 300 releases', () => {
     const { status, completeness } = reconcile({ expectedReleaseIds: index(RELEASES).map((r) => r.releaseId), outcomes });
     expect(status).toBe('FAILED_SCHEMA_CHANGED'); // loud, not silent partial data
     expect(completeness.completedReleases).toBe(RELEASES - 1);
-    // The other 299 releases still produced clean data — a drift doesn't corrupt the rest.
+    // The other 299 releases still produced clean data, a drift doesn't corrupt the rest.
     expect(completeness.extractedTracks).toBe((RELEASES - 1) * TRACKS_PER_RELEASE);
   }, 30_000);
 

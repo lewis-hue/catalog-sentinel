@@ -20,7 +20,7 @@ import { DistributorLinkService } from './distributor-link';
 import { createGracefulShutdown } from './graceful-shutdown';
 
 // Centralized startup validation (Phase 2): hosted-credential-form hard block,
-// provider-enable gates, live-scanner legal-review gate, and — in production —
+// provider-enable gates, live-scanner legal-review gate, and, in production -
 // required encryption key + DATABASE_URL + REDIS_URL. Fails fast on unsafe config.
 const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? '0.0.0.0';

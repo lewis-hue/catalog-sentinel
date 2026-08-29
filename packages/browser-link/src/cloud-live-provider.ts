@@ -183,7 +183,7 @@ export class CloudLiveBrowserProvider implements BrowserLinkProvider {
   async attachAutomation(sessionId: string): Promise<AutomationConnection> {
     const s = this.require(sessionId);
     // The CDP link can drop while the user is logging in (idle/close). Reconnect to
-    // the SAME remote session — the login cookies persist server-side — so the
+    // the SAME remote session, the login cookies persist server-side, so the
     // catalogue read still works.
     if (!s.browser.isConnected()) {
       s.browser = await this.connectSafe(s.cdpUrl);
@@ -204,7 +204,7 @@ export class CloudLiveBrowserProvider implements BrowserLinkProvider {
   // --- Cross-process handoff (durable catalogue-read worker) -----------------
   // Steel cloud sessions are addressable by their REMOTE id from ANY process/container. So
   // after the user logs in on the API, a separate worker can re-attach to the SAME logged-in
-  // browser (same session, same IP — no re-login) by remote id and do the long catalogue read
+  // browser (same session, same IP, no re-login) by remote id and do the long catalogue read
   // durably. The API hands off the remote id, detaches its local CDP handle WITHOUT releasing
   // the session, and the worker attaches, reads, then releases.
 
@@ -335,7 +335,7 @@ export class CloudLiveBrowserProvider implements BrowserLinkProvider {
     if (!s) return;
     this.sessions.delete(sessionId);
     try {
-      // Release the REMOTE session FIRST — a cheap REST call that frees cloud credits and
+      // Release the REMOTE session FIRST, a cheap REST call that frees cloud credits and
       // ends the session server-side. This is the part that must happen, so its failure must
       // reach the caller: durable cancellation code then restores the encrypted handoff for a
       // retry instead of falsely reporting that Steel termination succeeded.

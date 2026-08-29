@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { BrowserContext, Request, Route } from 'playwright';
 import { installReadOnlyGuard, shouldBlockRequest } from './read-only-guard';
 
-describe('read-only guard — the "cannot edit/delete/add" guarantee', () => {
+describe('read-only guard, the "cannot edit/delete/add" guarantee', () => {
   it('never blocks read (GET/HEAD) requests', () => {
     expect(shouldBlockRequest('GET', 'https://distrokid.com/mymusic', true)).toBe(false);
     expect(shouldBlockRequest('GET', 'https://distrokid.com/api/release/delete', true)).toBe(false);
@@ -27,10 +27,30 @@ describe('read-only guard — the "cannot edit/delete/add" guarantee', () => {
     expect(shouldBlockRequest('POST', 'https://distrokid.com/auth/release/update', true)).toBe(true);
   });
 
-  it('fails closed on opaque non-idempotent endpoints during extraction', () => {
+  it('blocks PUT/PATCH/DELETE during extraction (mutations by HTTP semantics), catalogue reads never use them', () => {
+    for (const m of ['PUT', 'PATCH', 'DELETE']) {
+      expect(shouldBlockRequest(m, 'https://distrokid.com/api/action', true)).toBe(true);
+      expect(shouldBlockRequest(m, 'https://distrokid.com/api/catalog/list', true)).toBe(true);
+    }
+  });
+
+  it('ALLOWS read POSTs during extraction, SPAs load catalogue data via POST, and observing them changes nothing', () => {
+    // This is the fix for a total-extraction-failure: a blanket POST block starved the network
+    // capture (every DistroKid release timed out with 0 tracks). A read POST to a non-mutation
+    // path is a data fetch, not a state change.
+    expect(shouldBlockRequest('POST', 'https://api.audiomack.com/v1/search', true)).toBe(false);
+    expect(shouldBlockRequest('POST', 'https://distrokid.com/api/albums/list', true)).toBe(false);
+    expect(shouldBlockRequest('POST', 'https://distrokid.com/mymusic/data', true)).toBe(false);
+  });
+
+  it('STILL blocks mutation-shaped POSTs during extraction', () => {
+    expect(shouldBlockRequest('POST', 'https://distrokid.com/api/release/delete', true)).toBe(true);
+    expect(shouldBlockRequest('POST', 'https://distrokid.com/api/stores/add', true)).toBe(true);
+    expect(shouldBlockRequest('POST', 'https://distrokid.com/release/123/takedown', true)).toBe(true);
+  });
+
+  it('a bodyless GraphQL POST cannot be proven a read, so it is blocked', () => {
     expect(shouldBlockRequest('POST', 'https://distrokid.com/graphql', true)).toBe(true);
-    expect(shouldBlockRequest('POST', 'https://api.audiomack.com/v1/search', true)).toBe(true);
-    expect(shouldBlockRequest('PATCH', 'https://distrokid.com/api/action', true)).toBe(true);
   });
 
   it('allows only explicitly recognizable GraphQL reads, never mutations', () => {

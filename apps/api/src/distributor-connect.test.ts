@@ -12,6 +12,7 @@ import {
   DistributorConnect,
   InMemoryConnectSessionRegistry,
   RedisConnectSessionRegistry,
+  sessionReuseEnabled,
   type ConnectSessionRedis,
   type DistributorConnectProviderFactory,
 } from './distributor-connect';
@@ -569,6 +570,61 @@ describe('DistributorConnect Steel-only flow', () => {
     expect(recovered).toHaveLength(1);
     expect(await registry.claimState(first.claim)).toBe('lost');
     expect(await registry.claimState(recovered[0]!)).toBe('active');
+  });
+
+  it('sessionReuseEnabled reads DISTRIBUTOR_SESSION_REUSE (default off)', () => {
+    expect(sessionReuseEnabled({})).toBe(false);
+    expect(sessionReuseEnabled({ DISTRIBUTOR_SESSION_REUSE: 'true' })).toBe(true);
+    expect(sessionReuseEnabled({ DISTRIBUTOR_SESSION_REUSE: '1' })).toBe(true);
+    expect(sessionReuseEnabled({ DISTRIBUTOR_SESSION_REUSE: 'off' })).toBe(false);
+  });
+
+  it('warm reuse ON: re-confirms a handed-off session and adopts a FRESH search, reusing the same Steel session', async () => {
+    const now = Date.now();
+    const registry = new InMemoryConnectSessionRegistry(() => now, true);
+    await registry.put('warm-1', {
+      tenantId: 'tenant-1', ownerUserId: 'alice', artists: ['Artist'], distributor: 'distrokid',
+      steelSessionId: 'remote-1', consentId: 'consent-1', artistWorkspaceId: 'workspace-1',
+      expiresAt: new Date(now + 60_000).toISOString(),
+    });
+    const first = await registry.claim('warm-1', ALICE, 'confirm', 1_000, { searchId: 'search-1', createdAt: new Date(now).toISOString() });
+    if (first.status !== 'claimed') throw new Error('expected first claim');
+    expect(await registry.ack(first.claim)).toBe(true);
+    // Rescan: a NEW confirm claim succeeds (not one-shot) and adopts the new searchId.
+    const second = await registry.claim('warm-1', ALICE, 'confirm', 1_000, { searchId: 'search-2', createdAt: new Date(now).toISOString() });
+    if (second.status !== 'claimed') throw new Error('expected warm reuse claim');
+    expect(second.claim.session.steelSessionId).toBe('remote-1');
+    expect(second.claim.confirmation?.searchId).toBe('search-2');
+  });
+
+  it('warm reuse OFF (default): a handed-off session stays one-shot (not-found on re-confirm)', async () => {
+    const now = Date.now();
+    const registry = new InMemoryConnectSessionRegistry(() => now);
+    await registry.put('once-1', {
+      tenantId: 'tenant-1', ownerUserId: 'alice', artists: ['Artist'], distributor: 'distrokid',
+      steelSessionId: 'remote-1', consentId: 'consent-1', artistWorkspaceId: 'workspace-1',
+      expiresAt: new Date(now + 60_000).toISOString(),
+    });
+    const first = await registry.claim('once-1', ALICE, 'confirm', 1_000, { searchId: 'search-1', createdAt: new Date(now).toISOString() });
+    if (first.status !== 'claimed') throw new Error('expected first claim');
+    expect(await registry.ack(first.claim)).toBe(true);
+    const second = await registry.claim('once-1', ALICE, 'confirm', 1_000, { searchId: 'search-2', createdAt: new Date(now).toISOString() });
+    expect(second.status).toBe('not-found');
+  });
+
+  it('warm reuse still enforces ownership: a different principal cannot reuse a handed-off session', async () => {
+    const now = Date.now();
+    const registry = new InMemoryConnectSessionRegistry(() => now, true);
+    await registry.put('warm-2', {
+      tenantId: 'tenant-1', ownerUserId: 'alice', artists: ['Artist'], distributor: 'distrokid',
+      steelSessionId: 'remote-1', consentId: 'consent-1', artistWorkspaceId: 'workspace-1',
+      expiresAt: new Date(now + 60_000).toISOString(),
+    });
+    const first = await registry.claim('warm-2', ALICE, 'confirm', 1_000, { searchId: 'search-1', createdAt: new Date(now).toISOString() });
+    if (first.status !== 'claimed') throw new Error('expected first claim');
+    await registry.ack(first.claim);
+    const second = await registry.claim('warm-2', BOB, 'confirm', 1_000, { searchId: 'search-2', createdAt: new Date(now).toISOString() });
+    expect(second.status).toBe('ownership-mismatch');
   });
 
   it('reclaims an abandoned cancellation and releases Steel after its visibility window', async () => {

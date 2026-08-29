@@ -26,7 +26,7 @@ export type SteelStatusCode =
   | 'READY' // Steel reachable → real live login available
   | 'DISABLED' // Steel intentionally off
   | 'UNREACHABLE' // configured but the API can't be reached
-  | 'UNSUPPORTED_LOCAL_ENV' // self_hosted on Windows/WSL2 — Chromium can't launch here
+  | 'UNSUPPORTED_LOCAL_ENV' // self_hosted on Windows/WSL2, Chromium can't launch here
   | 'MISCONFIGURED'; // cloud without STEEL_API_KEY, or external/self_hosted without STEEL_API_URL
 
 /** How distributor login behaves given the current Steel status. */
@@ -114,7 +114,7 @@ export function redactUrl(url: string | undefined): string | null {
     const u = new URL(url.trim());
     return `${u.protocol}//${u.host}`;
   } catch {
-    // Not a full URL — strip anything after the host-ish token, never echo raw creds.
+    // Not a full URL, strip anything after the host-ish token, never echo raw creds.
     return url.replace(/:\/\/[^@/\s]+@/, '://***@').split(/[/?#]/)[0] ?? null;
   }
 }
@@ -215,7 +215,7 @@ export async function probeSteelHealth(env: EnvLike, deps: ProbeDeps = {}): Prom
     };
   }
 
-  // cloud — Steel's hosted service (steel.dev). Needs an API key, not an API URL; runs on
+  // cloud, Steel's hosted service (steel.dev). Needs an API key, not an API URL; runs on
   // Steel's infra so it is NOT affected by the local WSL2 Chromium limitation.
   if (mode === 'cloud') {
     const cloudBase = env.STEEL_API_URL && env.STEEL_API_URL.trim() ? env.STEEL_API_URL.trim() : STEEL_CLOUD_BASE;

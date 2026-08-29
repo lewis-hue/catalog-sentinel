@@ -1,6 +1,10 @@
 import {
+  DISTROKID_CATALOG_INDEX_ERROR_CODES,
+  DistroKidCatalogIndexError,
+  distroKidCatalogIndexErrorCodeFromMessage,
   reconcile, retryableReleaseIds, describeCompleteness, releaseNeedsMetadataRetry,
   mergeCanonicalRelease,
+  type DistroKidCatalogIndexErrorCode,
   type ReleaseExtractionOutcome,
 } from '@sentinel/browser-assist';
 import type { SnapshotStatus, ExtractionCompleteness } from '@sentinel/contracts';
@@ -14,7 +18,7 @@ import { backoffWithJitter, startLockHeartbeat, type HeldLock } from './locks';
  *
  * Sized for the worst legitimate case: a 1000-release catalogue is 50 chunks, each serialized on
  * one account. Deferring with jittered backoff capped at 30s, a chunk at the back of that queue
- * waits a long time — so this is high. It is a stuck-holder backstop, not a tuning knob.
+ * waits a long time, so this is high. It is a stuck-holder backstop, not a tuning knob.
  */
 /** Legacy backstop for rolling-upgrade jobs which pre-date the mandatory wall-clock deadline. */
 export const MAX_CHUNK_DEFERS = 200;
@@ -23,7 +27,7 @@ export const MAX_CHUNK_DEFERS = 200;
 export const INITIAL_PASS = 1;
 
 /**
- * DistroKid extraction pipeline — chunked by RELEASE, resumable, retry-failed-only.
+ * DistroKid extraction pipeline, chunked by RELEASE, resumable, retry-failed-only.
  *
  *   extract-catalog-index → plan-release-chunks → extract-release-chunk (xN)
  *        → retry-failed-releases → reconcile-snapshot → finalize-snapshot
@@ -32,7 +36,7 @@ export const INITIAL_PASS = 1;
  * list in a single metadata response. Enqueuing per-track would multiply browser work for no
  * gain. Chunking bounds memory, gives us checkpoints, and lets a crash resume mid-catalogue.
  *
- * The job payloads and ids live in `@sentinel/contracts` — the API must be able to enqueue stage 1
+ * The job payloads and ids live in `@sentinel/contracts`, the API must be able to enqueue stage 1
  * without importing this application. Re-exported here so worker-internal imports stay short.
  */
 
@@ -121,13 +125,13 @@ function reconcileCheckpoint(index: ReleaseRefRecord[], outcomes: ReleaseExtract
 }
 
 /**
- * Carry a snapshot's identity — INCLUDING the authenticated session handle — to the next stage.
+ * Carry a snapshot's identity, INCLUDING the authenticated session handle, to the next stage.
  *
  * Every stage transition previously rebuilt this object field-by-field, and the chunk→reconcile
  * and retry→reconcile hops simply forgot `steelSessionId`. Reconcile then created the retry job
  * from that reduced object, so retry chunks had no session, `attach()` returned null, and every
- * retried release failed `REAUTH_REQUIRED`. The failed-release retry path — a core acceptance
- * criterion — could therefore never succeed.
+ * retried release failed `REAUTH_REQUIRED`. The failed-release retry path, a core acceptance
+ * criterion, could therefore never succeed.
  *
  * Using one helper everywhere means a stage cannot drop the handle by omission. That is the whole
  * point: the bug was silent because nothing forced the field to be mentioned.
@@ -213,6 +217,84 @@ export class PipelineShutdownError extends Error {
     super('PIPELINE_SHUTDOWN_RETRY: DistroKid pipeline worker is shutting down');
     this.name = 'PipelineShutdownError';
   }
+}
+
+const PIPELINE_TERMINAL_FAILURE_CODES = [
+  'PIPELINE_DEADLINE_EXCEEDED',
+  'PIPELINE_CONFIGURATION_INVALID',
+  'ACCOUNT_LOCK_UNAVAILABLE',
+  'ACCOUNT_LOCK_LOST',
+  'STAGE_TIMEOUT',
+  'CATALOG_INDEX_FAILED',
+  'PIPELINE_STAGE_FAILED',
+] as const;
+
+type PipelineTerminalFailureCode = (typeof PIPELINE_TERMINAL_FAILURE_CODES)[number];
+
+/**
+ * The only terminal infrastructure/browser categories allowed into customer-visible
+ * completeness. Exception messages are operational diagnostics and may contain provider data;
+ * they must never become durable keys or values.
+ */
+export const DISTROKID_TERMINAL_FAILURE_CODES = [
+  ...DISTROKID_CATALOG_INDEX_ERROR_CODES,
+  ...PIPELINE_TERMINAL_FAILURE_CODES,
+] as const;
+
+export type DistroKidTerminalFailureCode =
+  | DistroKidCatalogIndexErrorCode
+  | PipelineTerminalFailureCode;
+
+class RecoveredDistroKidTerminalError extends Error {
+  constructor(readonly failureCode: DistroKidTerminalFailureCode) {
+    super(`[DISTROKID_PIPELINE_FAILURE:${failureCode}] recovered from the durable failed-job ledger`);
+    this.name = 'RecoveredDistroKidTerminalError';
+  }
+}
+
+const isCatalogIndexStage = (stage: string): boolean =>
+  stage === 'distrokid-catalog-index' || /(?:^|[-_ ])catalog[-_ ]?index(?:$|[-_ ])/i.test(stage);
+
+/**
+ * Reduce an arbitrary exception to one stable, allowlisted code.
+ *
+ * Typed catalog-index failures are preferred. The message parser exists for BullMQ recovery:
+ * custom Error properties do not survive in `failedReason`, while the browser boundary embeds
+ * only its allowlisted code in a controlled prefix. Remaining message checks produce fixed
+ * categories and never return the matched text.
+ */
+export function classifyDistroKidTerminalFailure(
+  stage: string,
+  error: Error,
+): DistroKidTerminalFailureCode {
+  if (error instanceof RecoveredDistroKidTerminalError) return error.failureCode;
+  if (error instanceof DistroKidCatalogIndexError) return error.code;
+  const recoveredCatalogCode = distroKidCatalogIndexErrorCodeFromMessage(error.message);
+  if (recoveredCatalogCode) return recoveredCatalogCode;
+  if (error instanceof PipelineDeadlineExceededError) return 'PIPELINE_DEADLINE_EXCEEDED';
+  if (error instanceof InvalidPipelineDeadlineError) return 'PIPELINE_CONFIGURATION_INVALID';
+  if (error instanceof AccountLockUnavailableError) return 'ACCOUNT_LOCK_UNAVAILABLE';
+  if (error instanceof LockLostError) return 'ACCOUNT_LOCK_LOST';
+
+  // These are deliberately narrow compatibility checks for errors raised outside the typed
+  // catalog reader (for example, failure to re-attach the authenticated Steel session).
+  if (/(?:no authenticated distributor session|authentication (?:is )?required|authentication expired)/i.test(error.message)) {
+    return 'AUTHENTICATION_REQUIRED';
+  }
+  if (/(?:timed out|timeout)/i.test(error.message)) return 'STAGE_TIMEOUT';
+  return isCatalogIndexStage(stage) ? 'CATALOG_INDEX_FAILED' : 'PIPELINE_STAGE_FAILED';
+}
+
+/**
+ * Rehydrate a BullMQ `failedReason` without carrying its arbitrary text into terminal hooks,
+ * logs, tombstones, or the public snapshot. Only an allowlisted classification survives.
+ */
+export function sanitizeRecoveredDistroKidFailure(
+  stage: string,
+  failedReason: unknown,
+): Error {
+  const transient = new Error(typeof failedReason === 'string' ? failedReason : '');
+  return new RecoveredDistroKidTerminalError(classifyDistroKidTerminalFailure(stage, transient));
 }
 
 const pipelineNow = (deps: PipelineDeps): number => deps.now?.() ?? Date.now();
@@ -326,7 +408,7 @@ async function underAccountLock<T>(
   }
 }
 
-/** 1. Read the catalog index — the authoritative expectation for completeness. */
+/** 1. Read the catalog index, the authoritative expectation for completeness. */
 export async function extractDistroKidCatalogIndex(
   job: CatalogIndexJob,
   deps: PipelineDeps,
@@ -420,7 +502,7 @@ export async function extractDistroKidReleaseChunk(
     if (!job.deadlineAt && deferAttempt > MAX_CHUNK_DEFERS) {
       // Give up loudly instead of deferring for eternity: a lock this persistent means a stuck
       // holder, and a terminal failure is retryable by the operator. Silence is not.
-      deps.log?.('chunk abandoned — account lock held across every defer', { snapshotId: job.snapshotId, chunkIndex: job.chunkIndex, deferAttempt });
+      deps.log?.('chunk abandoned, account lock held across every defer', { snapshotId: job.snapshotId, chunkIndex: job.chunkIndex, deferAttempt });
       throw new Error(`chunk ${job.chunkIndex} could not acquire the account lock after ${MAX_CHUNK_DEFERS} attempts`);
     }
     const delayMs = backoffWithJitter(deferAttempt, 500, 30_000);
@@ -428,7 +510,7 @@ export async function extractDistroKidReleaseChunk(
     if (deadline !== null && pipelineNow(deps) + delayMs >= deadline) {
       throw new PipelineDeadlineExceededError('account lock cannot be reacquired before the catalogue-read deadline');
     }
-    deps.log?.('chunk deferred — connection lock held', { snapshotId: job.snapshotId, chunkIndex: job.chunkIndex, deferAttempt, delayMs });
+    deps.log?.('chunk deferred, connection lock held', { snapshotId: job.snapshotId, chunkIndex: job.chunkIndex, deferAttempt, delayMs });
     await deps.enqueue.chunk({ ...job, deferAttempt }, { delayMs });
     return { completed: 0, failed: 0, deferred: true };
   }
@@ -527,7 +609,7 @@ export class LockLostError extends Error {
   }
 }
 
-/** 4. Retry FAILED releases only — never the whole catalogue. */
+/** 4. Retry FAILED releases only, never the whole catalogue. */
 export async function retryFailedDistroKidReleases(
   job: RetryFailedJob,
   deps: PipelineDeps,
@@ -588,7 +670,7 @@ export async function reconcileDistroKidSnapshot(
   assertPipelineDeadline(job, deps);
   // The pass comes from the JOB. It used to be a default parameter (`attempt = 1`) that the queue
   // worker had no way to supply, so every reconciliation across a queue hop believed it was pass 1
-  // and re-enqueued retry pass 2 — forever. That infinite loop was masked only by the id collision
+  // and re-enqueued retry pass 2, forever. That infinite loop was masked only by the id collision
   // that silently discarded the repeat, turning two bugs into one permanent hang.
   const pass = job.pass ?? INITIAL_PASS;
   const index = await deps.store.getIndex(job.snapshotId);
@@ -630,12 +712,20 @@ export async function terminalizeDistroKidFailure(
   const index = await deps.store.getIndex(job.snapshotId);
   const outcomes = await deps.store.getOutcomes(job.snapshotId);
   const { completeness } = reconcileCheckpoint(index, outcomes);
+  const failureCode = classifyDistroKidTerminalFailure(stage, error);
+  const terminalCompleteness: ExtractionCompleteness = {
+    ...completeness,
+    failureReasons: {
+      ...completeness.failureReasons,
+      [failureCode]: (completeness.failureReasons[failureCode] ?? 0) + 1,
+    },
+  };
   const finalJob: FinalizeJob = {
-    ...refOf(job), status: 'FAILED', completeness,
+    ...refOf(job), status: 'FAILED', completeness: terminalCompleteness,
     pass: 'pass' in job && typeof job.pass === 'number' ? job.pass : INITIAL_PASS,
   };
   const winning = await deps.store.claimTerminal(job.snapshotId, {
-    kind: 'TERMINAL', finalizeJob: finalJob, createdAt: nowIso(), reason: `${stage}:${error.name}`,
+    kind: 'TERMINAL', finalizeJob: finalJob, createdAt: nowIso(), reason: `${stage}:${failureCode}`,
   });
   if (winning.kind === 'TERMINAL') {
     if (winning.finalizeJob.status === 'FAILED') await deps.terminalFailure?.(job, stage, error);
@@ -677,7 +767,7 @@ export async function finalizeDistroKidSnapshot(job: FinalizeJob, deps: Pipeline
   if (!alreadyPersisted) {
     const outcomes = await deps.store.getOutcomes(finalJob.snapshotId);
     await deps.persistSnapshot(finalJob, outcomes);
-    // A snapshot must ALWAYS end with a recorded terminal status — upsert rather than skip, so a
+    // A snapshot must ALWAYS end with a recorded terminal status, upsert rather than skip, so a
     // missing progress row can never leave a finished snapshot looking like it's still running.
     // This checkpoint is deliberately written BEFORE releasing the remote session. If release
     // fails, BullMQ can retry just that cleanup without re-projecting the customer-facing record.

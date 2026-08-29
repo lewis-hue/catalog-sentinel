@@ -17,12 +17,12 @@ import { installReadOnlyGuard, type ReadOnlyGuard } from '../read-only-guard';
  * NETWORK-FIRST release extractor.
  *
  * Extraction hierarchy (in order; DOM is never primary):
- *   1. Official/approved distributor API        — not available for DistroKid
- *   2. Observed authenticated JSON response     — DEFAULT (passive capture)
- *   3. Authenticated request replay             — gated behind feature + legal flags
+ *   1. Official/approved distributor API       , not available for DistroKid
+ *   2. Observed authenticated JSON response    , DEFAULT (passive capture)
+ *   3. Authenticated request replay            , gated behind feature + legal flags
  *   4. Embedded page/hydration state
- *   5. DOM extraction with event-based waits    — FALLBACK ONLY
- *   6. User-uploaded CSV/export                 — handled elsewhere
+ *   5. DOM extraction with event-based waits   , FALLBACK ONLY
+ *   6. User-uploaded CSV/export                , handled elsewhere
  *
  * The key inversion: listeners are installed BEFORE navigation and we wait for the metadata
  * RESPONSE, never for a component to render. No fixed sleeps are used for synchronization.
@@ -59,7 +59,7 @@ export interface ExtractorOptions {
   /** Observed release-details endpoint URL template for the gated direct reader. */
   directEndpointFor?: (releaseId: string) => string | undefined;
   candidateSink?: CandidateSink;
-  /** Tenant + scan each candidate is attributed to. REQUIRED with candidateSink — without it the
+  /** Tenant + scan each candidate is attributed to. REQUIRED with candidateSink, without it the
    *  sink is skipped (a scope is never inferred from shared mutable state). */
   candidateScope?: CandidateScope;
   /** Embedded hydration-state reader (tier 4). Runs in the page; returns a payload or null. */
@@ -93,7 +93,7 @@ export class NetworkFirstExtractor {
   ) {}
 
   /**
-   * Install capture. MUST be called before the first navigation — that's the whole point:
+   * Install capture. MUST be called before the first navigation, that's the whole point:
    * a response that arrives before we listen is lost, which is how metadata went missing.
    */
   async install(allowedReleaseIds: ReadonlySet<string> = new Set()): Promise<void> {
@@ -125,7 +125,7 @@ export class NetworkFirstExtractor {
       this.discovery!.setCurrentRelease(ref.releaseId);
       this.discovery!.resetCaptures();
       await this.page.goto(ref.dashboardUrl, { waitUntil: 'commit', timeout: this.opts.gotoTimeoutMs ?? 30_000 }).catch(() => undefined);
-      // Give the SPA's own requests a chance to land — bounded by a RESPONSE wait, not a sleep.
+      // Give the SPA's own requests a chance to land, bounded by a RESPONSE wait, not a sleep.
       await this.discovery!.waitForCatalogResponse(this.opts.responseTimeoutMs ?? 20_000, 1).catch(() => null);
     }
     const candidates = this.discovery!.report();
@@ -141,7 +141,7 @@ export class NetworkFirstExtractor {
   /**
    * PRODUCTION MODE: extract one release. Waits for the metadata RESPONSE, parses it through the
    * versioned registry, and only falls back down the hierarchy if no JSON was captured.
-   * Always returns a TERMINAL outcome — never a silent skip.
+   * Always returns a TERMINAL outcome, never a silent skip.
    */
   async extractRelease(ref: ReleaseRef): Promise<ReleaseExtractionOutcome> {
     const started = Date.now();
@@ -164,7 +164,7 @@ export class NetworkFirstExtractor {
       const policy = await this.releaseMatchPolicy(ref.releaseId);
 
       // Tier 2 (DEFAULT): passive capture. Navigate, then wait for the metadata RESPONSE the
-      // dashboard itself fetched — not the DOM. This is ALWAYS attempted first: enabling the
+      // dashboard itself fetched, not the DOM. This is ALWAYS attempted first: enabling the
       // direct-reader flags must not silently change the operational default to request replay.
       await this.page.goto(ref.dashboardUrl, { waitUntil: 'commit', timeout: this.opts.gotoTimeoutMs ?? 30_000 });
       if (!isAllowedDistributorUrl(this.page.url(), this.opts.origin)) {
@@ -179,7 +179,7 @@ export class NetworkFirstExtractor {
         if (parsed.ok) {
           // A single response may not carry every field (an endpoint BUNDLE). If the first
           // response has gaps, give a sibling endpoint a short, EVENT-DRIVEN window to land
-          // (not a fixed sleep) — otherwise we'd merge before the ISRC response arrives.
+          // (not a fixed sleep), otherwise we'd merge before the ISRC response arrives.
           if (hasGaps(parsed.release)) {
             await d.waitForDifferentEndpoint(hit.fingerprint, this.opts.bundleGraceMs ?? 2_000);
           }
@@ -196,7 +196,7 @@ export class NetworkFirstExtractor {
       }
 
       // Tier 3 (GATED, and only AFTER passive capture failed): authenticated request replay.
-      // Requires both flags AND an explicit per-run selection — legal approval alone is not
+      // Requires both flags AND an explicit per-run selection, legal approval alone is not
       // consent to change the default. The selection is recorded for the audit trail.
       if (this.direct && !this.direct.isHalted && this.opts.directReplayPolicy === 'after-passive-timeout') {
         const url = this.opts.directEndpointFor?.(ref.releaseId);
@@ -230,7 +230,7 @@ export class NetworkFirstExtractor {
    * satisfy the first question and be parsed as the wrong release.
    *
    * So: constrain to ACTIVE profiles for the release-data roles and correlate the response to
-   * this release id. The heuristic stays available only where it's still the right tool —
+   * this release id. The heuristic stays available only where it's still the right tool -
    * nothing is ACTIVE yet (bootstrap/discovery), or the profile is DEGRADED by schema drift and
    * refusing to fall back would strand every extraction.
    */
@@ -243,12 +243,12 @@ export class NetworkFirstExtractor {
 
     // ONLY genuinely ACTIVE profiles may constrain. `registry.activeFor()` deliberately falls
     // back to VALIDATING/CANDIDATE for "what should we try?", but a candidate is an unproven
-    // guess — treating it as authoritative here would let one lucky-looking payload lock out
+    // guess, treating it as authoritative here would let one lucky-looking payload lock out
     // the real endpoint before it was ever validated.
     const activeFingerprints = profiles.filter((p) => p.status === 'ACTIVE').map((p) => p.fingerprint);
 
     // A DEGRADED profile means the source schema moved under us. Refusing the heuristic there
-    // would turn one schema change into a total outage, so allow it — the drift alert already
+    // would turn one schema change into a total outage, so allow it, the drift alert already
     // fired, and the versioned parser still guards correctness.
     const anyDegraded = profiles.some((p) => p.status === 'DEGRADED');
 
@@ -285,7 +285,7 @@ export class NetworkFirstExtractor {
    * Merge gaps from EVERY other catalog payload captured during this navigation.
    *
    * A dashboard may split a release across endpoints (details here, ISRCs there, artwork
-   * elsewhere), so we cannot rely on the single highest-scoring response — the identifiers
+   * elsewhere), so we cannot rely on the single highest-scoring response, the identifiers
    * endpoint often scores LOWER than the details endpoint yet holds the ISRCs we need.
    */
   private mergeFromOtherCaptures(release: CanonicalDistributorRelease, usedFingerprint: string, expectedReleaseId: string): CanonicalDistributorRelease {
@@ -370,8 +370,22 @@ export class NetworkFirstExtractor {
     this.discovery?.dispose();
     await this.cdp?.dispose();
     if (this.readOnlyGuard) {
+      // Summarize DISTINCT blocked endpoints (method + sanitized path, no query values) with
+      // counts, rather than one line per attempt. If extraction ever fails while data-loading
+      // requests are being blocked, this is the line that names them, logged via console.warn so
+      // it survives the structured-log formatter that otherwise keeps only a few fields.
+      const byEndpoint = new Map<string, number>();
       for (const attempt of this.readOnlyGuard.blocked) {
-        this.opts.log?.('read-only guard blocked a mutation request', { ...attempt });
+        const key = `${attempt.method} ${attempt.url}`;
+        byEndpoint.set(key, (byEndpoint.get(key) ?? 0) + 1);
+      }
+      if (byEndpoint.size > 0) {
+        console.warn(JSON.stringify({
+          level: 'warn', msg: 'distrokid.readonly_guard.blocked_summary',
+          distinctEndpoints: byEndpoint.size,
+          totalBlocked: this.readOnlyGuard.blocked.length,
+          endpoints: [...byEndpoint.entries()].map(([endpoint, count]) => ({ endpoint, count })).slice(0, 40),
+        }));
       }
       await this.readOnlyGuard.dispose().catch(() => undefined);
     }
@@ -414,7 +428,7 @@ export function unresolvedOutcome(releaseId: string, reason: ReleaseFailureReaso
   return { kind: 'FAILED', distributorReleaseId: releaseId, reason, detail, elapsedMs: 0 };
 }
 
-/** Build a release whose fields are all NOT_CAPTURED — used when a release must be represented
+/** Build a release whose fields are all NOT_CAPTURED, used when a release must be represented
  *  in the catalog even though extraction failed (so "not captured" ≠ "missing"). */
 export function notCapturedRelease(ref: ReleaseRef, reason: ReleaseFailureReason, parserVersion: string): CanonicalDistributorRelease {
   const status = reason === 'TIMEOUT' ? 'TIMEOUT' : reason === 'REAUTH_REQUIRED' ? 'REAUTH_REQUIRED' : reason === 'NOT_AUTHORIZED' ? 'NOT_AUTHORIZED' : reason === 'PARSE_FAILED' || reason === 'SCHEMA_CHANGED' ? 'PARSE_FAILED' : 'NOT_CAPTURED';

@@ -36,7 +36,7 @@ export interface MatchOptions {
   /** Max duration delta (sec) still considered the same recording. */
   sameRecordingToleranceSec?: number;
   weights?: Partial<MatchWeights>;
-  /** Confirmed canonical artist profile id — mismatch flags WRONG_ARTIST_PROFILE. */
+  /** Confirmed canonical artist profile id, mismatch flags WRONG_ARTIST_PROFILE. */
   canonicalArtistProfileId?: string | null;
 }
 
@@ -68,12 +68,12 @@ function versionScore(a: string[], b: string[]): { value: number; mismatch: bool
   if (a.length === 0 && b.length === 0) return { value: 1, mismatch: false };
   if (setEq(a, b)) return { value: 1, mismatch: false };
   const overlap = overlapCoefficient(new Set(a), new Set(b));
-  // A remix vs an original are different recordings — treat divergence as a mismatch.
+  // A remix vs an original are different recordings, treat divergence as a mismatch.
   return { value: overlap === 0 ? 0 : 0.5, mismatch: true };
 }
 
 function durationScore(a: number | null | undefined, b: number | null | undefined, tol: number): number | null {
-  if (a == null || b == null) return null; // unknown — neutral, excluded from weighting
+  if (a == null || b == null) return null; // unknown, neutral, excluded from weighting
   const delta = Math.abs(a - b);
   if (delta <= tol) return 1;
   if (delta <= tol * 3) return 0.5;
@@ -94,14 +94,14 @@ export function scoreMatch(subject: NormalizedItem, candidate: NormalizedItem, o
   const artistOverlap = overlapCoefficient(new Set(subject.artistKeys), new Set(candidate.artistKeys));
   const artistMismatch = artistOverlap === 0;
 
-  // 1. ISRC exact — strongest possible signal.
+  // 1. ISRC exact, strongest possible signal.
   if (subject.isrc && candidate.isrc && subject.isrc === candidate.isrc) {
     signals.push({ name: 'isrc-exact', value: 1 });
     reasons.push('ISRC exact match');
     return { score: 1, band: 'confirmed', reasons, signals, artistMismatch, versionMismatch: false };
   }
 
-  // 2. Known platform id/url overlap — strongest when identifiers are absent.
+  // 2. Known platform id/url overlap, strongest when identifiers are absent.
   const subjIds = new Set(subject.externalIds ?? []);
   const idOverlap = (candidate.externalIds ?? []).some((x) => subjIds.has(x));
   if (idOverlap) {
@@ -136,7 +136,7 @@ export function scoreMatch(subject: NormalizedItem, candidate: NormalizedItem, o
   if (isrcConflict) {
     score = Math.min(score, 0.4); // conflicting ISRCs => not the same recording
     signals.push({ name: 'isrc-conflict', value: 0 });
-    reasons.push('Different ISRCs — distinct recordings');
+    reasons.push('Different ISRCs, distinct recordings');
   }
   if (ver.mismatch) {
     score = Math.min(score, 0.6); // remix/version divergence => different recording
@@ -182,7 +182,7 @@ export interface CatalogMatchResult {
 /**
  * Match one subject track against a whole DSP candidate catalog, returning the
  * ranked candidates and a decision. Nothing below the `strong` band is treated
- * as a confirmed match — those become manual-review tasks (PRD §E).
+ * as a confirmed match, those become manual-review tasks (PRD §E).
  */
 export function matchAgainstCatalog(
   subject: NormalizedItem,
@@ -215,7 +215,7 @@ export function matchAgainstCatalog(
     } else if (band === 'probable') {
       decision = 'review';
     } else if (artistMismatch && strongTitle) {
-      // Track clearly present, but under a different artist — a wrong-profile lead.
+      // Track clearly present, but under a different artist, a wrong-profile lead.
       decision = 'review';
       wrongProfileSuspected = true;
     } else {

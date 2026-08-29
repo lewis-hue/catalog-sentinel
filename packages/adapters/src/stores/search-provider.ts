@@ -1,9 +1,9 @@
 import type { FetchLike } from './types';
-import { createBraveSearch, createDuckDuckGoSearch, type SearchBackend, type SearchResult } from './web-search';
+import { createDuckDuckGoSearch, type SearchBackend, type SearchResult } from './web-search';
 
 const defaultFetch: FetchLike = (url, init) => fetch(url, init as RequestInit) as unknown as ReturnType<FetchLike>;
 
-export type SearchProviderName = 'searxng' | 'brave' | 'duckduckgo';
+export type SearchProviderName = 'duckduckgo' | 'serper';
 
 export interface SearchProviderHealth {
   provider: SearchProviderName;
@@ -17,9 +17,9 @@ export interface SearchProviderHealth {
 
 export interface SearchProviderCapabilities {
   provider: SearchProviderName;
-  /** Self-hosted (SearXNG) versus a third-party search API. */
+  /** Self-hosted versus a third-party search API (Serper is third-party). */
   selfHosted: boolean;
-  /** Best-effort evidence only — never a source of truth for platform presence. */
+  /** Best-effort evidence only, never a source of truth for platform presence. */
   authoritative: false;
   maxRps: number;
 }
@@ -46,9 +46,9 @@ export interface ResilienceOptions {
 /**
  * Wraps a raw search function with the compliant resilience the policy requires:
  *  - a per-provider rate limit (spacing, NOT evasion),
- *  - a circuit breaker (fail fast when upstream is unhealthy — never hammer it),
+ *  - a circuit breaker (fail fast when upstream is unhealthy, never hammer it),
  *  - an in-process TTL cache (dedupe queries and cut load).
- * A query that errors or trips the open breaker returns [] — callers treat an empty
+ * A query that errors or trips the open breaker returns [], callers treat an empty
  * result as UNVERIFIABLE, never a confirmed "missing". No proxy/Tor/anti-bot logic.
  */
 export class ResilientSearchProvider implements SearchProvider {
@@ -81,7 +81,7 @@ export class ResilientSearchProvider implements SearchProvider {
 
   async search(query: string): Promise<SearchResult[]> {
     const now = this.now();
-    // Cache hit — no upstream call, no rate-limit spend.
+    // Cache hit, no upstream call, no rate-limit spend.
     if (this.cacheTtl > 0) {
       const hit = this.cache.get(query);
       if (hit && now - hit.at < this.cacheTtl) return hit.results;
@@ -89,10 +89,14 @@ export class ResilientSearchProvider implements SearchProvider {
     // Circuit breaker open → fail fast (return empty → UNVERIFIABLE downstream).
     if (this.breakerState() === 'open') return [];
 
-    // Rate limit: space calls out (compliant spacing, not evasion).
-    const wait = Math.max(0, this.nextAllowedAt - now);
+    // Rate limit: reserve the next slot ATOMICALLY (the read-then-write below has no `await`
+    // between it, so it's indivisible in JS's single thread). Concurrent callers each grab a
+    // DISTINCT slot spaced by minInterval instead of all reading the same `nextAllowedAt` and
+    // bursting — which is what lets the caller parallelize tracks without exceeding the rate.
+    const slot = Math.max(now, this.nextAllowedAt);
+    this.nextAllowedAt = slot + this.minInterval;
+    const wait = slot - now;
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    this.nextAllowedAt = this.now() + this.minInterval;
 
     this.lastCheckedAt = new Date(this.now()).toISOString();
     try {
@@ -127,22 +131,29 @@ export class ResilientSearchProvider implements SearchProvider {
 }
 
 /**
- * SearXNG JSON search backend — self-hosted metasearch. Calls the INTERNAL SearXNG
- * endpoint (`${url}/search?format=json`). Best-effort evidence only. No Tor/proxy/anti-bot
- * logic — if SearXNG is rate-limited or blocked upstream, we back off and return [].
+ * Serper.dev search backend, a hosted Google SERP API (real results, honors `site:`, no
+ * proxy/CAPTCHA fight). The reliable, scalable web-verification path for large/obscure catalogues.
+ * POST {q} with an X-API-KEY header; a non-2xx
+ * (quota/invalid key) throws so the circuit breaker + UNVERIFIABLE-downstream behaviour kick in.
  */
-export function createSearxngSearch(searxngUrl: string, fetchImpl: FetchLike = defaultFetch, opts: { timeoutMs?: number } = {}): (query: string) => Promise<SearchResult[]> {
-  const base = searxngUrl.replace(/\/+$/, '');
+export function createSerperSearch(apiKey: string, fetchImpl: FetchLike = defaultFetch, opts: { timeoutMs?: number; endpoint?: string; gl?: string; hl?: string; num?: number } = {}): (query: string) => Promise<SearchResult[]> {
+  // `||` not `??`: an empty-string endpoint (e.g. SERPER_ENDPOINT="" from a compose `${VAR:-}`
+  // passthrough) must fall back to the default, or fetch('') throws "Failed to parse URL from ".
+  const endpoint = opts.endpoint || 'https://google.serper.dev/search';
   const timeoutMs = opts.timeoutMs ?? 8000;
   return async (query: string) => {
-    const url = `${base}/search?q=${encodeURIComponent(query)}&format=json&safesearch=0&categories=general`;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
-      const resp = await fetchImpl(url, { headers: { Accept: 'application/json' }, ...(controller ? { signal: controller.signal } : {}) } as Parameters<FetchLike>[1]);
-      if (!resp.ok) throw new Error(`SearXNG ${resp.status}`);
-      const data = (await resp.json()) as { results?: Array<{ url?: string; title?: string; content?: string }> };
-      return (data.results ?? []).filter((r) => r.url).map((r) => ({ url: r.url!, title: r.title ?? '', description: r.content ?? '' }));
+      const resp = await fetchImpl(endpoint, {
+        method: 'POST',
+        headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: query, num: opts.num ?? 10, gl: opts.gl ?? 'us', hl: opts.hl ?? 'en' }),
+        ...(controller ? { signal: controller.signal } : {}),
+      } as Parameters<FetchLike>[1]);
+      if (!resp.ok) throw new Error(`Serper ${resp.status}`);
+      const data = (await resp.json()) as { organic?: Array<{ link?: string; title?: string; snippet?: string }> };
+      return (data.organic ?? []).filter((r) => r.link).map((r) => ({ url: r.link!, title: r.title ?? '', description: r.snippet ?? '' }));
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -153,33 +164,28 @@ export interface SearchProviderConfig {
   // Index signature so NodeJS.ProcessEnv is directly assignable (avoids TS weak-type error).
   [key: string]: string | undefined;
   SEARCH_PROVIDER?: string;
-  SEARXNG_URL?: string;
-  SEARXNG_TIMEOUT_MS?: string;
-  SEARXNG_MAX_RPS?: string;
-  SEARXNG_CACHE_TTL_SECONDS?: string;
-  SEARXNG_CIRCUIT_BREAKER_FAILURE_THRESHOLD?: string;
-  SEARXNG_CIRCUIT_BREAKER_RESET_SECONDS?: string;
-  BRAVE_SEARCH_API_KEY?: string;
-  BRAVE_MAX_RPS?: string;
-  ENABLE_SEARXNG_PROVIDER?: string;
-  ENABLE_BRAVE_PROVIDER?: string;
   ENABLE_WEB_SEARCH_STORES?: string;
+  // Serper.dev (hosted SERP API), the reliable web-verification backend for scale.
+  SERPER_API_KEY?: string;
+  SERPER_ENDPOINT?: string;
+  SERPER_NUM?: string;
+  SERPER_TIMEOUT_MS?: string;
+  SERPER_MAX_RPS?: string;
+  SERPER_CACHE_TTL_SECONDS?: string;
+  SERPER_CIRCUIT_BREAKER_FAILURE_THRESHOLD?: string;
+  SERPER_CIRCUIT_BREAKER_RESET_SECONDS?: string;
 }
 
-const isOn = (v: string | undefined, dflt = false): boolean => (v == null || v === '' ? dflt : /^(1|true|yes|on)$/i.test(v));
-
 /**
- * Pick the search provider from config. Order of preference (compliant fallback):
- *   1. SearXNG (self-hosted) when SEARXNG_URL is set and enabled — the DEFAULT.
- *   2. Brave API when a key is set and enabled — optional fallback.
- *   3. null (web verification off) — the scan still runs on official APIs only.
- * SEARCH_PROVIDER pins an explicit real backend ('searxng' | 'brave' | 'duckduckgo').
- * Returns null when no web backend is available (callers must handle a null provider).
+ * Pick the search provider from config:
+ *   1. Serper (hosted Google SERP API) when SERPER_API_KEY is set, the production backend.
+ *   2. null (web verification off), the scan still runs on official APIs only.
+ * SEARCH_PROVIDER pins an explicit backend ('serper' | 'duckduckgo'); 'duckduckgo' is a keyless
+ * dev-only fallback (usually blocked from servers). Returns null when no web backend is available.
  */
 export function createSearchProvider(env: SearchProviderConfig = process.env as SearchProviderConfig, fetchImpl: FetchLike = defaultFetch): SearchProvider | null {
   const pinned = (env.SEARCH_PROVIDER ?? '').toLowerCase();
-  const searxngOn = isOn(env.ENABLE_SEARXNG_PROVIDER, true) && Boolean(env.SEARXNG_URL);
-  const braveOn = isOn(env.ENABLE_BRAVE_PROVIDER, false) ? Boolean(env.BRAVE_SEARCH_API_KEY) : Boolean(env.BRAVE_SEARCH_API_KEY);
+  const serperOn = Boolean(env.SERPER_API_KEY);
 
   const rpsToInterval = (rps?: string, dflt = 1100): number => {
     const n = Number(rps);
@@ -187,43 +193,45 @@ export function createSearchProvider(env: SearchProviderConfig = process.env as 
     const ms = 1000 / n;
     return ms < 1 ? 0 : Math.ceil(ms); // sub-ms spacing → no throttle (very high rps)
   };
-  const searxngRes: ResilienceOptions & { selfHosted?: boolean } = {
-    selfHosted: true,
-    minIntervalMs: rpsToInterval(env.SEARXNG_MAX_RPS, 500),
-    cacheTtlMs: (Number(env.SEARXNG_CACHE_TTL_SECONDS) || 300) * 1000,
-    failureThreshold: Number(env.SEARXNG_CIRCUIT_BREAKER_FAILURE_THRESHOLD) || 5,
-    breakerResetMs: (Number(env.SEARXNG_CIRCUIT_BREAKER_RESET_SECONDS) || 30) * 1000,
-  };
-  const searxng = (): SearchProvider =>
-    new ResilientSearchProvider('searxng', createSearxngSearch(env.SEARXNG_URL!, fetchImpl, { timeoutMs: Number(env.SEARXNG_TIMEOUT_MS) || 8000 }), searxngRes);
-  const brave = (): SearchProvider =>
-    new ResilientSearchProvider('brave', wrapNoThrow(createBraveSearch(env.BRAVE_SEARCH_API_KEY!, fetchImpl)), { minIntervalMs: rpsToInterval(env.BRAVE_MAX_RPS, 1100), cacheTtlMs: 300_000 });
 
-  if (pinned === 'searxng') return env.SEARXNG_URL ? searxng() : null;
-  if (pinned === 'brave') return env.BRAVE_SEARCH_API_KEY ? brave() : null;
+  // Serper handles its own proxy/CAPTCHA fleet, so we can drive it at a healthy rate.
+  const serperRes: ResilienceOptions & { selfHosted?: boolean } = {
+    selfHosted: false,
+    minIntervalMs: rpsToInterval(env.SERPER_MAX_RPS, 100), // ~10 rps default; raise for higher plans
+    cacheTtlMs: (Number(env.SERPER_CACHE_TTL_SECONDS) || 3600) * 1000,
+    failureThreshold: Number(env.SERPER_CIRCUIT_BREAKER_FAILURE_THRESHOLD) || 6,
+    breakerResetMs: (Number(env.SERPER_CIRCUIT_BREAKER_RESET_SECONDS) || 30) * 1000,
+  };
+  const serper = (): SearchProvider =>
+    new ResilientSearchProvider('serper', createSerperSearch(env.SERPER_API_KEY!, fetchImpl, {
+      timeoutMs: Number(env.SERPER_TIMEOUT_MS) || 8000,
+      endpoint: env.SERPER_ENDPOINT,
+      // Grouped `site: OR` queries fan across ~10 domains, so ask for more results per query to give
+      // each domain room to surface (Serper bills per query, not per result, up to 100).
+      num: Number(env.SERPER_NUM) || 30,
+    }), serperRes);
+
+  if (pinned === 'serper') return env.SERPER_API_KEY ? serper() : null;
   if (pinned === 'duckduckgo') return new ResilientSearchProvider('duckduckgo', wrapNoThrow(createDuckDuckGoSearch(fetchImpl)), { minIntervalMs: 1500, cacheTtlMs: 300_000 });
 
-  // Auto: SearXNG first (self-hosted default), then Brave, else none.
-  if (searxngOn) return searxng();
-  if (braveOn) return brave();
+  // Auto: use Serper (reliable, scalable) when a key is present; else official APIs only. A buyer
+  // supplies SERPER_API_KEY and web verification becomes reliable with no code change.
+  if (serperOn) return serper();
   return null;
 }
 
 /**
  * Fail fast on an explicitly-pinned-but-misconfigured search provider. Called at
  * startup. Only throws when SEARCH_PROVIDER names a backend whose required config is
- * missing — auto mode (unset) never throws (it degrades to official-APIs-only).
+ * missing, auto mode (unset) never throws (it degrades to official-APIs-only).
  */
 export function assertSearchProviderConfig(env: SearchProviderConfig = process.env as SearchProviderConfig): void {
   const pinned = (env.SEARCH_PROVIDER ?? '').toLowerCase();
-  if (pinned && !['searxng', 'brave', 'duckduckgo'].includes(pinned)) {
-    throw new Error('SEARCH_PROVIDER must be searxng, brave, or duckduckgo.');
+  if (pinned && !['duckduckgo', 'serper'].includes(pinned)) {
+    throw new Error('SEARCH_PROVIDER must be serper or duckduckgo.');
   }
-  if (pinned === 'searxng' && !env.SEARXNG_URL) {
-    throw new Error('SEARCH_PROVIDER=searxng but SEARXNG_URL is not set.');
-  }
-  if (pinned === 'brave' && !env.BRAVE_SEARCH_API_KEY) {
-    throw new Error('SEARCH_PROVIDER=brave but BRAVE_SEARCH_API_KEY is not set.');
+  if (pinned === 'serper' && !env.SERPER_API_KEY) {
+    throw new Error('SEARCH_PROVIDER=serper but SERPER_API_KEY is not set.');
   }
 }
 
@@ -232,8 +240,8 @@ export function searchBackendFrom(provider: SearchProvider): SearchBackend {
   return (query) => provider.search(query);
 }
 
-/** createBraveSearch/createDuckDuckGoSearch already swallow errors; wrap defensively so
- *  the breaker sees real throws (e.g. a future backend that rejects). */
+/** createDuckDuckGoSearch already swallows errors; wrap defensively so the breaker sees real
+ *  throws (e.g. a future backend that rejects). */
 function wrapNoThrow(backend: SearchBackend): (query: string) => Promise<SearchResult[]> {
   return async (query) => backend(query);
 }

@@ -66,7 +66,7 @@ export class TestBrowserLinkProvider implements BrowserLinkProvider {
       sessionId,
       status: expired ? 'EXPIRED' : s.status,
       expiresAt: s.expiresAt,
-      // Safe hint only — never exposes cookies/tokens.
+      // Safe hint only, never exposes cookies/tokens.
       loggedInHint: expired ? null : s.loggedIn,
     };
   }

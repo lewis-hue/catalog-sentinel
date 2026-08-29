@@ -99,7 +99,7 @@ export interface ArtistProfile extends Timestamps {
   isCanonical: boolean;
 }
 
-// --- Account connections (NEVER hold passwords — see CredentialReference) ----
+// --- Account connections (NEVER hold passwords, see CredentialReference) ----
 
 export interface DistributorAccount extends Timestamps {
   id: DistributorAccountId;
@@ -319,7 +319,7 @@ export interface IssueEvidence extends Timestamps {
   issueId: IssueId | null;
   snapshotId: CatalogSnapshotId | null;
   sourceMode: DataSourceMode;
-  /** e.g. "audiomack:artist-uploads" — a category, never a secret/token. */
+  /** e.g. "audiomack:artist-uploads", a category, never a secret/token. */
   sourceEndpointCategory: string;
   scannedAt: IsoTimestamp;
   normalizedMetadata: Record<string, unknown>;
@@ -384,7 +384,7 @@ export interface AuditLog extends Timestamps {
   action: string;
   targetType: string;
   targetId: string | null;
-  /** Redacted metadata only — never secrets or PII. */
+  /** Redacted metadata only, never secrets or PII. */
   metadata: Record<string, unknown>;
 }
 
@@ -393,7 +393,7 @@ export interface ConsentGrant extends Timestamps {
   workspaceId: WorkspaceId;
   grantedByUserId: UserId;
   scopes: ConsentScope[];
-  /** What data is accessed, why, and retention — shown to the user at grant. */
+  /** What data is accessed, why, and retention, shown to the user at grant. */
   purpose: string;
   retentionDays: number;
   grantedAt: IsoTimestamp;

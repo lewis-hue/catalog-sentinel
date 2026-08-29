@@ -169,7 +169,7 @@ describe('field status + identifier modeling', () => {
   });
 
   it('never renders a not-captured field as "Missing"', () => {
-    expect(explainField(notCaptured<string>('TIMEOUT', 'NETWORK_JSON', 'v1'), 'ISRC')).toBe('ISRC: not captured — distributor metadata request timed out');
+    expect(explainField(notCaptured<string>('TIMEOUT', 'NETWORK_JSON', 'v1'), 'ISRC')).toBe('ISRC: not captured, distributor metadata request timed out');
     expect(explainField(absentAtSource<string>('NETWORK_JSON', 'v1'), 'ISRC')).toBe('ISRC: none at distributor');
     expect(explainField(present('QT6ED2521965', 'NETWORK_JSON', 'v1'), 'ISRC')).toBe('ISRC: QT6ED2521965');
   });
@@ -293,7 +293,7 @@ describe('parser registry (schema drift → alert, never silent partial data)', 
     if (out.ok) expect(out.parserVersion).toBe(PARSER_VERSION);
   });
 
-  it('raises SOURCE_SCHEMA_CHANGED when no variant matches — it does not guess', () => {
+  it('raises SOURCE_SCHEMA_CHANGED when no variant matches, it does not guess', () => {
     const alerts: string[] = [];
     const reg = new ParserRegistry(undefined, (a) => alerts.push(a.code));
     const out = reg.parse({ totally: 'different', shape: [1, 2, 3] });
@@ -505,7 +505,7 @@ describe('completeness reconciliation', () => {
     expect(completeness.unresolvedReleaseIds).toEqual(['B']);
   });
 
-  it('source gaps are COMPLETE_WITH_SOURCE_GAPS — not our failure', () => {
+  it('source gaps are COMPLETE_WITH_SOURCE_GAPS, not our failure', () => {
     const { status } = reconcile({ expectedReleaseIds: ['A'], outcomes: [done(rel('A', 'ABSENT_AT_SOURCE', ['ABSENT_AT_SOURCE']))] });
     expect(status).toBe('COMPLETE_WITH_SOURCE_GAPS');
   });
@@ -558,7 +558,7 @@ describe('completeness reconciliation', () => {
     expect(reconcile({ expectedReleaseIds: ['A'], outcomes: [{ kind: 'FAILED', distributorReleaseId: 'A', reason: 'REAUTH_REQUIRED', detail: 'x', elapsedMs: 1 }] }).status).toBe('PARTIAL_REAUTH_REQUIRED');
   });
 
-  it('retries FAILED + unresolved releases only — never the whole catalogue', () => {
+  it('retries FAILED + unresolved releases only, never the whole catalogue', () => {
     const ids = retryableReleaseIds({
       expectedReleaseIds: ['OK', 'TIMEDOUT', 'NEVER_ATTEMPTED', 'FORBIDDEN'],
       outcomes: [

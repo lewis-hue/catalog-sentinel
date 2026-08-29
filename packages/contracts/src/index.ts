@@ -1,5 +1,5 @@
 /**
- * @sentinel/contracts — wire formats shared between applications.
+ * @sentinel/contracts, wire formats shared between applications.
  *
  * Dependency rule: this package imports NOTHING from `apps/*` and nothing heavy (no browser, no
  * queue driver, no database client). If you find yourself needing one of those here, the type

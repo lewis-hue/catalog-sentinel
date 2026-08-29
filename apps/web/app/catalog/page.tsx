@@ -1,8 +1,8 @@
 import { Suspense } from 'react';
 import { CatalogOps } from './CatalogOps';
 
-export const metadata = { title: 'Catalog — Catalog Sentinel' };
-// Data-driven — render at request time so the table reflects the latest saved audit.
+export const metadata = { title: 'Catalog, Catalog Sentinel' };
+// Data-driven, render at request time so the table reflects the latest saved audit.
 export const dynamic = 'force-dynamic';
 
 export default function CatalogPage() {
@@ -14,7 +14,7 @@ export default function CatalogPage() {
           <h1 className="page-title" style={{ margin: '6px 0 4px' }}>Catalog</h1>
           <p className="page-sub" style={{ margin: 0 }}>
             Every distributed track with its live status on each platform. Filter to what needs attention, then export
-            or open a support packet — nothing is reported missing without evidence.
+            or open a support packet, nothing is reported missing without evidence.
           </p>
         </div>
         <a className="btn" href="/connect">Run new audit</a>

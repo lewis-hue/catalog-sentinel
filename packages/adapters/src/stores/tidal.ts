@@ -19,7 +19,7 @@ interface TidalOptions {
 }
 
 /**
- * TIDAL store-presence provider — official TIDAL API v2 (openapi.tidal.com, JSON:API),
+ * TIDAL store-presence provider, official TIDAL API v2 (openapi.tidal.com, JSON:API),
  * client-credentials OAuth2.
  *   - POST auth.tidal.com/v1/oauth2/token (client_credentials)      → bearer token
  *   - GET  /v2/searchResults/{q}?include=artists                    → resolve artist id

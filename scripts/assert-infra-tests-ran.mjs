@@ -3,7 +3,7 @@
  * Fail CI when an infrastructure-gated test suite SKIPPED instead of running.
  *
  * Why this exists: every Redis/Postgres integration test is written as
- * `describe.skipIf(!REDIS_URL)`. That is correct for a laptop with no Redis — but in CI it meant
+ * `describe.skipIf(!REDIS_URL)`. That is correct for a laptop with no Redis, but in CI it meant
  * the suites that verify cross-process behaviour quietly skipped, and the run went green. A
  * pipeline whose workers consumed a queue no producer ever wrote to passed CI that way.
  *
@@ -14,10 +14,10 @@ import { readFileSync } from 'node:fs';
 /** Suites that MUST run in CI. Add one here whenever you gate a suite on infrastructure. */
 const REQUIRED = [
   'RedisConnectSessionRegistry against real Redis',
-  'DistroKid pipeline — API producer → real Redis → six-stage worker',
-  'durable persistence — real Postgres',
+  'DistroKid pipeline, API producer → real Redis → six-stage worker',
+  'durable persistence, real Postgres',
   'deep-scan API↔worker handoff over Redis',
-  'PrismaDistributorLinkRepository — Postgres integration',
+  'PrismaDistributorLinkRepository, Postgres integration',
 ];
 
 const file = process.argv[2];
@@ -54,7 +54,7 @@ for (const req of REQUIRED) {
   }
   const ran = statuses.filter((s) => s === 'passed' || s === 'failed').length;
   if (ran === 0) {
-    console.error(`SKIPPED: "${req}" ran 0 of ${statuses.length} tests — the infrastructure it needs was not available.`);
+    console.error(`SKIPPED: "${req}" ran 0 of ${statuses.length} tests, the infrastructure it needs was not available.`);
     console.error('  CI provisions Redis + Postgres services; check REDIS_URL / DATABASE_URL are exported to the test step.');
     failed = true;
   } else {

@@ -9,7 +9,7 @@ import {
  * These exist because of a real defect: the ids were colon-joined, and BullMQ REJECTS a custom
  * job id containing ":" ("Custom Id cannot contain :") since it namespaces its own Redis keys
  * that way. Every enqueue would have thrown, so the pipeline could never have processed a job in
- * production — yet the whole suite passed, because every test dispatched to the stage handlers
+ * production, yet the whole suite passed, because every test dispatched to the stage handlers
  * through a fake queue and never asked BullMQ to accept an id.
  *
  * A real-Redis end-to-end test caught it in the first run. These unit tests pin the invariant so
@@ -22,19 +22,19 @@ const REF: SnapshotRef = {
   tenantId: 'tenant-1', connectionId: 'tenant-1:distrokid', snapshotId: 'search_abc', distributor: 'distrokid',
 };
 
-describe('job ids — BullMQ compatibility', () => {
+describe('job ids, BullMQ compatibility', () => {
   it('never contains a colon, even when the inputs do', () => {
     const ids = [
       jobIds.index(REF), jobIds.plan(REF), jobIds.chunk(REF, 3),
       jobIds.retry(REF, 1), jobIds.reconcile(REF), jobIds.finalize(REF),
     ];
     for (const id of ids) {
-      expect(id, `"${id}" must not contain ":" — BullMQ rejects it`).not.toContain(':');
+      expect(id, `"${id}" must not contain ":", BullMQ rejects it`).not.toContain(':');
       expect(isValidBullJobId(id)).toBe(true);
     }
   });
 
-  it('is deterministic — the same work always yields the same id (idempotent redelivery)', () => {
+  it('is deterministic, the same work always yields the same id (idempotent redelivery)', () => {
     expect(jobIds.index(REF)).toBe(jobIds.index({ ...REF }));
     expect(jobIds.chunk(REF, 2)).toBe(jobIds.chunk({ ...REF }, 2));
   });
@@ -49,7 +49,7 @@ describe('job ids — BullMQ compatibility', () => {
   });
 
   it('does NOT collide when sanitizing makes two different inputs look alike', () => {
-    // Without the hash suffix, "a:b" and "a-b" both sanitize to "a-b" — two different accounts
+    // Without the hash suffix, "a:b" and "a-b" both sanitize to "a-b", two different accounts
     // would share a job id and silently deduplicate each other's scans. That is a data-leak-
     // shaped bug (one tenant's scan swallowed by another's), not a cosmetic one.
     const a = jobIds.index({ ...REF, connectionId: 'a:b' });
@@ -64,7 +64,7 @@ describe('job ids — BullMQ compatibility', () => {
     expect(jobIds.index({ ...REF, snapshotId: 'other' })).not.toBe(base);
   });
 
-  it('stays readable — the queue and the ids are still visible for debugging', () => {
+  it('stays readable, the queue and the ids are still visible for debugging', () => {
     expect(jobIds.index(REF)).toContain(DK_QUEUES.index);
     expect(jobIds.index(REF)).toContain('tenant-1');
     expect(jobIds.index(REF)).toContain('search_abc');

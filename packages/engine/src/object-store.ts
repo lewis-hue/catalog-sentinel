@@ -22,7 +22,7 @@ export interface SignedUrlObjectStore extends ObjectStore {
 }
 
 /**
- * Narrow S3 backend the store depends on — the subset of `@aws-sdk/client-s3` +
+ * Narrow S3 backend the store depends on, the subset of `@aws-sdk/client-s3` +
  * `@aws-sdk/s3-request-presigner` we use. Typed by hand so this package compiles
  * and tests run WITHOUT the AWS SDK installed; the real backend
  * ({@link createAwsS3Backend}) satisfies it at runtime.

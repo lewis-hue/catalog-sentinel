@@ -1,7 +1,7 @@
 import { Queue, Worker, type ConnectionOptions, type Job } from 'bullmq';
 
 /**
- * BullMQ (Redis-backed) queues + workers — the Node/TypeScript analog of Celery
+ * BullMQ (Redis-backed) queues + workers, the Node/TypeScript analog of Celery
  * for heavy workloads. Heavy, long-running work (deep catalog scans, report/PDF
  * generation) runs on dedicated worker processes, not in the API request path.
  * Jobs are retryable with backoff, rate-limited, and observable.
@@ -60,7 +60,7 @@ export interface DeepScanWorkerDeps {
   /** Load context + run the scan + persist results. Injected so this module has
    *  no DB coupling; the app supplies the real implementation (calls runDeepScanJob). */
   processDeepScan: (payload: DeepScanJobPayload, job: Job) => Promise<{ status: string; releases: number; tracks: number }>;
-  /** DEEP_SCAN_MAX_CONCURRENCY — serialize distributor scans by default (=1). */
+  /** DEEP_SCAN_MAX_CONCURRENCY, serialize distributor scans by default (=1). */
   concurrency?: number;
   /** DISTRIBUTOR_SCAN_MIN_DELAY_MS becomes the queue's rate limit window. */
   minDelayMs?: number;

@@ -58,7 +58,7 @@ describe('API authentication hook', () => {
     await server.close();
   });
 
-  it('rejects tokens without a tenant or with the wrong audience', async () => {
+  it('uses the verified subject for a personal account without a tenant claim and rejects a wrong audience', async () => {
     const server = await app();
     const missingTenant = await server.inject({
       method: 'GET', url: '/private', headers: { authorization: `Bearer ${await token({ realm_access: { roles: ['user'] } })}` },
@@ -66,9 +66,9 @@ describe('API authentication hook', () => {
     const wrongAudience = await server.inject({
       method: 'GET', url: '/private', headers: { authorization: `Bearer ${await token({ tenant_id: 'tenant-a', realm_access: { roles: ['user'] } }, 'other-api')}` },
     });
-    expect(missingTenant.statusCode).toBe(401);
+    expect(missingTenant.statusCode).toBe(200);
     expect(wrongAudience.statusCode).toBe(401);
-    expect(missingTenant.json()).toEqual({ error: 'invalid token' });
+    expect(missingTenant.json()).toEqual({ tenantId: 'user-1', tenantHeader: 'user-1' });
     expect(wrongAudience.json()).toEqual({ error: 'invalid token' });
     await server.close();
   });

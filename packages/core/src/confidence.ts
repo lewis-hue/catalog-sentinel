@@ -1,7 +1,7 @@
 /**
  * Confidence bands (PRD §E). The matching engine emits a raw score in [0,1];
  * these bands turn it into a decision. Fuzzy matches are NEVER silently treated
- * as confirmed — anything below `strong` surfaces a manual-review task.
+ * as confirmed, anything below `strong` surfaces a manual-review task.
  */
 export const CONFIDENCE_BANDS = ['confirmed', 'strong', 'probable', 'weak', 'no-match'] as const;
 export type ConfidenceBand = (typeof CONFIDENCE_BANDS)[number];
@@ -30,7 +30,7 @@ export function requiresManualReview(band: ConfidenceBand): boolean {
 export const CONFIDENCE_BAND_LABEL: Record<ConfidenceBand, string> = {
   confirmed: 'Confirmed (exact identifier)',
   strong: 'Strong (metadata)',
-  probable: 'Probable — review',
+  probable: 'Probable, review',
   weak: 'Weak',
   'no-match': 'No match',
 };

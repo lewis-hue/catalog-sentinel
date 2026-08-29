@@ -10,7 +10,7 @@ import { PostgresCandidateStore } from './candidate-store';
  *
  * Redis is operational checkpoint storage and may be flushed at any time; these tables are the
  * catalog system of record. Before this layer existed, `persistSnapshot` flipped a status flag and
- * logged counts — so after a Redis expiry there was no catalogue anywhere, and nobody would have
+ * logged counts, so after a Redis expiry there was no catalogue anywhere, and nobody would have
  * noticed until a user asked where their tracks went.
  *
  * These tests use real SQL because the bugs worth catching here are SQL bugs: a wrong ON CONFLICT
@@ -54,7 +54,7 @@ const finalizeJob = (over: Partial<FinalizeJob> = {}): FinalizeJob => ({
   ...over,
 });
 
-describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
+describe.skipIf(!DATABASE_URL)('durable persistence, real Postgres', () => {
   let pool: Pool;
 
   beforeAll(async () => {
@@ -185,20 +185,20 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(Number(persisted.rows[0]?.present_isrcs)).toBe(trackCount);
     }, 60_000);
 
-    it('is IDEMPOTENT — a redelivered finalize converges instead of duplicating the catalogue', async () => {
+    it('is IDEMPOTENT, a redelivered finalize converges instead of duplicating the catalogue', async () => {
       const repo = new DistroKidOutcomeRepository(pool);
       await repo.persist(finalizeJob(), [completed('R1'), completed('R2')]);
       await repo.persist(finalizeJob(), [completed('R1'), completed('R2')]);
       await repo.persist(finalizeJob(), [completed('R1'), completed('R2')]);
 
-      // BullMQ redelivers. Three finalizes must leave one snapshot and two releases — not three
+      // BullMQ redelivers. Three finalizes must leave one snapshot and two releases, not three
       // copies of someone's catalogue.
       expect((await pool.query(`SELECT * FROM "DistributorExtractionSnapshot" WHERE "tenantId" = 't-pg'`)).rowCount).toBe(1);
       expect((await pool.query(`SELECT * FROM "DistributorReleaseOutcome"`)).rowCount).toBe(2);
       expect((await pool.query(`SELECT * FROM "DistributorTrackOutcome"`)).rowCount).toBe(2);
     });
 
-    it('PERSISTS FAILURES with a reason code — a failed release is a fact, not an omission', async () => {
+    it('PERSISTS FAILURES with a reason code, a failed release is a fact, not an omission', async () => {
       const repo = new DistroKidOutcomeRepository(pool);
       const failed: ReleaseExtractionOutcome = {
         kind: 'FAILED', distributorReleaseId: 'R-bad', reason: 'TIMEOUT',
@@ -209,7 +209,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       const rows = await pool.query(`SELECT * FROM "DistributorReleaseOutcome" WHERE "kind" = 'FAILED'`);
       expect(rows.rowCount).toBe(1);
       expect(rows.rows[0].reason).toBe('TIMEOUT');
-      // The reason CODE is stored; the free-text detail is NOT — it can quote response content.
+      // The reason CODE is stored; the free-text detail is NOT, it can quote response content.
       expect(JSON.stringify(rows.rows[0])).not.toContain('timed out');
     });
 
@@ -224,7 +224,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       await repo.persist(finalizeJob(), [noUpcAtSource, upcTimedOut]);
 
       const rows = await pool.query(`SELECT "distributorReleaseId", "upc", "upcStatus" FROM "DistributorReleaseOutcome" ORDER BY "distributorReleaseId"`);
-      // Both have upc = NULL. Only the STATUS says which is our failure and therefore retryable —
+      // Both have upc = NULL. Only the STATUS says which is our failure and therefore retryable -
       // this is the whole reason the column exists.
       const absent = rows.rows.find((r) => r.distributorReleaseId === 'R-absent');
       const timeout = rows.rows.find((r) => r.distributorReleaseId === 'R-timeout');
@@ -234,7 +234,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(timeout.upcStatus).toBe('TIMEOUT');
     });
 
-    it('is TRANSACTIONAL — a mid-write failure leaves no half-written snapshot', async () => {
+    it('is TRANSACTIONAL, a mid-write failure leaves no half-written snapshot', async () => {
       const repo = new DistroKidOutcomeRepository(pool);
       const poison = { kind: 'COMPLETED', release: null, source: 'NETWORK_JSON', elapsedMs: 1 } as unknown as ReleaseExtractionOutcome;
       await expect(repo.persist(finalizeJob(), [completed('R1'), poison])).rejects.toThrow();
@@ -250,7 +250,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       await repo.persist(finalizeJob(), [completed('R1', { tracks: tracks(10) })]);
       expect((await pool.query(`SELECT * FROM "DistributorTrackOutcome"`)).rowCount).toBe(10);
 
-      // A corrected re-read finds 9. Upserting alone left track index 9 behind forever — a track
+      // A corrected re-read finds 9. Upserting alone left track index 9 behind forever, a track
       // the distributor no longer reports, sitting in our catalogue looking authoritative.
       await repo.persist(finalizeJob(), [completed('R1', { tracks: tracks(9) })]);
       const rows = await pool.query<{ trackIndex: number }>(`SELECT "trackIndex" FROM "DistributorTrackOutcome" ORDER BY "trackIndex"`);
@@ -276,7 +276,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(rel.rows[0].reason).toBe('TIMEOUT');
     });
 
-    it('persists the endpoint fingerprint — provenance from a release back to its endpoint', async () => {
+    it('persists the endpoint fingerprint, provenance from a release back to its endpoint', async () => {
       const repo = new DistroKidOutcomeRepository(pool);
       const withFp: ReleaseExtractionOutcome = { ...completed('R1'), endpointFingerprint: 'a'.repeat(64) } as ReleaseExtractionOutcome;
       await repo.persist(finalizeJob(), [withFp]);
@@ -286,7 +286,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(row.rows[0]!.endpointFingerprint).toBe('a'.repeat(32)); // truncated, not the full hash
     });
 
-    it('stores UPC only at release level — the track table has no upc column at all', async () => {
+    it('stores UPC only at release level, the track table has no upc column at all', async () => {
       const repo = new DistroKidOutcomeRepository(pool);
       await repo.persist(finalizeJob(), [completed('R1')]);
       const cols = await pool.query<{ column_name: string }>(
@@ -297,7 +297,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(names).not.toContain('upc');
     });
 
-    it('has no raw-payload column anywhere — the schema itself enforces the allowlist', async () => {
+    it('has no raw-payload column anywhere, the schema itself enforces the allowlist', async () => {
       const cols = await pool.query<{ table_name: string; column_name: string }>(
         `SELECT table_name, column_name FROM information_schema.columns
          WHERE table_name IN ('DistributorRelease','DistributorTrack','DistributorReleaseOutcome','DistributorTrackOutcome')`,
@@ -329,7 +329,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(got!.queryKeyShape).toEqual(['albumuuid']);
     });
 
-    it('round-trips EVERY field the model promises — schema keys, drift count, candidate score', async () => {
+    it('round-trips EVERY field the model promises, schema keys, drift count, candidate score', async () => {
       // The repository used to insert an empty `schemaKeys` array and a hard-coded drift count of
       // zero, and read the candidate score back out of `validationCount`. The table promised more
       // than the repository preserved: a restart silently dropped the endpoint's schema shape and
@@ -349,7 +349,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(got!.candidateScore).toBe(37);
       expect(got!.successfulCaptures).toBe(9);
       expect(got!.failedCaptures).toBe(2);
-      // The score has its own column now — it is not just a re-read of validationCount.
+      // The score has its own column now, it is not just a re-read of validationCount.
       const raw = await pool.query<{ candidateScore: number; validationCount: number }>(
         `SELECT "candidateScore", "validationCount" FROM "DistributorEndpointProfile" WHERE "tenantId" = 't-pg'`,
       );
@@ -369,7 +369,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(all[0]!.approvedAt).toBeTruthy();
     });
 
-    it('ISOLATES TENANTS — one tenant can never read or overwrite another tenant profile', async () => {
+    it('ISOLATES TENANTS, one tenant can never read or overwrite another tenant profile', async () => {
       const store = new PostgresEndpointRegistryStore(pool);
       await store.put(profile({ tenantId: 't-pg', status: 'ACTIVE' }));
       await store.put(profile({ tenantId: 't-pg-other', status: 'DEGRADED' }));
@@ -379,7 +379,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(mine[0]!.status).toBe('ACTIVE');
       expect(mine[0]!.tenantId).toBe('t-pg');
 
-      // Same fingerprint, different tenant — must be a separate row with its own status. A shared
+      // Same fingerprint, different tenant, must be a separate row with its own status. A shared
       // global registry would let one account's odd payload degrade the endpoint for everyone.
       const theirs = await store.get({ tenantId: 't-pg-other', distributor: 'DISTROKID' }, 'fp-abc');
       expect(theirs!.status).toBe('DEGRADED');
@@ -422,7 +422,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence — real Postgres', () => {
       expect(list[0]!.score).toBe(30); // keeps the best score seen
     });
 
-    it('ISOLATES TENANTS AND SCANS — concurrent scans never contaminate each other', async () => {
+    it('ISOLATES TENANTS AND SCANS, concurrent scans never contaminate each other', async () => {
       const store = new PostgresCandidateStore(pool);
       await store.write(candidate({ fingerprint: 'mine' }), { tenantId: 't-pg', scanId: 'scan-1' });
       await store.write(candidate({ fingerprint: 'theirs' }), { tenantId: 't-pg-other', scanId: 'scan-1' });

@@ -1,7 +1,7 @@
 import { normalizeTitle } from '@sentinel/adapters';
 
 /**
- * Deep-scan QUERY PLANNER — keeps large catalogues from exploding into
+ * Deep-scan QUERY PLANNER, keeps large catalogues from exploding into
  * tracks × platforms × engines searches. The plan:
  *   1. Bounds the track set to a per-scan budget.
  *   2. Skips tracks already confirmed everywhere (official APIs first).
@@ -12,7 +12,7 @@ import { normalizeTitle } from '@sentinel/adapters';
  *
  * For 1,000 tracks × 10 platforms the search-call estimate is O(uniqueSongs × platforms)
  * in the WORST case (every broad query misses every platform and needs a follow-up), and
- * far less in practice — never O(tracks × platforms × engines).
+ * far less in practice, never O(tracks × platforms × engines).
  */
 export interface PlannerTrack {
   title: string;
@@ -24,11 +24,11 @@ export interface DeepScanPlanInput {
   tracks: PlannerTrack[];
   /** Web platforms to verify (those without an official API / key). */
   platforms: string[];
-  /** Track indices already fully resolved (skip — no web verification needed). */
+  /** Track indices already fully resolved (skip, no web verification needed). */
   confirmedTrackIndices?: ReadonlySet<number>;
   /** Hard cap on tracks per scan (DEEP_SCAN_MAX_TRACKS_PER_SCAN). */
   maxTracks?: number;
-  /** Tracks per chunk (DEEP_SCAN_TRACK_CHUNK_SIZE) — checkpoint boundary. */
+  /** Tracks per chunk (DEEP_SCAN_TRACK_CHUNK_SIZE), checkpoint boundary. */
   chunkSize?: number;
 }
 

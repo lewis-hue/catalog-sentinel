@@ -1,13 +1,13 @@
 import type { Branded } from './ids';
 
 /**
- * ISRC — International Standard Recording Code (track-level canonical key).
+ * ISRC, International Standard Recording Code (track-level canonical key).
  * Canonical form is 12 chars: 2-letter country + 3-char registrant + 2-digit
  * year + 5-digit designation, uppercased with separators removed.
  */
 export type Isrc = Branded<string, 'Isrc'>;
 
-/** UPC/EAN — release-level canonical key (barcode). Stored digits-only. */
+/** UPC/EAN, release-level canonical key (barcode). Stored digits-only. */
 export type Upc = Branded<string, 'Upc'>;
 
 const ISRC_RE = /^[A-Z]{2}[A-Z0-9]{3}\d{2}\d{5}$/;

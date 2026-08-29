@@ -5,7 +5,7 @@ describe('parseTitle', () => {
   it('lowercases, trims, and strips diacritics into the base', () => {
     expect(parseTitle('  Café Del Mar  ').base).toBe('cafe del mar');
     expect(parseTitle('Naïve').base).toBe('naive');
-    expect(parseTitle('Beyoncé — Déjà Vu').base).toBe('beyonce deja vu');
+    expect(parseTitle('Beyoncé, Déjà Vu').base).toBe('beyonce deja vu');
   });
 
   it('extracts featured artists from bracketed and trailing forms', () => {

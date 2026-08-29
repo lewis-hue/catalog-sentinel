@@ -12,7 +12,7 @@ import {
 } from './types';
 
 /**
- * Apple Music / iTunes store-presence provider — REAL public iTunes Search API,
+ * Apple Music / iTunes store-presence provider, REAL public iTunes Search API,
  * no credentials.
  *   - GET /search?term=…&entity=musicArtist → resolve the artist id (exact-name match)
  *   - GET /lookup?id={artistId}&entity=song  → the artist's songs on Apple Music/iTunes
@@ -80,7 +80,7 @@ export class ItunesStoreProvider implements StoreCatalogProvider, TitleSearchPro
     const warnings: string[] = [];
     if (res === null) warnings.push('Apple/iTunes catalog request failed; the catalog is incomplete.');
     else if (!complete) warnings.push('Apple/iTunes catalog reached its result cap or omitted resultCount; the catalog is incomplete.');
-    if (tracks.length === 0 && complete) warnings.push('Apple/iTunes returned the artist but no songs — catalog may be empty or region-restricted.');
+    if (tracks.length === 0 && complete) warnings.push('Apple/iTunes returned the artist but no songs, catalog may be empty or region-restricted.');
     return { store: this.store, method: this.method, artist, tracks, pagination: { total: null, fetched, complete }, warnings };
   }
 

@@ -2,6 +2,7 @@
   "realm": "sentinel",
   "enabled": true,
   "sslRequired": "none",
+  "loginTheme": "sentinel",
   "components": {
     "org.keycloak.userprofile.UserProfileProvider": [
       {

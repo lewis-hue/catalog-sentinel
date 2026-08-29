@@ -4,7 +4,7 @@ import { normalizeCatalog, type CanonicalCatalogSnapshot, type CanonicalRelease,
 import type { DistributorProviderName, DistributorReleaseSnapshot, DistributorScanner, ScanEvent } from './types';
 import { PageShapeError } from './types';
 
-/** Structural connection contract — satisfied by browser-link's AutomationConnection. */
+/** Structural connection contract, satisfied by browser-link's AutomationConnection. */
 export interface ScanConnection {
   baseUrl: string;
   newPage(): Promise<Page>;
@@ -22,7 +22,7 @@ export interface DeepScanConfig {
   onEvent?: (e: ScanEvent) => void;
   nowIso?: () => string;
   idFor?: (kind: string, ...parts: string[]) => string;
-  /** Resume checkpoint — release ids already scanned in a previous run. */
+  /** Resume checkpoint, release ids already scanned in a previous run. */
   scannedReleaseIds?: Set<string>;
 }
 

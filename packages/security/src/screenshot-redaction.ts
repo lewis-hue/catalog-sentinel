@@ -3,7 +3,7 @@
  * screenshot as evidence, sensitive regions (account email, payment details,
  * balances, session/2FA UI) must be blurred before the image is stored.
  *
- * This module produces a REDACTION MANIFEST — the deterministic plan of what to
+ * This module produces a REDACTION MANIFEST, the deterministic plan of what to
  * blur and why. The pixel-level blurring is performed by the worker's image
  * pipeline (sharp/canvas) in production; that step is a documented TODO here so
  * the security contract and tests exist independently of an image dependency.

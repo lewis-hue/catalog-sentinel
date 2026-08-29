@@ -98,7 +98,7 @@ export function getWebAuthConfig(
   // The DEPLOYMENT/APP environment is the AUTHORITATIVE security signal, decoupled from NODE_ENV.
   //
   // `next start` only serves the app's route handlers when NODE_ENV=production, so a local run of
-  // a production build must keep NODE_ENV=production — yet it also needs to talk to Keycloak over
+  // a production build must keep NODE_ENV=production, yet it also needs to talk to Keycloak over
   // plaintext http on the container network. Conflating the two (as a plain
   // `environments.includes('production')` does) makes those requirements contradictory. So an
   // explicit DEPLOYMENT_ENV/APP_ENV decides the transport posture; only when neither is set does

@@ -67,7 +67,7 @@ function signedComplianceEnv(): NodeJS.ProcessEnv {
   };
 }
 
-describe('feature flags — hosted credential form hard block', () => {
+describe('feature flags, hosted credential form hard block', () => {
   it('is a no-op when the hosted credential form is disabled (default)', () => {
     expect(() => assertNoHostedCredentialForm({})).not.toThrow();
     expect(() => assertNoHostedCredentialForm({ ENABLE_HOSTED_CREDENTIAL_FORM: 'false' })).not.toThrow();
@@ -146,7 +146,7 @@ describe('DistroKid live scanner legal-review gate', () => {
   });
 });
 
-describe('validateServerConfig — startup hard-fails', () => {
+describe('validateServerConfig, startup hard-fails', () => {
   const key = Buffer.alloc(32, 1).toString('base64');
 
   it('passes a safe test/dev config', () => {

@@ -11,7 +11,7 @@ import type { ScannableStore } from './scan';
 import type { StoreCatalogProvider } from './types';
 
 export interface StoreScanOptions {
-  /** false → API stores only (fast); skip the rate-limited Brave web-search platforms. */
+  /** false → API stores only (fast); skip the rate-limited web-search platforms. */
   includeWebSearch?: boolean;
   /** Optional per-platform artist profile URLs (platform name → URL) for exact resolution. */
   profiles?: Record<string, string>;
@@ -22,7 +22,7 @@ export interface StoreScanOptions {
  *  - Tier 1 (artist-catalogue APIs): Deezer + Apple (always, no key), and Spotify /
  *    YouTube / Audiomack / SoundCloud / TIDAL when their credentials are set. Each
  *    lists the artist's real catalogue → a precise set-compare against the distributor.
- *  - Tier 2 (Brave web search): every remaining platform with no public artist API,
+ *  - Tier 2 (web search via Serper): every remaining platform with no public artist API,
  *    confirmed on-page with a confidence score (a miss is 'unverifiable', not 'not-live').
  */
 export function createStoreScanTargets(env: NodeJS.ProcessEnv = process.env, opts: StoreScanOptions = {}): ScannableStore[] {
@@ -48,7 +48,11 @@ export function createStoreScanTargets(env: NodeJS.ProcessEnv = process.env, opt
     stores.push({ catalog: spotify, isrc: spotify, title: spotify });
     covered.add('Spotify');
   }
-  if (env.YOUTUBE_API_KEY) {
+  // YouTube Data API is OFF by default: its free quota (100 units/search, 10k/day) can't cover a
+  // real catalogue (a few hundred tracks exhausts it → false 0-live), so YouTube Music web-verifies
+  // through the search provider (Serper) like the other stores. Opt back into the API with
+  // YOUTUBE_USE_API=true only if you hold a high-quota key.
+  if (env.YOUTUBE_API_KEY && /^(1|true|yes|on)$/i.test(env.YOUTUBE_USE_API ?? '')) {
     const yt = new YouTubeMusicProvider({ apiKey: env.YOUTUBE_API_KEY });
     stores.push({ catalog: yt, catalogMode: 'confirm-only', title: yt, confirmOnly: true }); // YouTube isn't a clean discography
     covered.add('YouTube Music');
@@ -72,17 +76,17 @@ export function createStoreScanTargets(env: NodeJS.ProcessEnv = process.env, opt
 
   // Fast path (distributor-connect scan): catalogue-LIST stores only. Exclude
   // confirmOnly stores (e.g. YouTube), which have no artist list and would do a
-  // per-song API search for every distributor track — slow and quota-hungry over a
+  // per-song API search for every distributor track, slow and quota-hungry over a
   // full catalogue. Those run in the deep/web pass instead. Whole catalogue in seconds.
   if (opts.includeWebSearch === false) return stores.filter((s) => !s.confirmOnly);
 
   // AUTO-FALLBACK (the core of the distributor sale): every platform whose official API
   // key is ABSENT is NOT in `covered`, so it falls through to web verification here. When
   // a buyer (e.g. DistroKid) supplies a platform's API keys, that platform moves to the
-  // precise official-API path above and drops out of web search automatically — no code
+  // precise official-API path above and drops out of web search automatically, no code
   // change. Web verification is confirmOnly → a miss is 'unverifiable' (→ manual review),
-  // never a false 'not-live'. Backend: self-hosted SearXNG (default) or Brave, whichever
-  // is configured (see createSearchProvider). No web backend configured → official APIs only.
+  // never a false 'not-live'. Backend: Serper hosted SERP API (see createSearchProvider).
+  // No web backend configured → official APIs only.
   const provider = createSearchProvider(env);
   const enableWeb = /^(1|true|yes|on)$/i.test(env.ENABLE_SEARCH_WEB_VERIFY ?? 'true') && provider !== null;
   if (enableWeb) {

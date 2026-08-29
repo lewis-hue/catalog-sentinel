@@ -6,14 +6,14 @@ import { scoreAgainstPolicy, correlateRequest, type CapturedResponse, type Respo
  *
  * Two defects these cover:
  *
- * 1. Production selected the highest-scoring catalog-shaped response — a DISCOVERY question
+ * 1. Production selected the highest-scoring catalog-shaped response, a DISCOVERY question
  *    ("does this look like catalog data?") rather than the production one ("is this the response
  *    for the release I asked for?"). A catalog index could outrank the release-details response.
  *
  * 2. "Correlation" was `releaseId = whatever release we happened to be navigating`. That is
  *    TEMPORAL ATTRIBUTION, not correlation: a catalog index, a recommendations payload, a late
  *    response from the PREVIOUS navigation, another page in the same context, or a service-worker
- *    fetch all land inside that window and would be labelled as this release's data — then scored
+ *    fetch all land inside that window and would be labelled as this release's data, then scored
  *    as "correlated" because the label matched the release we set it from. It was circular.
  */
 
@@ -23,7 +23,7 @@ const capture = (over: Partial<CapturedResponse>): CapturedResponse => ({
   correlation: 'TEMPORAL_ASSOCIATION', ...over,
 });
 
-describe('correlateRequest — evidence from the request, not from the clock', () => {
+describe('correlateRequest, evidence from the request, not from the clock', () => {
   const known = new Set(['R1', 'R2']);
 
   it('REQUEST_ID_MATCH when the URL path names the expected release', () => {
@@ -46,7 +46,7 @@ describe('correlateRequest — evidence from the request, not from the clock', (
     expect(r.kind).toBe('REQUEST_ID_MATCH');
   });
 
-  it('flags a request that names a DIFFERENT known release — this is the late-response case', () => {
+  it('flags a request that names a DIFFERENT known release, this is the late-response case', () => {
     // The extractor has moved on to R2, but R1's request is only now finishing. Temporal
     // attribution would label this response R2 and file R1's ISRCs under R2.
     const r = correlateRequest('https://distrokid.com/api/album/R1/details', null, 'R2', known);
@@ -66,10 +66,10 @@ describe('correlateRequest — evidence from the request, not from the clock', (
   });
 });
 
-describe('scoreAgainstPolicy — production response selection', () => {
+describe('scoreAgainstPolicy, production response selection', () => {
   it('REJECTS a response whose request names a different release, however catalog-shaped', () => {
     const policy: ResponseMatchPolicy = { activeFingerprints: ['fp-details'], releaseId: 'R1', allowHeuristic: true };
-    // Same endpoint, perfect score — but the REQUEST was for R2. Using it would file R2's ISRCs
+    // Same endpoint, perfect score, but the REQUEST was for R2. Using it would file R2's ISRCs
     // under R1: silent, plausible, and wrong.
     expect(scoreAgainstPolicy(capture({ score: 100, correlation: 'NO_CORRELATION', namesOtherRelease: true }), policy)).toBeNull();
   });
@@ -98,7 +98,7 @@ describe('scoreAgainstPolicy — production response selection', () => {
     expect(scoreAgainstPolicy(temporal, policy)).not.toBe(scoreAgainstPolicy(named, policy));
   });
 
-  it('REJECTS everything off-profile once a profile is ACTIVE — a clean timeout beats a confident wrong answer', () => {
+  it('REJECTS everything off-profile once a profile is ACTIVE, a clean timeout beats a confident wrong answer', () => {
     const policy: ResponseMatchPolicy = { activeFingerprints: ['fp-details'], releaseId: 'R1', allowHeuristic: false, minScore: 10 };
     expect(scoreAgainstPolicy(capture({ fingerprint: 'fp-something-else', score: 99 }), policy)).toBeNull();
   });
@@ -118,7 +118,7 @@ describe('scoreAgainstPolicy — production response selection', () => {
   });
 
   it('accepts a profile-matching response whose request names no release (endpoint bundles do this)', () => {
-    // Not every response is attributable — a page-level bootstrap or an index payload carries real
+    // Not every response is attributable, a page-level bootstrap or an index payload carries real
     // data. Requiring correlation absolutely would reject legitimate bundle members; it is a
     // preference, not a precondition.
     const policy: ResponseMatchPolicy = { activeFingerprints: ['fp-details'], releaseId: 'R1', allowHeuristic: false };

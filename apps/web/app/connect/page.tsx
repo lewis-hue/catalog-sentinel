@@ -2,7 +2,7 @@ import { ConnectGate } from './ConnectGate';
 import { steelViewerOrigins } from '@/lib/security-headers';
 
 export const metadata = {
-  title: 'Connect distributor — Catalog Sentinel',
+  title: 'Connect distributor, Catalog Sentinel',
 };
 
 // Viewer origins are deployment runtime configuration. Do not bake them into a
@@ -12,12 +12,10 @@ export const dynamic = 'force-dynamic';
 export default function ConnectPage() {
   return (
     <>
-      <div className="eyebrow">Secure distributor link</div>
+      <div className="eyebrow">Distributor link</div>
       <h1 className="page-title">Connect DistroKid &amp; scan your catalog</h1>
       <p className="page-sub">
-        You sign in to DistroKid inside an isolated Steel session; Catalog Sentinel never collects your password or bypasses
-        2FA. After explicit consent for Catalog Sentinel&rsquo;s read-only automation, you can start the catalog import,
-        cancel the full-authority attended session, or let its short, server-issued access window expire.
+        Sign in to DistroKid in an isolated Steel browser session and import your catalog for a read-only audit.
       </p>
       <ConnectGate viewerOrigins={steelViewerOrigins()} />
     </>

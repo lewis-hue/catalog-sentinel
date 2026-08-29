@@ -1,7 +1,7 @@
 import { OrganizationManager } from './OrganizationManager';
 
 export const metadata = {
-  title: 'Organization access — Catalog Sentinel',
+  title: 'Organization access, Catalog Sentinel',
   description: 'Manage organization members, workspace access, and verified-email invitations.',
 };
 

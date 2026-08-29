@@ -17,9 +17,9 @@ const methodOf = (r: Row) => (r.reviewed ? 'Reviewer-confirmed' : r.confidence >
 function ticketText(artist: string, scanId: string, auditedOn: string, g: Group): string {
   const notLive = g.rows.filter((r) => r.issue === 'not-live');
   const wrong = g.rows.filter((r) => r.issue === 'wrong-profile');
-  const ref = (r: Row) => `• ${r.title}${r.release ? ` — ${r.release}` : ''}${r.isrc ? ` (ISRC ${r.isrc})` : ' (no ISRC)'}`;
+  const ref = (r: Row) => `• ${r.title}${r.release ? `, ${r.release}` : ''}${r.isrc ? ` (ISRC ${r.isrc})` : ' (no ISRC)'}`;
   const lines: string[] = [];
-  lines.push(`Subject: Delivery confirmation — ${artist} on ${g.platform}`, '', 'Hello,', '');
+  lines.push(`Subject: Delivery confirmation, ${artist} on ${g.platform}`, '', 'Hello,', '');
   if (notLive.length) {
     lines.push(
       `The following ${artist} releases were distributed but are not appearing in the artist's ${g.platform} catalog when checked via ${g.platform}'s official API on ${auditedOn}. Please confirm delivery status and expected go-live date:`,
@@ -30,9 +30,9 @@ function ticketText(artist: string, scanId: string, auditedOn: string, g: Group)
   }
   if (wrong.length) {
     lines.push(
-      `The following resolve to a different artist profile on ${g.platform} (possible mis-delivery) — please correct the artist mapping:`,
+      `The following resolve to a different artist profile on ${g.platform} (possible mis-delivery), please correct the artist mapping:`,
       '',
-      ...wrong.map((r) => `${ref(r)}${r.foundArtist ? ` — currently shows under "${r.foundArtist}"` : ''}`),
+      ...wrong.map((r) => `${ref(r)}${r.foundArtist ? `, currently shows under "${r.foundArtist}"` : ''}`),
       '',
     );
   }
@@ -125,14 +125,14 @@ export function SupportPackets() {
 
       {total === 0 ? (
         <div className="cat-empty">
-          <p><strong>Nothing to escalate.</strong> Every distributed track for {rec.artist} is either confirmed live or awaiting manual review — there are no official-API-backed gaps to send to a distributor.</p>
+          <p><strong>Nothing to escalate.</strong> Every distributed track for {rec.artist} is either confirmed live or awaiting manual review, there are no official-API-backed gaps to send to a distributor.</p>
           <a className="btn ghost" href="/review" style={{ marginTop: 16 }}>Open manual review</a>
         </div>
       ) : (
         <>
           <div className="row" style={{ marginBottom: 18, alignItems: 'center', gap: 12 }}>
             <button className="btn" onClick={() => exportCsv(groups.flatMap((g) => g.rows), '')}>Download full evidence CSV</button>
-            <span className="cat-note" style={{ margin: 0 }}>Only official-API-backed gaps and reviewer-confirmed results are included. Unverifiable cells stay in <a href="/review">manual review</a> — never asserted as missing.</span>
+            <span className="cat-note" style={{ margin: 0 }}>Only official-API-backed gaps and reviewer-confirmed results are included. Unverifiable cells stay in <a href="/review">manual review</a>, never asserted as missing.</span>
           </div>
 
           {groups.map((g) => (

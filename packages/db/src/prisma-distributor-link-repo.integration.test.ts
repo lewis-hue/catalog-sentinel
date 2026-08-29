@@ -5,7 +5,7 @@ import type { LinkConsent, LinkDeepScan } from './distributor-link-repo';
 
 /**
  * Postgres integration test for the Prisma persistence adapter. GATED behind
- * DATABASE_URL so it never runs (or fails) in the default unit-test run — CI/local
+ * DATABASE_URL so it never runs (or fails) in the default unit-test run, CI/local
  * `vitest` stays green with no database. To run it:
  *
  *   docker compose up -d postgres
@@ -51,7 +51,7 @@ const scan = (id: string, tenantId: string): LinkDeepScan => ({
   snapshot: null,
 });
 
-describe.skipIf(!hasDb)('PrismaDistributorLinkRepository — Postgres integration', () => {
+describe.skipIf(!hasDb)('PrismaDistributorLinkRepository, Postgres integration', () => {
   let repo: PrismaDistributorLinkRepository;
   let client: { $disconnect: () => Promise<void> };
 

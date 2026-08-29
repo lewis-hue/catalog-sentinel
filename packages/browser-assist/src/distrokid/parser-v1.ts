@@ -5,11 +5,11 @@ import {
 } from './metadata-model';
 
 /**
- * DistroKid release parser — version 1.
+ * DistroKid release parser, version 1.
  *
  * Validate with a schema rather than indexing arbitrary JSON paths all over the codebase. When
  * the payload doesn't match, we throw `SchemaMismatchError` and the caller marks the endpoint
- * DEGRADED + alerts — we never guess, and never emit silently-partial data.
+ * DEGRADED + alerts, we never guess, and never emit silently-partial data.
  *
  * The payload shape is not contracted to us, so v1 is deliberately permissive about WHERE the
  * release object sits (it locates it), but STRICT about the fields it then extracts.

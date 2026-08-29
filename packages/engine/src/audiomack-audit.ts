@@ -118,7 +118,7 @@ export async function runAudiomackAudit(input: AudiomackAuditInput): Promise<Aud
       releaseId: null,
       platform: AUDIOMACK,
       summary: audiomackSnapshot.artistProfile
-        ? 'Audiomack profile resolved but has zero uploads while releases are opted in — likely a broken account connection.'
+        ? 'Audiomack profile resolved but has zero uploads while releases are opted in, likely a broken account connection.'
         : 'No Audiomack profile could be resolved for the confirmed slug.',
       confidence: 0.8,
       scannedAt,
@@ -169,10 +169,10 @@ export async function runAudiomackAudit(input: AudiomackAuditInput): Promise<Aud
       confidence = result.best?.score.score ?? 0.5;
       matchedExternalId = result.best?.candidate.id ?? null;
       evidenceNote = result.wrongProfileSuspected
-        ? 'A same-title item exists under a different artist — verify the artist profile.'
+        ? 'A same-title item exists under a different artist, verify the artist profile.'
         : 'A probable match needs manual review before confirming presence.';
     } else {
-      // Not in the confirmed profile — check other profiles before calling it missing.
+      // Not in the confirmed profile, check other profiles before calling it missing.
       const cross = await this_findCrossProfile(input, track);
       if (cross) {
         matchedExternalId = cross.externalId;

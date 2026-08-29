@@ -69,7 +69,7 @@ export interface StorePresence {
   confidence: number;
   /** True when confidence is below the trust threshold → surface for manual review. */
   needsManualReview: boolean;
-  /** "artist title" — lets the UI build a manual-verify search link for this track. */
+  /** "artist title", lets the UI build a manual-verify search link for this track. */
   reviewQuery?: string | null;
 }
 
@@ -97,7 +97,7 @@ export interface ScannableStore {
   catalogMode?: 'enumerable' | 'confirm-only';
   /** Artist-agnostic ISRC lookup (for exact live + wrong-profile detection). */
   isrc?: IsrcLookupProvider;
-  /** Title+artist search — confirms existence on stores without ISRC search. */
+  /** Title+artist search, confirms existence on stores without ISRC search. */
   title?: TitleSearchProvider;
   /** `catalog` means title lookup only re-reads the same catalogue; never do that per track. */
   titleSearchMode?: 'query' | 'catalog';
@@ -291,7 +291,7 @@ export async function scanStorePresence(input: {
   expectedArtist: string;
   /**
    * All artist names the catalogue may span (a label with many artists under one
-   * distributor account — DistroKid Ultimate allows 5–100). When omitted, the set is
+   * distributor account, DistroKid Ultimate allows 5–100). When omitted, the set is
    * derived from the released tracks' own primaryArtist values. Each artist's store
    * catalogue is prefetched independently. Results remain scoped to the track's own
    * artist credit; a sibling label artist must not satisfy that track's presence.
@@ -301,10 +301,10 @@ export async function scanStorePresence(input: {
   stores: ScannableStore[];
   /**
    * Quick mode: match ONLY against each store's pre-fetched catalogue index (title +
-   * ISRC) — no per-track network calls. For catalogue-LIST stores the index IS the
+   * ISRC), no per-track network calls. For catalogue-LIST stores the index IS the
    * artist's full catalogue, so a miss is an accurate 'not-live'. Skips the per-track
    * ISRC lookup (wrong-profile) and title search, which are O(tracks) network calls and
-   * too slow for a large catalogue synchronously — those run in the deep pass. Scales to
+   * too slow for a large catalogue synchronously, those run in the deep pass. Scales to
    * hundreds of tracks in ~seconds (just the one catalogue fetch per store).
    */
   quick?: boolean;
@@ -312,6 +312,8 @@ export async function scanStorePresence(input: {
   catalogMaxTracks?: number;
   catalogFetchConcurrency?: number;
   maxDistinctArtists?: number;
+  /** How many tracks to verify in parallel (their per-track network calls overlap). */
+  trackConcurrency?: number;
 }): Promise<StoreScanReport> {
   const { expectedArtist, releasedTracks, quick = false } = input;
 
@@ -332,8 +334,11 @@ export async function scanStorePresence(input: {
 
   const perStoreCatalog = prepared.stores;
 
-  const results: TrackScanResult[] = [];
-  for (const track of releasedTracks) {
+  // Verify tracks with bounded concurrency so their per-track network calls (ISRC lookups + web
+  // searches) overlap instead of running strictly one-at-a-time. The concurrency-safe rate limiter
+  // keeps the aggregate request rate compliant no matter how many tracks are in flight.
+  const trackConcurrency = boundedInteger(input.trackConcurrency, quick ? 32 : 8, 1, 64, 'trackConcurrency');
+  const results = await mapWithConcurrency(releasedTracks, trackConcurrency, async (track): Promise<TrackScanResult> => {
     const perStore: StorePresence[] = [];
     const trackIsrc = normalizeIsrc(track.isrc);
     const trackTitleNorm = normalizeTitle(track.title);
@@ -368,7 +373,7 @@ export async function scanStorePresence(input: {
         : undefined;
       let supplementalDegraded = false;
 
-      // 1) ISRC present in the artist's own store catalogue (no network) — strongest signal.
+      // 1) ISRC present in the artist's own store catalogue (no network), strongest signal.
       if (catalogIsrcHit) {
         perStore.push(mk(store.store, 'live', 'isrc', 1.0, { url: catalogIsrcHit.url }));
         continue;
@@ -378,7 +383,7 @@ export async function scanStorePresence(input: {
         perStore.push(mk(store.store, 'live', 'title-artist', 0.8, { url: catalogTitleHit.url }));
         continue;
       }
-      // Quick mode stops here — index-only, no per-track network. A miss on a
+      // Quick mode stops here, index-only, no per-track network. A miss on a
       // catalogue-list store is an accurate not-live; wrong-profile + web confirmation
       // are deferred to the deep pass.
       if (quick) {
@@ -429,8 +434,8 @@ export async function scanStorePresence(input: {
           : mk(store.store, 'not-live', null, 0.8),
       );
     }
-    results.push({ track, perStore });
-  }
+    return { track, perStore };
+  });
 
   const flat = results.flatMap((r) => r.perStore);
   return {

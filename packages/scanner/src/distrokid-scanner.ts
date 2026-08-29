@@ -62,7 +62,7 @@ interface RawRelease {
 
 /**
  * DistroKid deep-scan adapter. Owns DistroKid-specific, resilient locators
- * (semantic data-fields / roles) and extracts ONLY catalog-management metadata —
+ * (semantic data-fields / roles) and extracts ONLY catalog-management metadata -
  * never payment/tax/bank/personal data. When a field is absent it records the
  * value as null/UNKNOWN with lower confidence rather than guessing. Unknown page
  * shapes raise PageShapeError so the worker files a maintenance issue.
@@ -112,7 +112,7 @@ export class DistroKidDistributorAdapter implements DistributorScanner {
   }
 
   async scanRelease(page: Page, release: ReleaseIndexItem, ctx: ScanContext): Promise<DistributorReleaseSnapshot> {
-    // Rate limit — never hammer the distributor.
+    // Rate limit, never hammer the distributor.
     if (ctx.minDelayMs > 0) await page.waitForTimeout(ctx.minDelayMs);
     await page.goto(release.url, { waitUntil: 'domcontentloaded' });
     if ((await page.locator('[data-page="release-detail"]').count()) === 0) {

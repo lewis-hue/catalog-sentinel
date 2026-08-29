@@ -156,7 +156,7 @@ export function ManualReview() {
           </div>
         ))}
       </div>
-      {filtered.length > WINDOW && <p className="cat-note">Showing the first {WINDOW} of {filtered.length} items. Resolve these or narrow by platform to see more — the queue reveals the rest as you clear it.</p>}
+      {filtered.length > WINDOW && <p className="cat-note">Showing the first {WINDOW} of {filtered.length} items. Resolve these or narrow by platform to see more, the queue reveals the rest as you clear it.</p>}
       <p className="cat-note">Each decision is written back to the presence matrix as authoritative (confidence 1.0) and recomputes the catalog summary. Decisions are reversible from the record.</p>
     </>
   );

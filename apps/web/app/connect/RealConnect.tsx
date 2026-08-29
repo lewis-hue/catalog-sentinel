@@ -144,7 +144,7 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
 
   async function start() {
     const roster = [...new Set([...artists, ...(artistInput.trim() ? [artistInput.trim()] : [])])].slice(0, 100);
-    if (!roster.length || !consented || !workspaceId) return;
+    if (!roster.length || !consented || (workspaces.length > 1 && !workspaceId)) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -154,7 +154,7 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          artistWorkspaceId: workspaceId,
+          ...(workspaceId ? { artistWorkspaceId: workspaceId } : {}),
           distributor: 'distrokid',
           scope: SCOPE,
           provider: 'steel',
@@ -276,27 +276,30 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
   if (phase === 'form' || phase === 'expired') {
     return (
       <div className="card" style={{ maxWidth: 680 }}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>DistroKid · attended Steel session</div>
-        <label className="field-label" htmlFor="dist">Distributor</label>
-        <input id="dist" className="field" value="DistroKid" readOnly aria-readonly="true" style={{ marginBottom: 14 }} />
-        <label className="field-label" htmlFor="artist-workspace">Artist workspace</label>
-        <select
-          id="artist-workspace"
-          className="field"
-          value={workspaceId}
-          disabled={workspaceState !== 'ready' || workspaces.length === 0 || busy}
-          onChange={(event) => setWorkspaceId(event.target.value)}
-          style={{ marginBottom: 8 }}
-        >
-          {workspaces.length === 0 && <option value="">No editable workspace available</option>}
-          {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.id}</option>)}
-        </select>
-        <p className="hint" style={{ marginTop: 0, marginBottom: 16 }}>
-          {workspaceState === 'loading' && 'Loading your authorized workspaces…'}
-          {workspaceState === 'error' && <>Workspace access could not be verified. <Link href="/organization">Review organization access</Link>.</>}
-          {workspaceState === 'ready' && workspaces.length === 0 && <>You need editor access before connecting a distributor. <Link href="/organization">Review organization access</Link>.</>}
-          {workspaceState === 'ready' && workspaces.length > 0 && 'The resulting catalog and audit history stay bound to this workspace.'}
-        </p>
+        {workspaces.length > 1 ? (
+          <>
+            <label className="field-label" htmlFor="artist-workspace">Catalog workspace</label>
+            <select
+              id="artist-workspace"
+              className="field"
+              value={workspaceId}
+              disabled={workspaceState !== 'ready' || busy}
+              onChange={(event) => setWorkspaceId(event.target.value)}
+              style={{ marginBottom: 8 }}
+            >
+              {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.id}</option>)}
+            </select>
+            <p className="hint" style={{ marginTop: 0, marginBottom: 16 }}>
+              Choose where this catalog and its audit history should be stored.
+            </p>
+          </>
+        ) : (
+          <p className="hint" style={{ marginTop: 0, marginBottom: 16 }}>
+            {workspaceState === 'loading' && 'Preparing your private personal catalog…'}
+            {workspaceState === 'error' && 'Your personal catalog will be resolved securely when the scan starts.'}
+            {workspaceState === 'ready' && 'Saved to your private catalog.'}
+          </p>
+        )}
         <label className="field-label" htmlFor="artist">Your artist name(s)</label>
         {artists.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
@@ -321,32 +324,22 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
             }
           }}
           onBlur={() => addArtist(artistInput)}
-          style={{ marginBottom: 8 }}
+          style={{ marginBottom: 16 }}
         />
-        <p className="hint" style={{ marginTop: 0, marginBottom: 16 }}>Add up to 100 artist names from this DistroKid account.</p>
 
         <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 16, cursor: 'pointer' }}>
           <input type="checkbox" checked={consented} onChange={(event) => setConsented(event.target.checked)} style={{ marginTop: 3 }} />
           <span className="rail-sub">
-            I authorize Catalog Sentinel&rsquo;s automation to read release and track metadata visible in my DistroKid catalog for this audit
-            (<code>{SCOPE}</code>) to verify store presence. Catalog metadata/results are designated for {CONSENT_RETENTION_DAYS}-day retention.
-            This automation scope does not authorize uploads, edits, takedowns, billing changes, or password collection.
+            I authorize Catalog Sentinel to read my DistroKid catalog metadata (<code>{SCOPE}</code>) to verify store
+            presence and keep the results for {CONSENT_RETENTION_DAYS} days. It cannot upload, edit, delete, change billing, or collect my password.
           </span>
         </label>
 
-        <p className="hint" style={{ marginTop: -6, marginBottom: 16 }}>
-          The attended Steel viewer is a real signed-in browser with your DistroKid account&rsquo;s full authority. Do not share its link or use it to make account changes. Cancel and revoke the session when finished; its short server-set expiry is the final backstop.
-        </p>
-
         {notice && <div className="notice-banner" role="status" style={{ borderColor: 'var(--live-edge)', background: 'var(--live-tint)', color: 'var(--live)' }}>{notice}</div>}
         {error && <div className="notice-banner" role="alert" style={{ borderColor: 'var(--wrong-edge)', background: 'var(--wrong-tint)', color: 'var(--wrong)' }}>{error}</div>}
-        <button className="btn" disabled={(artists.length === 0 && !artistInput.trim()) || !workspaceId || !consented || busy} onClick={() => void start()}>
+        <button className="btn" disabled={(artists.length === 0 && !artistInput.trim()) || (workspaces.length > 1 && !workspaceId) || !consented || busy} onClick={() => void start()}>
           {busy ? <><span className="spinner" /> Opening Steel…</> : 'Open Steel and sign in to DistroKid'}
         </button>
-        <p className="hint" style={{ marginTop: 12 }}>
-          You enter credentials only in DistroKid&rsquo;s site inside Steel. Catalog Sentinel never asks for or stores your password.
-          The server sets a short Steel access window, shown after launch, and you can revoke it before scanning.
-        </p>
       </div>
     );
   }
@@ -355,11 +348,10 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
     return (
       <div className="card">
         <div className="login-callout">
-          <div className="login-callout-icon" aria-hidden>🔐</div>
           <div>
             <strong>Sign in to DistroKid in this Steel session.</strong>
             <p>
-              Complete DistroKid sign-in and 2FA, then start the catalog import. This viewer has your signed-in account&rsquo;s full authority: do not share its URL or make account changes here. Catalog Sentinel&rsquo;s subsequent automation is constrained to read-only traffic. Time remaining: <strong>{formatRemaining(remaining)}</strong>.
+              Complete DistroKid sign-in and 2FA, then start the import. This viewer has your account&rsquo;s full authority: don&rsquo;t share its link or change account settings. Time remaining: <strong>{formatRemaining(remaining)}</strong>.
             </p>
           </div>
         </div>
@@ -376,7 +368,7 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
         {error && <div className="notice-banner" role="alert" style={{ marginTop: 14, borderColor: 'var(--wrong-edge)', background: 'var(--wrong-tint)', color: 'var(--wrong)' }}>{error}</div>}
         <div style={{ display: 'flex', gap: 12, marginTop: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn" disabled={busy || remaining <= 0} onClick={() => void confirmAndScan()}>
-            {busy ? <><span className="spinner" /> Starting catalog read…</> : 'I’m signed in — read my catalog'}
+            {busy ? <><span className="spinner" /> Starting catalog read…</> : 'I’m signed in, read my catalog'}
           </button>
           <button className="btn ghost" disabled={busy} onClick={() => void cancelAndRevoke()}>Cancel and revoke Steel session</button>
           <a className="btn ghost" href={session.loginUrl} target="_blank" rel="noopener noreferrer">Open Steel in a new tab ↗</a>
@@ -390,14 +382,14 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
   }
 
   if (phase === 'scanning') {
-    return <div className="cat-empty"><p><span className="spinner" style={{ marginRight: 8 }} />Starting the read-only DistroKid catalog import…</p></div>;
+    return <div className="cat-empty"><p><span className="spinner" style={{ marginRight: 8 }} />Starting the DistroKid catalog import…</p></div>;
   }
 
   return (
     <div className="cat-empty">
       <p>
-        <strong>Catalog read accepted.</strong> The isolated Steel session was handed to the catalog pipeline.
-        Open the catalog to follow progress; results appear only when the pipeline records them.
+        <strong>Catalog read accepted.</strong> Your catalog was handed to the import pipeline.
+        Open the catalog to follow progress; results appear as the pipeline records them.
       </p>
       <div className="row" style={{ gap: 12, marginTop: 16, justifyContent: 'center' }}>
         <Link className="btn" href={result?.searchId ? `/catalog?id=${encodeURIComponent(result.searchId)}` : '/catalog'}>View your catalog →</Link>

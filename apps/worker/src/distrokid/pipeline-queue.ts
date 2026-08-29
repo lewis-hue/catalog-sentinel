@@ -4,6 +4,7 @@ import {
   retryFailedDistroKidReleases, reconcileDistroKidSnapshot, finalizeDistroKidSnapshot,
   jobIds, DISTROKID_MAX_ATTEMPTS, resumeTerminalFinalizer, terminalizeDistroKidFailure,
   PipelineDeadlineExceededError, InvalidPipelineDeadlineError, PipelineShutdownError,
+  sanitizeRecoveredDistroKidFailure,
   type PipelineDeps, type CatalogIndexJob, type PlanChunksJob, type ReleaseChunkJob,
   type RetryFailedJob, type ReconcileJob, type FinalizeJob, type SnapshotRef,
 } from './pipeline';
@@ -78,7 +79,7 @@ export function enqueuers(q: DistroKidQueues): PipelineDeps['enqueue'] & { start
     },
     async retry(job) { await q.retry.add('run', job, { jobId: jobIds.retry(job, job.attempt) }); },
     // `pass` is load-bearing. BullMQ retains completed jobs (removeOnComplete: 500) and returns
-    // the retained job for a colliding id — so without the pass, the retry sweep's reconciliation
+    // the retained job for a colliding id, so without the pass, the retry sweep's reconciliation
     // reused pass 1's id, never ran, and the snapshot hung without ever finalizing.
     async reconcile(job) { await q.reconcile.add('run', job, { jobId: jobIds.reconcile(job, job.pass ?? 1) }); },
     async finalize(job) { await q.finalize.add('run', job, { jobId: jobIds.finalize(job, job.pass ?? 1) }); },
@@ -258,7 +259,12 @@ export async function recoverFailedDistroKidJobs(
           stats.skipped++;
           continue;
         }
-        await terminalizeDistroKidFailure(job.data, queue.name, errorOf(job.failedReason), deps);
+        await terminalizeDistroKidFailure(
+          job.data,
+          queue.name,
+          sanitizeRecoveredDistroKidFailure(queue.name, job.failedReason),
+          deps,
+        );
         await markTerminalFailureHandled(job, queue.name);
         stats.terminalized++;
       } catch (value) {

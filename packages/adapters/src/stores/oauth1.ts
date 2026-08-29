@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 
 /**
- * Minimal OAuth 1.0a (RFC 5849) HMAC-SHA1 request signer — no dependency.
+ * Minimal OAuth 1.0a (RFC 5849) HMAC-SHA1 request signer, no dependency.
  * Used for APIs that require signed requests (e.g. the Audiomack Data API).
  * Supports 2-legged (consumer key/secret only) and 3-legged (with a user token).
  */
@@ -17,7 +17,7 @@ export function rfc3986(value: string): string {
   return encodeURIComponent(value).replace(/[!*'()]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
-/** The OAuth 1.0a signature base string — the canonical artifact that is HMAC'd. */
+/** The OAuth 1.0a signature base string, the canonical artifact that is HMAC'd. */
 export function oauth1BaseString(method: string, baseUrl: string, allParams: Record<string, string>): string {
   const paramString = Object.keys(allParams)
     .map((k) => [rfc3986(k), rfc3986(allParams[k] ?? '')] as const)
@@ -29,7 +29,7 @@ export function oauth1BaseString(method: string, baseUrl: string, allParams: Rec
 
 /**
  * Build the OAuth `Authorization` header for a request. `queryParams` must include
- * every query-string parameter that is actually sent on the URL — they participate
+ * every query-string parameter that is actually sent on the URL, they participate
  * in the signature base string.
  */
 export function oauth1Header(

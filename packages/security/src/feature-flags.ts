@@ -15,12 +15,19 @@ export interface DistributorLinkFlags {
   browserLinkProvider: 'steel';
   /** MUST remain false in every environment. Gated by assertNoHostedCredentialForm. */
   enableHostedCredentialForm: boolean;
-  /** Live DistroKid scanning — double-gated with the legal-review flag below. */
+  /** Live DistroKid scanning, double-gated with the legal-review flag below. */
   enableDistroKidLiveScanner: boolean;
   legalReviewDistroKidScannerApproved: boolean;
   /** Queued deep scans are always handed to a separate BullMQ worker. */
   deepScanDispatch: 'bullmq';
   deepScanMaxConcurrency: number;
+  /**
+   * When false (the default), store-presence verification does NOT auto-fire after a DistroKid
+   * catalogue scrape finishes. Scraping is a standalone product surface; the store check runs
+   * only when a user explicitly triggers it. Set SCAN_STORE_PRESENCE_AUTO=true to restore the
+   * legacy "scrape then immediately verify" chain.
+   */
+  storePresenceAuto: boolean;
   distributorScanMinDelayMs: number;
   distributorScanMaxPagesPerRun: number;
   distributorScanMaxReleasesPerRun: number;
@@ -84,6 +91,7 @@ export function readDistributorLinkFlags(env: NodeJS.ProcessEnv = process.env): 
     legalReviewDistroKidScannerApproved: boolEnv(env.LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED, false),
     deepScanDispatch: 'bullmq',
     deepScanMaxConcurrency: intEnv(env.DEEP_SCAN_MAX_CONCURRENCY, 1),
+    storePresenceAuto: boolEnv(env.SCAN_STORE_PRESENCE_AUTO, false),
     distributorScanMinDelayMs: intEnv(env.DISTRIBUTOR_SCAN_MIN_DELAY_MS, 1500),
     distributorScanMaxPagesPerRun: intEnv(env.DISTRIBUTOR_SCAN_MAX_PAGES_PER_RUN, 500),
     distributorScanMaxReleasesPerRun: intEnv(env.DISTRIBUTOR_SCAN_MAX_RELEASES_PER_RUN, 1000),

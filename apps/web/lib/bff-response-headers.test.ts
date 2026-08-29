@@ -8,8 +8,10 @@ describe('BFF response header allowlist', () => {
       'set-cookie': 'upstream-secret=1',
       'x-internal-debug': 'private',
       'x-sentinel-next-cursor': 'opaque.next',
+      'x-sentinel-organization-selection': 'invalid',
     }));
     expect(result.get('x-sentinel-next-cursor')).toBe('opaque.next');
+    expect(result.get('x-sentinel-organization-selection')).toBe('invalid');
     expect(result.get('content-type')).toBe('application/json');
     expect(result.has('set-cookie')).toBe(false);
     expect(result.has('x-internal-debug')).toBe(false);

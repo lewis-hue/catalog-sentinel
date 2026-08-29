@@ -28,7 +28,7 @@ const NOOP_SPAN: SpanHandle = {
   end() {},
 };
 
-/** Does nothing but run the surrounding code — the safe default everywhere. */
+/** Does nothing but run the surrounding code, the safe default everywhere. */
 export class NoopTelemetry implements Telemetry {
   startSpan(_name: string, _attrs?: Attributes): SpanHandle {
     return NOOP_SPAN;
@@ -37,7 +37,7 @@ export class NoopTelemetry implements Telemetry {
   recordHistogram(_name: string, _value: number, _attrs?: Attributes): void {}
 }
 
-/** Records everything in memory — for tests/assertions. */
+/** Records everything in memory, for tests/assertions. */
 export class RecordingTelemetry implements Telemetry {
   readonly spans: Array<{ name: string; attrs: Attributes; status?: 'ok' | 'error'; errors: unknown[] }> = [];
   readonly counters: Array<{ name: string; value: number; attrs: Attributes }> = [];
@@ -168,7 +168,7 @@ export async function startNodeTelemetry(
     setTelemetry(telemetry);
     return { telemetry, shutdown: () => sdk.shutdown() };
   } catch (err) {
-    // Never let telemetry setup break the service — fall back to no-op.
+    // Never let telemetry setup break the service, fall back to no-op.
     console.warn(`[telemetry] OpenTelemetry requested but could not start; continuing without it: ${err instanceof Error ? err.message : String(err)}`);
     const telemetry = new NoopTelemetry();
     setTelemetry(telemetry);

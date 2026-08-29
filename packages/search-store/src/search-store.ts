@@ -21,6 +21,21 @@ export interface PerStoreLike {
   reviewNotes?: string;
 }
 
+/** Store-side lyric availability for one track, from the lyrics-verification microservice.
+ *  `found`/`not-found`/`unverifiable` mirror the never-false-missing rule: a lookup failure is
+ *  `unverifiable`, never a claim that lyrics are absent. */
+export interface LyricsStoreLike {
+  status: 'found' | 'not-found' | 'unverifiable';
+  /** The store/aggregator holds plain lyrics for this track. */
+  plain: boolean;
+  /** The store/aggregator holds time-synced (LRC) lyrics for this track. */
+  synced: boolean;
+  /** True when the matched track is marked instrumental (legitimately lyric-free). */
+  instrumental: boolean;
+  /** Which source answered (e.g. "lrclib"). */
+  source: string;
+}
+
 /**
  * Public, durable field evidence from the distributor extractor. A null scalar alone cannot say
  * whether the distributor omitted a value or Sentinel failed to capture it, so catalog records
@@ -71,6 +86,8 @@ export interface CatalogTrackLike {
   isrc: string | null;
   artworkUrl: string | null;
   perStore: PerStoreLike[];
+  /** Store-side lyric availability (LRCLIB), present once the lyrics check has run for this track. */
+  lyricsStore?: LyricsStoreLike | null;
   /** Release-level distributor metadata (present when scanned from a connected/imported catalogue). */
   label?: string | null;
   upc?: string | null;
@@ -166,7 +183,11 @@ export interface SearchInput {
 
 /** Progress of the background multi-platform deep scan for a search. */
 export interface DeepScanState {
-  status: 'idle' | 'queued' | 'running' | 'done' | 'error';
+  // `unchecked` = the catalogue is scraped but store-presence verification has NOT been run and is
+  // not queued (the decoupled default). Unlike `idle`, a transient in-lifecycle state treated as
+  // active, `unchecked` is terminal: the record is deletable and the UI shows a "Check stores"
+  // call to action instead of polling for a job that will never arrive.
+  status: 'unchecked' | 'idle' | 'queued' | 'running' | 'done' | 'error';
   platformsPending: string[];
   platformsDone: string[];
   startedAt?: string;
@@ -177,12 +198,25 @@ export interface DeepScanState {
   error?: string;
 }
 
+/** Progress of the background lyric-availability verification (LRCLIB) for a search. Independent of
+ *  `deepScan` (store presence) so the two fault-isolated checks run and report separately. */
+export interface LyricsScanState {
+  status: 'unchecked' | 'idle' | 'queued' | 'running' | 'done' | 'error';
+  /** Tracks whose lyric availability has been resolved so far. */
+  checked: number;
+  /** Total tracks to resolve. */
+  total: number;
+  startedAt?: string;
+  updatedAt?: string;
+  error?: string;
+}
+
 export interface SearchRecord {
   id: string;
   /** Monotonic concurrency token shared by hot and durable tiers. Missing means legacy revision 0. */
   revision?: number;
   /**
-   * Owning tenant. Every read on behalf of a user MUST be filtered by this — see
+   * Owning tenant. Every read on behalf of a user MUST be filtered by this, see
    * `apps/api/src/tenant-scoped-search-store.ts`.
    *
    * Records written before this field existed have no tenant; they are quarantined in the
@@ -205,6 +239,8 @@ export interface SearchRecord {
   result: CatalogResultLike;
   released?: ReleasedTrackLike[];
   deepScan?: DeepScanState;
+  /** Progress + results of the independent lyric-availability (LRCLIB) check. */
+  lyricsScan?: LyricsScanState;
 }
 
 /** Quarantine namespace for records written before tenant ownership was mandatory. */

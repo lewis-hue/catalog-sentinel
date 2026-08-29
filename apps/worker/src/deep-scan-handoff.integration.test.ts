@@ -26,7 +26,7 @@ import { startDeepScanWorker, connectionFromUrl, type DeepScanJobPayload } from 
  *   REDIS_URL=redis://localhost:6379 npx vitest run deep-scan-handoff.integration
  *
  * It proves the real production path: a QUEUED scan is enqueued to Redis (via
- * BullMqDeepScanDispatcher — NOT run in-process), a separate BullMQ worker consumes
+ * BullMqDeepScanDispatcher, NOT run in-process), a separate BullMQ worker consumes
  * the job and runs it via executeDeepScanRun against the SHARED repository, and the
  * finished results land back where the API would read them.
  *

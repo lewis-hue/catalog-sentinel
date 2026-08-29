@@ -68,7 +68,7 @@ describe('loopback carve-out: a production build runs locally over http without 
   } as NodeJS.ProcessEnv;
 
   it('allows http for localhost / loopback endpoints even in production', () => {
-    // `KEYCLOAK_BASE_URL=http://keycloak:8080` is NOT loopback — it is a docker service name — so
+    // `KEYCLOAK_BASE_URL=http://keycloak:8080` is NOT loopback, it is a docker service name, so
     // it would fail the guard. Loopback is localhost/127.x/::1 only. Use loopback for the internal
     // base too in the pure-localhost case.
     const cfg = getWebAuthConfig(undefined, { ...localhost, KEYCLOAK_BASE_URL: 'http://127.0.0.1:8080' });

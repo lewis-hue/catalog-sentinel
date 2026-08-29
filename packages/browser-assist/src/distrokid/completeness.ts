@@ -17,7 +17,7 @@ import { isExtractionFailure, type CanonicalDistributorRelease, type ReleaseExtr
 export type { ExtractionCompleteness, SnapshotStatus } from '@sentinel/contracts';
 
 export interface ReconcileInput {
-  /** Release ids from the catalog index — the authoritative expectation. */
+  /** Release ids from the catalog index, the authoritative expectation. */
   expectedReleaseIds: string[];
   outcomes: ReleaseExtractionOutcome[];
   /** Track count expected from the index, when the index exposes it. */
@@ -78,7 +78,7 @@ export function reconcile(input: ReconcileInput): { completeness: ExtractionComp
     else skippedReleases++;
   }
 
-  // A release indexed but with NO terminal outcome is unresolved — this is what makes a
+  // A release indexed but with NO terminal outcome is unresolved, this is what makes a
   // snapshot non-complete. Silent skips are exactly the bug we're preventing.
   const unresolvedReleaseIds = input.expectedReleaseIds.filter((id) => !byId.has(id));
 
@@ -137,7 +137,7 @@ export function deriveStatus(c: ExtractionCompleteness): SnapshotStatus {
   // an unknown expectation is reported as unknown rather than manufacturing equality.
   if (c.expectedTracksKnown && c.extractedTracks !== c.expectedTracks) return 'PARTIAL_RETRYABLE';
   // Everything was attempted and completed. If identifiers are missing only because the
-  // distributor itself has none, that's a COMPLETE snapshot with source gaps — not our failure.
+  // distributor itself has none, that's a COMPLETE snapshot with source gaps, not our failure.
   // New producers audit the complete provenance-bearing model (including artwork, dates and
   // label). Fall back to the legacy identifier-only counters for an old in-flight finalizer.
   const ourGaps = c.metadataFieldsNotCaptured
@@ -148,7 +148,7 @@ export function deriveStatus(c: ExtractionCompleteness): SnapshotStatus {
   return sourceGaps > 0 ? 'COMPLETE_WITH_SOURCE_GAPS' : 'COMPLETE';
 }
 
-/** Releases that should be retried — failed, unresolved, or field-incomplete; never the whole catalog. */
+/** Releases that should be retried, failed, unresolved, or field-incomplete; never the whole catalog. */
 export function retryableReleaseIds(input: ReconcileInput): string[] {
   const retryable = new Set<string>(input.outcomes.filter((o) => o.kind === 'FAILED' && isRetryable(o.reason)).map((o) => (o as { distributorReleaseId: string }).distributorReleaseId));
   const attempted = new Set(input.outcomes.map((o) => (o.kind === 'COMPLETED' ? o.release.distributorReleaseId : o.distributorReleaseId)));

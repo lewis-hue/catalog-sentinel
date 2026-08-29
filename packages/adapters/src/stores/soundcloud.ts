@@ -10,7 +10,7 @@ import {
 } from './types';
 
 /**
- * SoundCloud store-presence provider — official SoundCloud API (api.soundcloud.com),
+ * SoundCloud store-presence provider, official SoundCloud API (api.soundcloud.com),
  * client-credentials OAuth2.
  *   - POST /oauth/token (client_credentials)      → bearer token
  *   - GET  /resolve?url={profileUrl}              → resolve the artist's user id

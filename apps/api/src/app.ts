@@ -1,5 +1,7 @@
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import {
+  InsecureConfigurationError,
   envelopeEncryptorFromEnv,
   isProductionEnvironment,
   securityHeaders,
@@ -25,14 +27,16 @@ import {
 import {
   createDistroKidProducer,
   createPresenceProducer,
+  createLyricsProducer,
   connectionFromUrl,
 } from '@sentinel/queue-client';
-import { PostgresCandidateStore } from '@sentinel/persistence';
+import { PostgresCandidateStore, DistroKidOutcomeRepository } from '@sentinel/persistence';
 import type { CandidateSink, StoredCandidate } from '@sentinel/contracts';
 import { resolveCorsOrigin } from './cors';
 import {
   DistributorConnect,
   RedisConnectSessionRegistry,
+  sessionReuseEnabled,
   type ConnectSessionRegistry,
   type ConnectSessionRedis,
 } from './distributor-connect';
@@ -56,6 +60,7 @@ import {
   GovernanceConflictError,
   GovernanceValidationError,
   DistroKidRecoveryAlreadyTerminalError,
+  deterministicPersonalWorkspaceId,
   PostgresDistroKidRecoveryRepository,
   type GovernanceActor,
   type InvitationAcceptor,
@@ -100,6 +105,9 @@ export interface AppDeps {
   /** Inject persistence and dispatch seams for focused route/contract tests. */
   searchStore?: SearchStore;
   enqueueDeepScan?: (searchId: string, tenantId: string) => Promise<void>;
+  enqueueLyricsCheck?: (searchId: string, tenantId: string) => Promise<void>;
+  /** Test/composition seam for the Postgres outcome repo the catalogue + lyrics-check + marks use. */
+  catalogueRepo?: Pick<DistroKidOutcomeRepository, 'readCatalogue' | 'setStoreLyricsProgress' | 'readStoreLyricsProgress' | 'updateTrackMarks'>;
   runFastCatalogScan?: typeof runCatalogScan;
   runReleasedCatalogScan?: typeof scanReleasedCatalog;
   /** Test/composition seam for a concrete OIDC verifier key and issuer. */
@@ -246,11 +254,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // CORS.
     //
     // `authorization` MUST be allowed: with bearer auth and a cross-origin frontend, the browser's
-    // preflight rejects every authenticated request without it — so auth would appear "broken"
+    // preflight rejects every authenticated request without it, so auth would appear "broken"
     // for reasons invisible in the API's own logs, since the request never arrives.
     //
     // The origin is not `*` in production: a wildcard invites any site to call this API with the
-    // user's credentials. If APP_BASE_URL isn't set we send no ACAO header at all — same-origin
+    // user's credentials. If APP_BASE_URL isn't set we send no ACAO header at all, same-origin
     // deployments (the Compose setup proxies /api through the web origin) don't need one, and a
     // missing header fails closed instead of open.
     const corsOrigin = resolveCorsOrigin(process.env);
@@ -259,7 +267,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       reply.header('Access-Control-Allow-Origin', corsOrigin);
     }
     reply.header('Vary', 'Origin');
-    reply.header('Access-Control-Allow-Headers', 'content-type, authorization, x-request-id, idempotency-key, traceparent');
+    reply.header('Access-Control-Allow-Headers', 'content-type, authorization, x-request-id, idempotency-key, traceparent, x-sentinel-organization-id');
+    reply.header('Access-Control-Expose-Headers', 'x-sentinel-next-cursor, x-sentinel-organization-selection');
     reply.header('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
     reply.header('Access-Control-Max-Age', '600');
     return payload;
@@ -306,29 +315,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   // --- Secure Distributor Link + Deep Catalog Scan ------------------------
-  // Tenant context comes only from the verified principal. Legacy header/body/query claims may
-  // repeat that tenant for compatibility, but can never select or impersonate another tenant.
-  const tenantOf = (req: { headers: Record<string, unknown>; auth?: { tenantId?: string } }, bodyTenantId?: string): { tenantId: string } | null => {
-    const header = req.headers['x-tenant-id'];
-    const claimed = (typeof header === 'string' && header) || bodyTenantId;
+  // A request's effective tenant is resolved once by the organization pre-handler below. The
+  // verified Keycloak subject is always a safe personal fallback. A signed `tenant_id` or an
+  // explicit browser selector is only accepted after current database membership is proven.
+  const tenantContexts = new WeakMap<FastifyRequest, { tenantId: string; personalWorkspaceId?: string }>();
+  const effectiveTenantId = (req: FastifyRequest): string => {
+    const resolved = tenantContexts.get(req)?.tenantId;
+    if (resolved) return resolved;
     const organizationHeader = req.headers['x-sentinel-organization-id'];
-    const selectedOrganization = typeof organizationHeader === 'string' ? organizationHeader.trim() : '';
-    if (selectedOrganization) {
-      if (bodyTenantId && bodyTenantId !== selectedOrganization) return null;
-      return { tenantId: selectedOrganization };
+    if (typeof organizationHeader === 'string' && organizationHeader.trim()) return organizationHeader.trim();
+    return req.auth.authenticated ? req.auth.sub : req.auth.tenantId;
+  };
+  const tenantOf = (req: FastifyRequest, bodyTenantId?: string): { tenantId: string } | null => {
+    if (!authVerifier.enabled) {
+      const header = req.headers['x-tenant-id'];
+      const claimed = (typeof header === 'string' && header) || bodyTenantId;
+      return { tenantId: claimed || req.auth?.tenantId || 'default' };
     }
-    const tenantId = req.auth?.tenantId;
-    // Isolated tests can exercise tenant scoping without a token. This branch is unreachable in
-    // every deployed runtime because application construction requires Keycloak enforcement.
-    if (!authVerifier.enabled) return { tenantId: claimed || tenantId || 'default' };
-    if (!tenantId || (claimed && claimed !== tenantId)) return null;
+    const tenantId = effectiveTenantId(req);
+    if (!tenantId || (bodyTenantId && bodyTenantId !== tenantId)) return null;
     return { tenantId };
   };
 
   const governanceActor = (req: FastifyRequest): GovernanceActor => ({
-    tenantId: typeof req.headers['x-sentinel-organization-id'] === 'string'
-      ? req.headers['x-sentinel-organization-id'].trim()
-      : req.auth.tenantId,
+    tenantId: effectiveTenantId(req),
     subjectId: req.auth.sub,
   });
   const organizationContexts = new WeakMap<FastifyRequest, { tenantId: string; administrator: boolean }>();
@@ -361,32 +371,66 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.addHook('preHandler', async (req, reply) => {
     const selectedOrganization = req.headers['x-sentinel-organization-id'];
     const routePattern = req.routeOptions.url;
+    // Readiness describes the configured Steel connector, not a customer tenant. A stale browser
+    // workspace selector must never turn a healthy Steel dependency into an organization 403.
+    if (routePattern === '/api/integrations/steel/status') return;
+    // Invitation acceptance is authorized by the hashed bearer plus verified token email. The
+    // invitee is not a member of that organization until this transaction commits, so ignore any
+    // stale selector left by a previous browser account.
+    if (routePattern === '/api/organization/invitations/accept') {
+      if (req.auth.authenticated) tenantContexts.set(req, { tenantId: req.auth.sub });
+      return;
+    }
     const skipsPersonalProvisioning = routePattern === '/api/organization/invitations/accept'
       || routePattern === '/api/organization/erasure-requests/:requestId';
+    if (selectedOrganization !== undefined && !validIdentifier(selectedOrganization)) {
+      return void reply.status(400).send({ error: 'x-sentinel-organization-id is invalid' });
+    }
     if (req.auth.authenticated
-      && req.auth.tenantId === req.auth.sub
       && routePattern?.startsWith('/api/')
-      && (typeof selectedOrganization !== 'string' || !selectedOrganization.trim())
-      && !skipsPersonalProvisioning) {
+      && (typeof selectedOrganization !== 'string' || !selectedOrganization.trim())) {
+      if (skipsPersonalProvisioning) {
+        tenantContexts.set(req, { tenantId: req.auth.tenantId });
+        return;
+      }
       if (!deps.organization) {
         if (process.env.NODE_ENV !== 'test') {
           return void reply.status(503).send({ error: 'organization provisioning unavailable' });
         }
+        // Focused tests intentionally omit the production membership repository and retain their
+        // injected tenant claim. Every deployed composition requires the repository above.
+        tenantContexts.set(req, { tenantId: req.auth.tenantId });
       } else {
+        // A legacy signed tenant claim may still name a shared organization. It is a candidate,
+        // not authority: retain it only when current durable membership succeeds. Google broker
+        // subjects and new local users fall through to the personal workspace derived from `sub`.
+        const claimedTenant = req.auth.tenantId.trim();
+        if (claimedTenant && claimedTenant !== req.auth.sub) {
+          const claimedActor = { tenantId: claimedTenant, subjectId: req.auth.sub };
+          try {
+            await deps.organization.listWorkspaceMemberships(claimedActor);
+            tenantContexts.set(req, { tenantId: claimedTenant });
+            return;
+          } catch (error) {
+            if (!(error instanceof GovernanceAuthorizationError)) {
+              return void governanceFailure(reply, error, 'organization.home.resolve');
+            }
+          }
+        }
         try {
-          await deps.organization.provisionPersonalOrganization(req.auth.tenantId, req.auth.sub);
+          const provisioned = await deps.organization.provisionPersonalOrganization(req.auth.sub, req.auth.sub);
+          tenantContexts.set(req, {
+            tenantId: provisioned.tenantId,
+            personalWorkspaceId: provisioned.workspaceId,
+          });
+          organizationContexts.set(req, { tenantId: provisioned.tenantId, administrator: true });
         } catch (error) {
           return void governanceFailure(reply, error, 'organization.personal.provision');
         }
       }
-    }
-    if (selectedOrganization !== undefined && !validIdentifier(selectedOrganization)) {
-      return void reply.status(400).send({ error: 'x-sentinel-organization-id is invalid' });
+      return;
     }
     if (typeof selectedOrganization !== 'string' || !selectedOrganization.trim() || !req.auth.authenticated) return;
-    // Invitation acceptance is authorized by its hashed bearer plus the token's verified email;
-    // the subject cannot be a member of the invited organization until that transaction commits.
-    if (req.routeOptions.url === '/api/organization/invitations/accept') return;
     if (!deps.organization) {
       if (process.env.NODE_ENV === 'test') return;
       return void reply.status(503).send({ error: 'organization service unavailable' });
@@ -404,8 +448,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       } catch (error) {
         if (!(error instanceof GovernanceAuthorizationError)) throw error;
       }
+      tenantContexts.set(req, { tenantId: actor.tenantId });
       organizationContexts.set(req, { tenantId: actor.tenantId, administrator });
     } catch (error) {
+      if (error instanceof GovernanceAuthorizationError) {
+        reply.header('x-sentinel-organization-selection', 'invalid');
+      }
       return void governanceFailure(reply, error, 'organization.select');
     }
   });
@@ -433,11 +481,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     workspaceValue: unknown,
     capability: 'READ' | 'EDIT' | 'MANAGE_MEMBERS' | 'DELETE',
   ): Promise<{ workspaceId: string; tenantId: string } | null> => {
-    if (!validIdentifier(workspaceValue)) {
+    let workspaceId: string;
+    if (workspaceValue === undefined || workspaceValue === null || workspaceValue === '') {
+      const actor = governanceActor(req);
+      // Ordinary users never need to know or submit an organization/workspace identifier. Their
+      // first authenticated request provisioned this deterministic personal workspace above.
+      if (actor.tenantId !== req.auth.sub) {
+        reply.status(400).send({ error: 'artistWorkspaceId is required when a team organization is selected' });
+        return null;
+      }
+      workspaceId = tenantContexts.get(req)?.personalWorkspaceId
+        ?? deterministicPersonalWorkspaceId(req.auth.sub, req.auth.sub);
+    } else if (!validIdentifier(workspaceValue)) {
       reply.status(400).send({ error: 'artistWorkspaceId must identify an existing workspace' });
       return null;
+    } else {
+      workspaceId = workspaceValue.trim();
     }
-    const workspaceId = workspaceValue.trim();
     // Existing focused tests may omit the production repository. No deployed composition may do
     // so because construction above fails closed outside NODE_ENV=test.
     if (!deps.organization && process.env.NODE_ENV === 'test') {
@@ -719,14 +779,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     },
   );
 
-  app.post('/api/consent', { preHandler: requireRole('artist_manager', 'tenant_admin') }, async (req, reply) => {
+  app.post('/api/consent', { preHandler: requireRole('user', 'artist_manager', 'tenant_admin') }, async (req, reply) => {
     if (!await enforceProductionRateLimit(req, reply, 'consent')) return;
     const b = (req.body ?? {}) as { tenantId?: string; artistWorkspaceId?: string; distributor?: string; scope?: string; provider?: string };
     const ctx = tenantOf(req, b.tenantId);
-    const artistWorkspaceId = typeof b.artistWorkspaceId === 'string' ? b.artistWorkspaceId.trim() : '';
+    const artistWorkspaceId = typeof b.artistWorkspaceId === 'string' ? b.artistWorkspaceId.trim() : undefined;
     const distributor = typeof b.distributor === 'string' ? b.distributor.trim().toLowerCase() : '';
     if (!ctx) return reply.status(400).send({ error: 'tenant claim does not match the authenticated principal' });
-    if (!artistWorkspaceId || artistWorkspaceId.length > 256 || hasDisallowedControlCharacter(artistWorkspaceId)) {
+    if (artistWorkspaceId && (artistWorkspaceId.length > 256 || hasDisallowedControlCharacter(artistWorkspaceId))) {
       return reply.status(400).send({ error: 'artistWorkspaceId must be a valid value of at most 256 characters' });
     }
     if (distributor !== 'distrokid') return reply.status(400).send({ error: 'only DistroKid is supported by the active connect flow' });
@@ -757,7 +817,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     };
   });
 
-  app.post('/api/consent/:id/revoke', { preHandler: requireRole('artist_manager', 'tenant_admin') }, async (req, reply) => {
+  app.post('/api/consent/:id/revoke', { preHandler: requireRole('user', 'artist_manager', 'tenant_admin') }, async (req, reply) => {
     const ctx = tenantOf(req);
     if (!ctx) return reply.status(400).send({ error: 'tenant claim does not match the authenticated principal' });
     const consentId = (req.params as { id: string }).id;
@@ -868,6 +928,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
   rateLimitRedis = built.redis as unknown as RateLimitRedis | null;
   const presenceProducer = redis && redisUrl ? createPresenceProducer(connectionFromUrl(redisUrl)) : null;
+  const lyricsProducer = redis && redisUrl ? createLyricsProducer(connectionFromUrl(redisUrl)) : null;
   // Sanitized endpoint candidates observed during scans (served by the admin route below).
   //
   // Durable in every deployment. The process-local implementation is reachable only from an
@@ -875,11 +936,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const candidateStore: CandidateSink & { list(t: string, s: string): Promise<StoredCandidate[]> | StoredCandidate[] } =
     built.pgPool ? new PostgresCandidateStore(built.pgPool) : new ScanCandidateStore();
   if (!built.pgPool) app.log.warn('Test-only endpoint candidate store is process-local.');
+  // Read-back of the pure scraped catalogue (releases + tracks + metadata + art), decoupled from
+  // store-presence verification, the standalone foundation the Catalogue dashboard reads.
+  const catalogueRepo = deps.catalogueRepo ?? (built.pgPool ? new DistroKidOutcomeRepository(built.pgPool) : null);
   // Catalogue-read DISPATCH.
   //
   // `pipeline` is the DEFAULT whenever Redis is present, because it is the only path with crash
   // recovery, failed-release-only retry and durable finalization. The others exist for a dev box
-  // with no Redis and for emergency rollback — they are not equivalent, and defaulting to the
+  // with no Redis and for emergency rollback, they are not equivalent, and defaulting to the
   // weaker one meant the durable pipeline was "available" but effectively unused.
   app.log.info('Catalogue read dispatch: durable network-first pipeline');
   // Enqueues onto `distrokid-catalog-index`, which the worker's six-stage pipeline consumes. Via
@@ -915,6 +979,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     if (consentRevocationRecovery) await consentRevocationRecovery;
     await Promise.allSettled([
       presenceProducer?.close() ?? Promise.resolve(),
+      lyricsProducer?.close() ?? Promise.resolve(),
       dkProducer?.close() ?? Promise.resolve(),
       distributorLink.close(),
       deps.closeAudit?.() ?? Promise.resolve(),
@@ -950,7 +1015,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     retryFailedOnly: true,
     queue: 'distrokid-catalog-index',
   }));
-  // Ranked, SANITIZED endpoint candidates observed during a scan — this is what removes the
+  // Ranked, SANITIZED endpoint candidates observed during a scan, this is what removes the
   // manual "read the logs and hard-code a URL" step. Never returns cookies, headers, tokens,
   // query/POST values or response bodies: only endpoint shape + schema key names.
   app.get('/api/admin/distributor-scans/:scanId/endpoint-candidates', { preHandler: requireRole('tenant_admin', 'platform_admin') }, async (req) => {
@@ -961,10 +1026,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     await audit.log({ tenantId, action: 'distributor.endpoint-candidates.read', targetType: 'DistributorScan', targetId: scanId, metadata: { candidates: candidates.length } });
     return { scanId, tenantId, candidates };
   });
-  // Steel Browser connector status. Safe status only — the
+  // Steel Browser connector status. Safe status only, the
   // API URL is host-only redacted and no secrets, session ids, viewer URLs, or deprecated
   // local-browser alternatives are returned.
-  app.get('/api/integrations/steel/status', { preHandler: requireAuth() }, async () => health.steel());
+  app.get('/api/integrations/steel/status', { preHandler: requireAuth() }, async () => health.distributorLogin());
   // Kick off the background multi-platform deep scan through the BullMQ worker. The API never
   // executes catalogue scans in its request process.
   const enqueueDeepScan = async (searchId: string, tenantId: string): Promise<boolean> => {
@@ -1003,12 +1068,41 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       }
     }
     // No queue and no injected runner. Say so rather than silently returning a scan that will
-    // never progress past its fast pass — the user would just watch it never fill in.
+    // never progress past its fast pass, the user would just watch it never fill in.
     app.log.warn({ searchId }, 'deep scan unavailable: no presence queue configured and no inline runner injected');
     return false;
   };
 
-  app.post('/api/searches', { preHandler: [requireRole('artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+  // Enqueue the fault-isolated store-lyrics check (LRCLIB) on its own queue. Marks the snapshot's
+  // Postgres progress `queued` (NOT the search record) and rolls back to `error` if dispatch fails -
+  // so the check shares no state with the store-presence scan and the two never contend.
+  const enqueueLyricsCheck = async (searchId: string, tenantId: string): Promise<boolean> => {
+    const dispatch = deps.enqueueLyricsCheck
+      ? () => deps.enqueueLyricsCheck!(searchId, tenantId)
+      : lyricsProducer
+        ? () => lyricsProducer.enqueue(searchId, tenantId)
+        : null;
+    if (!dispatch) {
+      app.log.warn({ searchId }, 'lyrics check unavailable: no lyrics queue configured and no inline runner injected');
+      return false;
+    }
+    if (!catalogueRepo) {
+      app.log.warn({ searchId }, 'lyrics check unavailable: no outcome store configured');
+      return false;
+    }
+    await catalogueRepo.setStoreLyricsProgress(tenantId, searchId, { status: 'queued' });
+    try {
+      await dispatch();
+      return true;
+    } catch (error) {
+      await catalogueRepo
+        .setStoreLyricsProgress(tenantId, searchId, { status: 'error', error: 'Lyric check could not be queued.' })
+        .catch(() => null);
+      throw error;
+    }
+  };
+
+  app.post('/api/searches', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
     const b = (req.body ?? {}) as { name?: unknown; artistWorkspaceId?: unknown; artist?: string; distributor?: string; platforms?: string[]; song?: { title?: string; isrc?: string } };
     const artist = (b.artist ?? '').trim();
     if (!artist) return reply.status(400).send({ error: 'artist is required' });
@@ -1055,7 +1149,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
    * platform-admin-only identity does not implicitly receive customer catalogue access.
    *
    * Before this, `list()` returned EVERY tenant's searches to every caller and `get(id)` fetched
-   * by id alone — so an authenticated user could read another tenant's artists, unreleased
+   * by id alone, so an authenticated user could read another tenant's artists, unreleased
    * catalogue and ISRCs by knowing a search id. The record type carried no tenant at all, so
    * there was nothing to filter on even if a route had wanted to.
    */
@@ -1120,7 +1214,184 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return rec;
   });
 
-  app.patch('/api/searches/:id', { preHandler: [requireRole('artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+  // The PURE scraped DistroKid catalogue for a scan, releases + metadata + cover art + tracks +
+  // ISRCs, read from the authoritative outcome tables, independent of store-presence verification.
+  // This is the standalone foundation the Catalogue dashboard renders and exports.
+  app.get('/api/searches/:id/catalogue', { preHandler: [requireAuth(), requireCustomerScanPrincipal] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const scoped = await forPrincipal(req, reply);
+    if (!scoped) return;
+    // Access + enumeration guard: 404 (never 403) if the caller cannot see this search.
+    const rec = await scoped.get(id);
+    if (!rec) return reply.status(404).send({ error: 'search not found' });
+    if (!catalogueRepo) return reply.status(503).send({ error: 'catalogue store unavailable' });
+    const catalogue = await catalogueRepo.readCatalogue(governanceActor(req).tenantId, id);
+    if (!catalogue) return reply.status(404).send({ error: 'no scraped catalogue for this search' });
+    return catalogue;
+  });
+
+  // ON-DEMAND store-presence verification for an already-scraped catalogue. Scraping is decoupled
+  // from verification (SCAN_STORE_PRESENCE_AUTO defaults off), so this is how the "Missing Songs"
+  // module starts a check, in place, on THIS record, so its per-store results join back to the
+  // same catalogue the dashboard renders. Repeatable: the retained queue job is cleared and
+  // progress reset so each trigger runs a full re-scan.
+  app.post('/api/searches/:id/store-check', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const activeTenantId = governanceActor(req).tenantId;
+    const scoped = await forPrincipal(req, reply, activeTenantId);
+    if (!scoped) return;
+    const source = await scoped.get(id);
+    if (!source) return reply.status(404).send({ error: 'search not found' });
+    // The scrape must have finished before we verify what it produced.
+    if (isActiveSearch(source)) {
+      return reply.status(409).send({ error: 'the catalogue scan is still in progress', status: activeSearchStage(source) });
+    }
+    // Never stack a second run on top of one already in flight.
+    const inFlight = source.deepScan?.status;
+    if (inFlight === 'queued' || inFlight === 'running') {
+      return reply.status(409).send({ error: 'a store-presence check is already in progress', status: inFlight });
+    }
+    // No verified tracks means there is nothing to look for across the stores.
+    if (!source.released?.length && !source.result.tracks?.length) {
+      return reply.status(422).send({ error: 'this catalogue has no verified tracks to check' });
+    }
+    // Clear any retained job for this id, then reset progress so the whole catalogue is re-checked
+    // (drops platformsDone / platformTracksVerified). enqueueDeepScan then flips it to 'queued' and
+    // dispatches, rolling the record back to 'error' if the dispatch itself fails.
+    if (presenceProducer) await presenceProducer.remove(id);
+    await scoped.update(id, (record) => ({
+      ...record,
+      deepScan: { status: 'idle', platformsPending: [], platformsDone: [], updatedAt: new Date().toISOString() },
+    }));
+    try {
+      const queued = await enqueueDeepScan(id, activeTenantId);
+      if (!queued) return reply.status(503).send({ error: 'store-presence check is unavailable' });
+    } catch (error) {
+      app.log.error({ errorType: error instanceof Error ? error.name : 'Error', searchId: id }, 'store-presence check queue failed');
+      return reply.status(503).send({ error: 'store-presence check could not be queued' });
+    }
+    const queuedRecord = await scoped.get(id);
+    await audit.log({
+      tenantId: activeTenantId,
+      workspaceId: source.artistWorkspaceId ?? null,
+      actorUserId: req.auth?.sub ?? null,
+      action: 'catalog.search.store-check.triggered',
+      targetType: 'CatalogSearch',
+      targetId: id,
+      metadata: { mode: 'on_demand_store_presence' },
+    });
+    reply.status(202);
+    return { id, operation: 'STORE_PRESENCE_CHECK', deepScan: queuedRecord?.deepScan };
+  });
+
+  // ON-DEMAND lyric-availability verification (LRCLIB) for a scraped catalogue. A fault-isolated
+  // microservice, independent of the store-presence check (they can run concurrently): only the
+  // scrape reading state blocks it. Repeatable in place (results join back to the same catalogue).
+  app.post('/api/searches/:id/lyrics-check', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const activeTenantId = governanceActor(req).tenantId;
+    const scoped = await forPrincipal(req, reply, activeTenantId);
+    if (!scoped) return;
+    const source = await scoped.get(id);
+    if (!source) return reply.status(404).send({ error: 'search not found' });
+    if (!catalogueRepo) return reply.status(503).send({ error: 'lyrics check is unavailable' });
+    // Only the scrape itself blocks a lyrics check, NOT a running store-presence scan (independent).
+    if (source.result.warnings.includes('__reading_in_progress__')) {
+      return reply.status(409).send({ error: 'the catalogue scan is still in progress', status: 'reading_distributor_catalog' });
+    }
+    // "Already running" is read from the snapshot's Postgres progress, the check writes there, not
+    // the search record, so it never collides with a concurrent store-presence scan.
+    const progress = await catalogueRepo.readStoreLyricsProgress(activeTenantId, id);
+    if (progress && (progress.status === 'queued' || progress.status === 'running')) {
+      return reply.status(409).send({ error: 'a lyrics check is already in progress', status: progress.status });
+    }
+    if (!source.result.tracks?.length) {
+      return reply.status(422).send({ error: 'this catalogue has no tracks to check' });
+    }
+    if (lyricsProducer) await lyricsProducer.remove(id);
+    try {
+      const queued = await enqueueLyricsCheck(id, activeTenantId);
+      if (!queued) return reply.status(503).send({ error: 'lyrics check is unavailable' });
+    } catch (error) {
+      app.log.error({ errorType: error instanceof Error ? error.name : 'Error', searchId: id }, 'lyrics check queue failed');
+      return reply.status(503).send({ error: 'lyrics check could not be queued' });
+    }
+    const queued = await catalogueRepo.readStoreLyricsProgress(activeTenantId, id);
+    await audit.log({
+      tenantId: activeTenantId,
+      workspaceId: source.artistWorkspaceId ?? null,
+      actorUserId: req.auth?.sub ?? null,
+      action: 'catalog.search.lyrics-check.triggered',
+      targetType: 'CatalogSearch',
+      targetId: id,
+      metadata: { mode: 'on_demand_lyrics_verification', source: 'lrclib' },
+    });
+    reply.status(202);
+    return { id, operation: 'LYRICS_CHECK', lyricsScan: queued };
+  });
+
+  // Lightweight progress poll for the store-lyrics check. Reads only the snapshot's progress row
+  // (not the full catalogue), so the UI can poll cheaply while the check runs.
+  app.get('/api/searches/:id/lyrics-check', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const activeTenantId = governanceActor(req).tenantId;
+    const scoped = await forPrincipal(req, reply, activeTenantId);
+    if (!scoped) return;
+    const source = await scoped.get(id);
+    if (!source) return reply.status(404).send({ error: 'search not found' });
+    if (!catalogueRepo) return { id, lyricsScan: null };
+    const progress = await catalogueRepo.readStoreLyricsProgress(activeTenantId, id);
+    return { id, lyricsScan: progress };
+  });
+
+  // Bulk manual track marks, the user curates the missing-songs list from the store-health grid
+  // (mark selected songs 'missing' / 'resolved', or clear). A pure annotation on top of the
+  // automated verdict; never mutates the distributor. Body: { marks: [{ releaseId, trackIndex, mark }] }.
+  app.post('/api/searches/:id/track-marks', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+    const id = (req.params as { id: string }).id;
+    const activeTenantId = governanceActor(req).tenantId;
+    const scoped = await forPrincipal(req, reply, activeTenantId);
+    if (!scoped) return;
+    const source = await scoped.get(id);
+    if (!source) return reply.status(404).send({ error: 'search not found' });
+    if (!catalogueRepo) return reply.status(503).send({ error: 'track marks are unavailable' });
+
+    const body = (req.body ?? {}) as { marks?: unknown };
+    if (!Array.isArray(body.marks) || body.marks.length === 0) {
+      return reply.status(422).send({ error: 'provide a non-empty marks array' });
+    }
+    if (body.marks.length > 5000) {
+      return reply.status(413).send({ error: 'too many marks in one request (max 5000)' });
+    }
+    const ALLOWED = new Set(['missing', 'resolved']);
+    const marks: Array<{ releaseId: string; trackIndex: number; mark: string | null; note?: string | null }> = [];
+    for (const raw of body.marks as Array<Record<string, unknown>>) {
+      const releaseId = typeof raw.releaseId === 'string' ? raw.releaseId : null;
+      const trackIndex = typeof raw.trackIndex === 'number' && Number.isInteger(raw.trackIndex) ? raw.trackIndex : null;
+      // `mark` null/'' clears the mark; otherwise it must be one of the allowed states.
+      const markRaw = raw.mark;
+      const mark = markRaw === null || markRaw === '' || markRaw === undefined ? null : String(markRaw);
+      if (!releaseId || trackIndex === null || (mark !== null && !ALLOWED.has(mark))) {
+        return reply.status(422).send({ error: 'each mark needs releaseId, trackIndex and a valid mark (missing|resolved|null)' });
+      }
+      const note = typeof raw.note === 'string' ? raw.note.slice(0, 500) : null;
+      marks.push({ releaseId, trackIndex, mark, note });
+    }
+
+    const updated = await catalogueRepo.updateTrackMarks(activeTenantId, id, marks);
+    await audit.log({
+      tenantId: activeTenantId,
+      workspaceId: source.artistWorkspaceId ?? null,
+      actorUserId: req.auth?.sub ?? null,
+      action: 'catalog.search.track-marks.updated',
+      targetType: 'CatalogSearch',
+      targetId: id,
+      metadata: { count: marks.length, updated },
+    });
+    return { id, updated };
+  });
+
+  app.patch('/api/searches/:id', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
     const searchId = (req.params as { id: string }).id;
     const parsedName = validateScanName((req.body as { name?: unknown } | null)?.name);
     if (!parsedName.ok) return reply.status(400).send({ error: parsedName.error });
@@ -1140,7 +1411,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { id: updated.id, name: updated.name, revision: updated.revision };
   });
 
-  app.delete('/api/searches/:id', { preHandler: [requireRole('artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+  app.delete('/api/searches/:id', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
     const searchId = (req.params as { id: string }).id;
     const scoped = await forPrincipal(req, reply);
     if (!scoped) return;
@@ -1165,7 +1436,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return reply.status(204).send();
   });
 
-  app.post('/api/searches/:id/rescan', { preHandler: [requireRole('artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+  app.post('/api/searches/:id/rescan', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
     const sourceSearchId = (req.params as { id: string }).id;
     const activeTenantId = governanceActor(req).tenantId;
     const scoped = await forPrincipal(req, reply, activeTenantId);
@@ -1280,7 +1551,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { scanId: rec.id, artist: rec.artist, open: items.filter((i) => !i.resolved).length, items };
   });
 
-  app.patch('/api/searches/:id/manual-review/:itemId', { preHandler: [requireRole('artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+  app.patch('/api/searches/:id/manual-review/:itemId', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
     const { id, itemId } = req.params as { id: string; itemId: string };
     const body = (req.body ?? {}) as { decision?: string; notes?: string };
     const decision = body.decision as ManualReviewDecision;
@@ -1324,6 +1595,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         process.env.CONNECT_SESSION_PREFIX ?? `sentinel:${process.env.NODE_ENV ?? 'development'}:connect-session`,
         () => Date.now(),
         envelopeEncryptor,
+        sessionReuseEnabled(process.env),
       )
     : deps.connectSessionRegistry;
   if (!connectRegistry) throw new Error('A durable Redis connect-session registry is required.');
@@ -1425,10 +1697,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     // Recover work left by a previous deployment without waiting one full interval.
     void recover();
   }
-  app.post('/api/connect', { preHandler: requireRole('artist_manager', 'tenant_admin') }, async (req, reply) => {
+  app.post('/api/connect', { preHandler: requireRole('user', 'artist_manager', 'tenant_admin') }, async (req, reply) => {
     if (!await enforceProductionRateLimit(req, reply, 'connect')) return;
     const b = (req.body ?? {}) as { distributor?: string; artist?: string; artists?: string[]; consentId?: string };
-    // Accept a single `artist` (legacy) or `artists[]` (a label with many artists — DistroKid
+    // Accept a single `artist` (legacy) or `artists[]` (a label with many artists, DistroKid
     // Ultimate allows 5–100). Dedupe + trim; cap to a sane roster size.
     if (b.artists !== undefined && (!Array.isArray(b.artists) || b.artists.some((a) => typeof a !== 'string'))) {
       return reply.status(400).send({ error: 'artists must be an array of names' });
@@ -1481,6 +1753,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
     } catch (err) {
       app.log.warn({ errorType: err instanceof Error ? err.name : 'Error' }, 'could not start distributor login');
+      if (err instanceof InsecureConfigurationError) {
+        return reply.status(503).send({
+          error: 'DistroKid connection is disabled by deployment policy. Ask an administrator to verify the approved live-scan configuration.',
+        });
+      }
       return reply.status(502).send({ error: 'could not start distributor login' });
     }
   });
@@ -1488,11 +1765,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
    * Consume an attended-login session and start the read.
    *
    * Authenticated AND ownership-checked. The connect id was previously the only thing needed to
-   * consume a live, logged-in distributor session — a bearer capability in a URL path, which ends
+   * consume a live, logged-in distributor session, a bearer capability in a URL path, which ends
    * up in browser history, referrers, proxy logs and client state. High entropy doesn't change
    * what it is: possession of the string was authorization to read someone's catalogue.
    */
-  app.post('/api/connect/:id/scan', { preHandler: requireRole('artist_manager', 'tenant_admin') }, async (req, reply) => {
+  app.post('/api/connect/:id/scan', { preHandler: requireRole('user', 'artist_manager', 'tenant_admin') }, async (req, reply) => {
     try {
       const connectId = (req.params as { id: string }).id;
       const activeTenantId = governanceActor(req).tenantId;
@@ -1526,7 +1803,50 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
-  app.post('/api/connect/:id/cancel', { preHandler: requireRole('artist_manager', 'tenant_admin') }, async (req, reply) => {
+  // TESTING-ONLY rescan trigger (off unless ENABLE_DEV_RESCAN=true). Lets an operator re-run a scan
+  // against an already-authorized, retained warm session WITHOUT re-login, during the iterate→rescan
+  // loop. It bypasses the Keycloak preHandler, so it is defended three ways: (1) it REFUSES TO BOOT
+  // in production, (2) it accepts only LOOPBACK callers (the real TCP peer, never a spoofable
+  // header), and (3) it requires a shared secret compared in constant time. confirmAndScan still
+  // re-authorizes ownership of the retained session on top of all that.
+  if (/^(1|true|yes|on)$/i.test(process.env.ENABLE_DEV_RESCAN ?? '')) {
+    if (isProductionEnvironment(process.env)) {
+      throw new InsecureConfigurationError('ENABLE_DEV_RESCAN must never be set in a production environment');
+    }
+    const devSecret = (process.env.DEV_RESCAN_SECRET ?? '').trim();
+    if (devSecret.length < 16) {
+      throw new InsecureConfigurationError('ENABLE_DEV_RESCAN requires DEV_RESCAN_SECRET of at least 16 characters');
+    }
+    const devSecretBuf = Buffer.from(devSecret);
+    app.log.warn('DEV rescan trigger ENABLED, testing only (loopback + shared secret). Never enable in production.');
+    app.post('/api/dev/rescan', async (req, reply) => {
+      // Loopback only: the actual TCP peer address, which a header cannot forge.
+      const peer = req.socket.remoteAddress ?? '';
+      if (!(peer === '127.0.0.1' || peer === '::1' || peer === '::ffff:127.0.0.1')) {
+        return reply.status(403).send({ error: 'forbidden' });
+      }
+      // Shared secret, constant-time.
+      const provided = Buffer.from(String(req.headers['x-dev-rescan-secret'] ?? ''));
+      if (provided.length !== devSecretBuf.length || !timingSafeEqual(provided, devSecretBuf)) {
+        return reply.status(403).send({ error: 'forbidden' });
+      }
+      const body = (req.body ?? {}) as { connectId?: string; tenantId?: string; actorUserId?: string };
+      if (!body.connectId || !body.tenantId || !body.actorUserId) {
+        return reply.status(400).send({ error: 'connectId, tenantId, actorUserId are required' });
+      }
+      try {
+        return await connect.confirmAndScan(body.connectId, {
+          tenantId: body.tenantId,
+          actorUserId: body.actorUserId,
+          allowTenantAdmin: false,
+        });
+      } catch (err) {
+        return reply.status(502).send({ error: err instanceof Error ? err.message : 'dev rescan failed' });
+      }
+    });
+  }
+
+  app.post('/api/connect/:id/cancel', { preHandler: requireRole('user', 'artist_manager', 'tenant_admin') }, async (req, reply) => {
     try {
       const connectId = (req.params as { id: string }).id;
       const activeTenantId = governanceActor(req).tenantId;
@@ -1560,9 +1880,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
-  app.post('/api/distributor-imports/csv', { preHandler: [requireRole('artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
+  app.post('/api/distributor-imports/csv', { preHandler: [requireRole('user', 'artist_manager', 'tenant_admin'), requireCustomerScanPrincipal] }, async (req, reply) => {
     // Safe fallback: import an uploaded distributor export (e.g. DistroKid's "Download
-    // CSV") without any automation. This is the authoritative released set — its
+    // CSV") without any automation. This is the authoritative released set, its
     // release-level metadata (label, UPC, release/upload dates) carries through to the
     // catalogue. With `save`, we scan it against the stores and persist a search record.
     const b = (req.body ?? {}) as {

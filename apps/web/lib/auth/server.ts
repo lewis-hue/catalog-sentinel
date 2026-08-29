@@ -1,8 +1,14 @@
 import 'server-only';
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { NextRequest, NextResponse } from 'next/server';
-import { AUTH_COOKIES, type KeycloakWebAuthConfig } from './config';
+import { NextResponse, type NextRequest } from 'next/server';
+import { buildAuthorizationUrl, type AuthorizationFlow } from './authorization';
+import {
+  AUTH_COOKIES,
+  getWebAuthConfig,
+  safeReturnTo,
+  type KeycloakWebAuthConfig,
+} from './config';
 
 export interface KeycloakTokenSet {
   accessToken: string;
@@ -52,6 +58,41 @@ export function randomUrlSafe(bytes = 32): string {
 
 export function pkceChallenge(verifier: string): string {
   return createHash('sha256').update(verifier).digest('base64url');
+}
+
+/**
+ * Start a browser-bound authorization transaction with state, nonce, and PKCE.
+ * Both sign-in and brokered sign-up use the same callback validation path.
+ */
+export function beginAuthorization(
+  request: NextRequest,
+  flow: AuthorizationFlow,
+): NextResponse {
+  const cfg = getWebAuthConfig(request.nextUrl.origin);
+  const returnTo = safeReturnTo(request.nextUrl.searchParams.get('returnTo'));
+  const state = randomUrlSafe();
+  const verifier = randomUrlSafe(48);
+  const nonce = randomUrlSafe();
+  const authorize = buildAuthorizationUrl(cfg, {
+    state,
+    nonce,
+    codeChallenge: pkceChallenge(verifier),
+  }, flow);
+
+  const response = NextResponse.redirect(authorize);
+  const options = {
+    httpOnly: true,
+    secure: cfg.secureCookies,
+    sameSite: 'lax' as const,
+    path: '/auth/callback',
+    maxAge: 600,
+  };
+  response.cookies.set(AUTH_COOKIES.state, state, options);
+  response.cookies.set(AUTH_COOKIES.verifier, verifier, options);
+  response.cookies.set(AUTH_COOKIES.nonce, nonce, options);
+  response.cookies.set(AUTH_COOKIES.returnTo, returnTo, options);
+  response.headers.set('cache-control', 'no-store');
+  return response;
 }
 
 export function constantTimeEqual(left: string, right: string): boolean {
@@ -147,7 +188,6 @@ export async function validateAccessToken(token: string, cfg: KeycloakWebAuthCon
   if (claims.iss !== cfg.issuer) throw new Error('The access token issuer is invalid.');
   if (!claimAudienceIncludes(claims.aud, cfg.apiAudience)) throw new Error('The access token audience is invalid.');
   if (typeof claims.sub !== 'string' || !claims.sub.trim()) throw new Error('The access token subject is missing.');
-  if (typeof claims.tenant_id !== 'string' || !claims.tenant_id.trim()) throw new Error('The access token tenant is missing.');
   if (typeof claims.exp !== 'number' || claims.exp <= now - 30) throw new Error('The access token has expired.');
   if (typeof claims.iat !== 'number' || claims.iat > now + 60) throw new Error('The access token issue time is invalid.');
 }
@@ -279,7 +319,9 @@ export function sessionDisplayFromAccessToken(token: string): SessionDisplay | n
     return {
       subject: claims.sub,
       displayName: candidate?.trim() ?? 'Signed-in user',
-      tenantId: typeof claims.tenant_id === 'string' && claims.tenant_id.trim() ? claims.tenant_id.trim() : null,
+      // Personal isolation is keyed by the verified Keycloak subject. Shared organizations are
+      // explicit database-authorized selections, never a browser-readable token claim.
+      tenantId: claims.sub,
     };
   } catch {
     return null;

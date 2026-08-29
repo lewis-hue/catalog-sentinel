@@ -11,7 +11,7 @@ import {
  * Cross-tenant isolation of the search store.
  *
  * The vulnerability: the API read searches by id alone and listed them with no filter at all, and
- * `SearchRecord` carried no `tenantId` — so there was nothing to filter on even if a route had
+ * `SearchRecord` carried no `tenantId`, so there was nothing to filter on even if a route had
  * tried. With multi-tenant auth enabled, any authenticated caller could read another tenant's
  * artists, unreleased catalogue and ISRCs by knowing a search id, and `GET /api/searches` handed
  * every tenant's scans to everyone.
@@ -32,7 +32,7 @@ describe('TenantScopedSearchStore', () => {
     expect(rec.tenantId).toBe('acme');
   });
 
-  it('returns NULL for another tenant record — not 403, which would confirm it exists', async () => {
+  it('returns NULL for another tenant record, not 403, which would confirm it exists', async () => {
     const inner = new InMemorySearchStore();
     const theirs = await new TenantScopedSearchStore(inner, 'acme').save({ artist: 'Secret Artist', distributor: 'distrokid' }, result('Secret Artist'));
 
@@ -50,7 +50,7 @@ describe('TenantScopedSearchStore', () => {
     const mine = await new TenantScopedSearchStore(inner, 'acme').list();
     expect(mine).toHaveLength(1);
     expect(mine[0]!.artist).toBe('Acme Artist');
-    // The unscoped store still sees both — that's why routes must never touch it directly.
+    // The unscoped store still sees both, that's why routes must never touch it directly.
     expect(await inner.list()).toHaveLength(2);
   });
 
@@ -79,7 +79,7 @@ describe('TenantScopedSearchStore', () => {
 
   it('cannot be tricked into RE-OWNING a record via the mutator', async () => {
     // The mutate callback is caller-supplied. Returning a different tenantId from it must not
-    // move someone else's record — or an update would double as a takeover.
+    // move someone else's record, or an update would double as a takeover.
     const inner = new InMemorySearchStore();
     const scoped = new TenantScopedSearchStore(inner, 'acme');
     const mine = await scoped.save({ artist: 'A', distributor: 'distrokid' }, result('A'));

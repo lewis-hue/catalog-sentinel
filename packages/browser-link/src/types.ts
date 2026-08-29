@@ -40,7 +40,7 @@ export interface CreateBrowserSessionResult {
   status: BrowserSessionStatus;
   expiresAt: string;
   /**
-   * Provider-side session identifier — returned to the BACKEND only, to be
+   * Provider-side session identifier, returned to the BACKEND only, to be
    * stored encrypted. NEVER sent to the frontend.
    */
   providerSessionRef: string;

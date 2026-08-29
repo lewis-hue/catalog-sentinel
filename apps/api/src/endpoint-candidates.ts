@@ -9,7 +9,7 @@ import type { NetworkCandidate, CandidateSink, CandidateScope } from '@sentinel/
  * Scoping rules (a shared mutable "current scan" is a correctness bug, not a shortcut):
  *  - every write carries its {tenantId, scanId} EXPLICITLY, so concurrent scans can never
  *    contaminate each other and API replicas stay consistent;
- *  - every read is filtered by tenant AND scan — a tenant can never see another's candidates.
+ *  - every read is filtered by tenant AND scan, a tenant can never see another's candidates.
  *
  * What is stored: endpoint SHAPE (method/host/masked path/query KEY names/operationName), schema
  * KEY names, a schema hash, score, sizes, timestamps. What is never stored: cookies, auth

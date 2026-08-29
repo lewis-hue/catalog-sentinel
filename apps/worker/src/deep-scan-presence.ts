@@ -72,6 +72,9 @@ export async function runStorePresenceDeepScan(searchId: string, deps: DeepScanP
   const catalogMaxTracks = configuredInteger(env, 'DSP_CATALOG_MAX_TRACKS_PER_ARTIST', undefined, 20_000, 1, 100_000);
   const catalogFetchConcurrency = configuredInteger(env, 'DSP_CATALOG_FETCH_CONCURRENCY', undefined, 2, 1, 16);
   const maxDistinctArtists = configuredInteger(env, 'DEEP_SCAN_MAX_DISTINCT_ARTISTS', undefined, 5_000, 1, 20_000);
+  // How many tracks in a chunk verify in parallel. The rate limiter caps the aggregate request
+  // rate, so this just keeps the pipe full; raise it alongside SERPER_MAX_RPS on a paid plan.
+  const trackConcurrency = configuredInteger(env, 'DEEP_SCAN_TRACK_CONCURRENCY', undefined, 8, 1, 64);
 
   // Plan: enforce an explicit budget, dedupe estimates, and chunk for checkpoints.
   const plannerTracks: PlannerTrack[] = released.map((t) => ({ title: t.title, primaryArtist: t.primaryArtist, isrc: t.isrc }));
@@ -88,7 +91,7 @@ export async function runStorePresenceDeepScan(searchId: string, deps: DeepScanP
     return;
   }
 
-  log(`deep-scan plan: ${searchId} — ${platformNames.length} platform(s) × ${tracksScanned} track(s), ${plan.uniqueQueries} unique queries, ~${plan.estimatedSearchCalls} max search calls, ${plan.chunks.length} chunk(s)`, { platforms: platformNames, skippedOverBudget: plan.skippedOverBudget });
+  log(`deep-scan plan: ${searchId}, ${platformNames.length} platform(s) × ${tracksScanned} track(s), ${plan.uniqueQueries} unique queries, ~${plan.estimatedSearchCalls} max search calls, ${plan.chunks.length} chunk(s)`, { platforms: platformNames, skippedOverBudget: plan.skippedOverBudget });
   if (plan.skippedOverBudget > 0) {
     const message = `Deep scan requires ${released.length} tracks but DEEP_SCAN_MAX_TRACKS_PER_SCAN is ${maxTracks}; no track was silently truncated.`;
     await store.update(searchId, (r) => ({
@@ -142,6 +145,7 @@ export async function runStorePresenceDeepScan(searchId: string, deps: DeepScanP
           releasedTracks: chunkTracks,
           stores: [target],
           prepared,
+          trackConcurrency,
         });
         if (report.results.length !== chunk.length) throw new Error('platform resolver returned a misaligned track set');
         chunk.forEach((origIdx, j) => {

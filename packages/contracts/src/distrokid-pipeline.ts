@@ -1,13 +1,13 @@
 import { z } from 'zod';
 
 /**
- * DistroKid extraction pipeline — the CROSS-APPLICATION contract.
+ * DistroKid extraction pipeline, the CROSS-APPLICATION contract.
  *
  * These types used to live in `apps/worker`, which forced the API to import the worker
  * application (and transitively Playwright) just to enqueue a job. An audit correctly called that
  * out as the wrong dependency direction: applications must not import other applications.
  *
- * This package therefore owns the wire format and nothing else — no queue driver, no browser, no
+ * This package therefore owns the wire format and nothing else, no queue driver, no browser, no
  * database. The producer (API) and the consumer (worker) both depend on it, and on each other
  * not at all.
  *
@@ -74,13 +74,13 @@ export const snapshotRefSchema = z.object({
  * The extraction PASS a job belongs to. Pass 1 is the initial sweep; pass N>1 is the Nth
  * retry-failed-only sweep.
  *
- * This is not bookkeeping — it is part of every job id from the chunk stage onward. Without it,
+ * This is not bookkeeping, it is part of every job id from the chunk stage onward. Without it,
  * the second reconciliation re-used the first one's id; BullMQ retains completed jobs
  * (`removeOnComplete: 500`) and treats a colliding add as the existing job, so the retry pass's
  * reconciliation silently never ran and the snapshot never finalized.
  *
  * It also has to travel ON THE JOB. It was previously a default function parameter
- * (`reconcile(job, deps, attempt = 1)`), which the queue worker could not supply — so every
+ * (`reconcile(job, deps, attempt = 1)`), which the queue worker could not supply, so every
  * reconciliation believed it was pass 1 and re-enqueued retry pass 2 forever. That infinite loop
  * was invisible only because the id collision above discarded the repeat.
  */
@@ -94,14 +94,14 @@ export const releaseChunkJobSchema = snapshotRefSchema.extend({
   chunkIndex: z.number().int().nonnegative(),
   releaseIds: z.array(z.string().min(1)),
   pass: passField,
-  /** How many chunks this pass enqueued — lets the LAST chunk of the pass trigger its reconcile
+  /** How many chunks this pass enqueued, lets the LAST chunk of the pass trigger its reconcile
    *  without racing the others. */
   passChunkCount: z.number().int().nonnegative().optional(),
   /**
    * How many times this chunk has been deferred because another worker held the account lock.
    *
    * It is part of the JOB ID. Without it, a deferred chunk re-enqueues under the id of the job
-   * currently running, BullMQ treats it as a duplicate, and the chunk is dropped — silently, and
+   * currently running, BullMQ treats it as a duplicate, and the chunk is dropped, silently, and
    * forever. With per-account concurrency of 1 that stranded every chunk after the first, so any
    * catalogue over one chunk could never finish.
    */
@@ -118,7 +118,7 @@ export type RetryFailedJob = z.infer<typeof retryFailedJobSchema>;
 export type ReconcileJob = z.infer<typeof reconcileJobSchema>;
 
 // ---------------------------------------------------------------------------
-// Completeness — the finalize payload's shape
+// Completeness, the finalize payload's shape
 // ---------------------------------------------------------------------------
 
 /**
@@ -150,7 +150,7 @@ export interface ExtractionCompleteness {
   /** Absent because the distributor genuinely has no value (not our failure). */
   releasesUpcAbsentAtSource: number;
   tracksIsrcAbsentAtSource: number;
-  /** Absent because OUR extraction failed — retryable, and must never read as "missing". */
+  /** Absent because OUR extraction failed, retryable, and must never read as "missing". */
   releasesUpcNotCaptured: number;
   tracksIsrcNotCaptured: number;
 
@@ -217,7 +217,7 @@ const completenessSchema: z.ZodType<
 export const finalizeJobSchema = snapshotRefSchema.extend({
   status: z.enum(['COMPLETE', 'COMPLETE_WITH_SOURCE_GAPS', 'PARTIAL_RETRYABLE', 'PARTIAL_REAUTH_REQUIRED', 'FAILED_SCHEMA_CHANGED', 'FAILED']),
   completeness: completenessSchema,
-  /** The pass that produced this terminal verdict — part of the job id for the same reason as
+  /** The pass that produced this terminal verdict, part of the job id for the same reason as
    *  reconcile: a snapshot that reconciles twice must be able to finalize twice. */
   pass: passField,
 });
@@ -228,7 +228,7 @@ export type FinalizeJob = z.infer<typeof finalizeJobSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * BullMQ REJECTS a custom job id containing ":" — it namespaces its own Redis keys with colons,
+ * BullMQ REJECTS a custom job id containing ":", it namespaces its own Redis keys with colons,
  * so a colon in the id would collide with its key structure ("Custom Id cannot contain :").
  *
  * These ids were previously colon-joined, which meant every enqueue threw and the pipeline could
@@ -236,14 +236,14 @@ export type FinalizeJob = z.infer<typeof finalizeJobSchema>;
  * to the handlers through a fake queue and never asked BullMQ to accept an id.
  *
  * So: sanitize each segment, join with "__", and append a short deterministic hash of the ORIGINAL
- * segments. The hash keeps the id exact — without it, sanitizing "a:b" and "a-b" to the same
+ * segments. The hash keeps the id exact, without it, sanitizing "a:b" and "a-b" to the same
  * string would let two different accounts share a job id and silently deduplicate each other's
  * scans. Readable prefix for debugging, hash for correctness.
  */
 const SEP = '__';
 const safeSegment = (s: string): string => s.replace(/[^A-Za-z0-9_-]/g, '-');
 
-/** FNV-1a (32-bit). Deterministic across processes and dependency-free — a contracts package
+/** FNV-1a (32-bit). Deterministic across processes and dependency-free, a contracts package
  *  must stay importable from anywhere, so no node:crypto. */
 function shortHash(parts: readonly string[]): string {
   let h = 0x811c9dc5;
@@ -258,7 +258,7 @@ const buildId = (queue: string, segments: readonly string[]): string =>
   [queue, ...segments.map(safeSegment), shortHash(segments)].join(SEP);
 
 /**
- * A duplicate delivery or a resumed run must be a no-op rather than a double extraction — the id
+ * A duplicate delivery or a resumed run must be a no-op rather than a double extraction, the id
  * is derived from the work, never from a clock or a random value.
  */
 export const jobIds = {
@@ -284,7 +284,7 @@ export const isValidBullJobId = (id: string): boolean => !id.includes(':') && id
 
 /**
  * Validate a job crossing the process boundary. A malformed payload must fail loudly at the edge
- * rather than half-run a catalogue read — and the error must never echo the payload back, since
+ * rather than half-run a catalogue read, and the error must never echo the payload back, since
  * jobs carry a session handle.
  */
 export function parseJob<T>(schema: z.ZodType<T>, raw: unknown, queue: string): T {

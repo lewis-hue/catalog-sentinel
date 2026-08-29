@@ -2,7 +2,7 @@ import type { Page } from 'playwright';
 import { isInspectableUrl } from './redaction';
 
 /**
- * Direct authenticated JSON reader — a GATED optimization, OFF by default.
+ * Direct authenticated JSON reader, a GATED optimization, OFF by default.
  *
  * Passive capture (observing the JSON the dashboard itself fetches during normal navigation) is
  * the default and is already sufficient to fix the render-timing problem. Calling an
@@ -13,7 +13,7 @@ import { isInspectableUrl } from './redaction';
  *  - both flags must be true;
  *  - the URL must be same-origin to the distributor and not a sensitive route;
  *  - only release ids DISCOVERED from the connected user's own catalog may be requested
- *    (callers pass `allowedReleaseIds`) — never enumerate other users' ids;
+ *    (callers pass `allowedReleaseIds`), never enumerate other users' ids;
  *  - a minimum delay between requests (rate-limit preservation);
  *  - stop immediately on reauth/CAPTCHA/forbidden/rate-limit.
  */
@@ -76,7 +76,7 @@ export class DirectJsonReader {
     this.lastRequestAt = this.now();
 
     try {
-      // page.request shares the authenticated context's cookie jar — no session data is copied
+      // page.request shares the authenticated context's cookie jar, no session data is copied
       // out of the browser, and we never read or log it.
       const response = await page.request.get(endpointUrl, { failOnStatusCode: false, headers: { accept: 'application/json' }, timeout: 30_000 });
       const status = response.status();

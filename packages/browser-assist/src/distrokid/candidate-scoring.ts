@@ -4,7 +4,7 @@
  * Discovery must not dump every JSON request into a log for a human to read. It ranks
  * candidates automatically so production can pick an endpoint without manual steps.
  *
- * Scoring works on KEY NAMES ONLY — never values (values may be sensitive).
+ * Scoring works on KEY NAMES ONLY, never values (values may be sensitive).
  */
 import { isSensitiveKey } from './redaction';
 

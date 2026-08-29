@@ -1,5 +1,5 @@
 /**
- * @sentinel/matching — deterministic, confidence-scored cross-platform matching.
+ * @sentinel/matching, deterministic, confidence-scored cross-platform matching.
  * No I/O, no platform coupling: callers normalize items via `toNormalizedItem`
  * then run `matchAgainstCatalog`.
  */

@@ -3,7 +3,7 @@
  *
  * Lives in contracts because it crosses process boundaries (extractor → pipeline → persistence)
  * and because the durable store must be able to name these shapes without depending on the
- * package that produces them — persistence importing browser-assist would drag Playwright into
+ * package that produces them, persistence importing browser-assist would drag Playwright into
  * the database layer.
  *
  * Two corrections over the older shape, both load-bearing:
@@ -14,7 +14,7 @@
  *
  * 2. FIELD-LEVEL STATUS. `null` is not enough: "the distributor has no ISRC for this track" and
  *    "our request timed out" are different facts with different remedies. Every field carries a
- *    status + provenance so the UI can say "Not captured — request timed out" instead of the
+ *    status + provenance so the UI can say "Not captured, request timed out" instead of the
  *    false "Missing".
  */
 
@@ -30,7 +30,7 @@ export type MetadataFieldStatus =
   | 'NOT_AUTHORIZED'
   | 'UNKNOWN';
 
-/** Where a value came from — mirrors the extraction hierarchy (network JSON preferred). */
+/** Where a value came from, mirrors the extraction hierarchy (network JSON preferred). */
 export type MetadataSource = 'OFFICIAL_API' | 'NETWORK_JSON' | 'DIRECT_JSON' | 'PAGE_STATE' | 'DOM' | 'CSV_IMPORT';
 
 export interface MetadataField<T> {
@@ -41,6 +41,15 @@ export interface MetadataField<T> {
   parserVersion: string;
 }
 
+/**
+ * Whether the distributor holds lyrics for a track, per type.
+ * - `present`   , lyrics are uploaded and processed (DistroKid shows the green "uploaded/saved" state).
+ * - `processing`, lyrics were submitted but are not yet approved/processed.
+ * - `none`      , the lyric slot exists and is empty (the artist has not added lyrics).
+ * - `unknown`   , we could not read the state (cell absent / not captured). NEVER shown as "missing".
+ */
+export type LyricStatus = 'present' | 'processing' | 'none' | 'unknown';
+
 export interface CanonicalDistributorTrack {
   distributorTrackId?: string;
   title: string;
@@ -48,6 +57,11 @@ export interface CanonicalDistributorTrack {
   isrc: MetadataField<string>;
   trackNumber?: number;
   durationSec?: number;
+  /**
+   * Distributor-side lyric availability, per type (plain vs time-synced). Absent on tracks read
+   * before this was captured; a `none`/`unknown` is a fact about the distributor, not a store.
+   */
+  lyrics?: { plain: LyricStatus; synced: LyricStatus };
 }
 
 export interface CanonicalDistributorRelease {
@@ -61,13 +75,18 @@ export interface CanonicalDistributorRelease {
   releaseDate: MetadataField<string>;
   uploadDate?: MetadataField<string>;
   label?: MetadataField<string>;
+  /** Stores DistroKid reports it SUBMITTED this release to (authoritative delivery signal, read from
+   *  the album page's "Submitted to X" store icons). `url` is DistroKid's deep-link to the release on
+   *  that store when it provides one (only a few stores). Used to show "Delivered by DistroKid" for
+   *  stores that independent verification can't confirm. */
+  submittedStores?: Array<{ store: string; url: string | null }>;
   tracks: CanonicalDistributorTrack[];
 }
 
 /**
  * Terminal outcome for ONE release. Every indexed release must end with one of these.
  *
- * `endpointFingerprint` is the sanitized identity hash of the endpoint that produced the data —
+ * `endpointFingerprint` is the sanitized identity hash of the endpoint that produced the data -
  * the durable link from a release back to the endpoint profile it came from. Without it, a
  * persisted release cannot answer "which endpoint served this, and is that endpoint still
  * healthy?", which is the question you need when a profile degrades and you must decide what to

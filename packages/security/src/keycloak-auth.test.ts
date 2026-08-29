@@ -70,7 +70,7 @@ describe('readKeycloakConfig', () => {
 });
 
 describe('KeycloakVerifier', () => {
-  it('verifies a valid token and extracts tenant + roles', async () => {
+  it('retains a signed tenant candidate and extracts roles', async () => {
     const v = new KeycloakVerifier({ enabled: true, issuer: ISSUER, audience: AUDIENCE, keyInput: pub });
     const id = await v.verify(await token({ tenant_id: 'tenant-A', realm_access: { roles: ['artist_manager', 'user'] }, preferred_username: 'lewis' }));
     expect(id).toMatchObject({ sub: 'user-1', tenantId: 'tenant-A', username: 'lewis', authenticated: true });
@@ -78,10 +78,16 @@ describe('KeycloakVerifier', () => {
     expect(id.emailVerified).toBe(false);
   });
 
-  it('rejects a missing or empty tenant claim', async () => {
+  it('does not require a broker-specific tenant claim for a personal account', async () => {
     const v = new KeycloakVerifier({ enabled: true, issuer: ISSUER, audience: AUDIENCE, keyInput: pub });
-    await expect(v.verify(await token({ realm_access: { roles: ['user'] } }))).rejects.toThrow(/tenant_id/);
-    await expect(v.verify(await token({ tenant_id: '   ', realm_access: { roles: ['user'] } }))).rejects.toThrow(/tenant_id/);
+    await expect(v.verify(await token({ realm_access: { roles: ['user'] } }))).resolves.toMatchObject({
+      sub: 'user-1',
+      tenantId: 'user-1',
+    });
+    await expect(v.verify(await token({ tenant_id: '   ', realm_access: { roles: ['user'] } }))).resolves.toMatchObject({
+      sub: 'user-1',
+      tenantId: 'user-1',
+    });
   });
 
   it('rejects a token from the wrong issuer', async () => {

@@ -7,7 +7,7 @@
  * depend on this file and on each other not at all.
  *
  * TENANT SCOPING. An endpoint's shape is technically a property of the distributor, not of a
- * tenant — so a global registry is tempting. It is also a shared mutable surface across tenants:
+ * tenant, so a global registry is tempting. It is also a shared mutable surface across tenants:
  * one account whose dashboard serves an unusual payload could promote a bad profile, or degrade a
  * good one, for everybody. Each tenant therefore validates independently. That costs a few extra
  * validation captures per tenant and contains the blast radius to one account, which is the right
@@ -16,7 +16,7 @@
 
 export type EndpointStatus = 'CANDIDATE' | 'VALIDATING' | 'ACTIVE' | 'DEGRADED' | 'RETIRED';
 
-/** Which role an endpoint plays — never assume one endpoint returns every field. */
+/** Which role an endpoint plays, never assume one endpoint returns every field. */
 export type EndpointRole =
   | 'catalogIndex'
   | 'releaseDetails'
@@ -31,7 +31,7 @@ export const ENDPOINT_ROLES: readonly EndpointRole[] = [
   'storeDeliveryStatus', 'lyricsStatus', 'creditsStatus',
 ];
 
-/** Who a registry read/write belongs to. Every store call carries it — there is no ambient scope. */
+/** Who a registry read/write belongs to. Every store call carries it, there is no ambient scope. */
 export interface RegistryScope {
   tenantId: string;
   distributor: string;
@@ -52,7 +52,7 @@ export interface DistributorEndpointProfile {
   graphqlOperationName?: string;
   /** Hash of the response's KEY NAMES. A change here means the source schema moved. */
   schemaHash: string;
-  /** The response's KEY NAMES — never values. Kept so a restarted worker still knows the shape. */
+  /** The response's KEY NAMES, never values. Kept so a restarted worker still knows the shape. */
   schemaKeys?: string[];
   parserVersion: string;
   candidateScore: number;
@@ -87,7 +87,7 @@ export interface CandidateScope {
   scanId: string;
 }
 
-/** The sanitized identity of an endpoint. Shape only — a path is masked, values never appear. */
+/** The sanitized identity of an endpoint. Shape only, a path is masked, values never appear. */
 export interface EndpointIdentity {
   method: string;
   host: string;
@@ -105,7 +105,7 @@ export interface EndpointIdentity {
  * response IS R1's data. A catalog index, a recommendations payload, a still-settling request from
  * the PREVIOUS navigation, another tab in the same browser context, or a service-worker background
  * fetch can all land during R1's window. Treating that as correlation is how one release's ISRCs
- * get filed under another — silently, and plausibly.
+ * get filed under another, silently, and plausibly.
  */
 export type CorrelationKind =
   /** The REQUEST itself names this release (path segment, query value, GraphQL variable, body). */
@@ -131,7 +131,7 @@ export interface NetworkCandidate {
   observedAt: string;
   /**
    * The release the browser was NAVIGATING when this arrived. This is a temporal marker, NOT
-   * correlation — read `correlation` for that. Kept because the discovery report benefits from
+   * correlation, read `correlation` for that. Kept because the discovery report benefits from
    * knowing a payload varies per navigation.
    */
   releaseId?: string;
@@ -150,7 +150,7 @@ export interface CandidateSink {
  * A sanitized endpoint observation.
  *
  * Everything here is SHAPE. There is deliberately no field that could hold a value from the
- * response, a query string, a header or a cookie — the type itself is the enforcement.
+ * response, a query string, a header or a cookie, the type itself is the enforcement.
  */
 export interface StoredCandidate {
   fingerprint: string;

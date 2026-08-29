@@ -7,7 +7,7 @@ import { connectionFromUrl } from './distrokid';
  *
  * The dispatcher used to live in `apps/worker` with both halves in one file: an `inline` mode that
  * executes the scan in the caller's process, and a `bullmq` mode that just enqueues. Because they
- * shared a module, the API had to import the worker — and with it Playwright and a scan executor —
+ * shared a module, the API had to import the worker, and with it Playwright and a scan executor -
  * to reach the half that only pushes JSON onto Redis.
  *
  * This is the enqueue half. The inline executor stays in the worker, where the runner lives.

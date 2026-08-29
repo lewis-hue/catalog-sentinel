@@ -158,7 +158,7 @@ export class InMemoryConnectSessionRegistry implements ConnectSessionRegistry {
     claimUntil?: number;
   }>();
 
-  constructor(private readonly nowMs: () => number = () => Date.now()) {}
+  constructor(private readonly nowMs: () => number = () => Date.now(), private readonly reuseWarmSessions = false) {}
 
   async put(connectId: string, session: DurableConnectSession): Promise<void> {
     if (session.consentId && this.consentRevoked(session.tenantId, session.consentId)) {
@@ -216,7 +216,14 @@ export class InMemoryConnectSessionRegistry implements ConnectSessionRegistry {
       }
     }
     if (action === 'cancel') record.cancelRequested = true;
-    if (record.handedOff && action === 'confirm') return { status: 'not-found' };
+    if (record.handedOff && action === 'confirm') {
+      if (!this.reuseWarmSessions || record.cancelRequested) return { status: 'not-found' };
+      // Warm reuse (keep-alive): this session was already scanned but is still live, start a
+      // FRESH scan on it. Clear the handoff and the prior stable search so the new search work
+      // (a new searchId) is adopted below. The ownership check above still gated this reuse.
+      record.handedOff = false;
+      delete record.confirmation;
+    }
     if (record.claim && record.claim.until > this.nowMs()) return { status: 'busy' };
     const effectiveAction: ConnectSessionAction = record.cancelRequested ? 'cancel' : action;
     if (effectiveAction === 'confirm' && !record.confirmation) {
@@ -538,7 +545,12 @@ if not isSystem then
   if not isOwner and not tenantAdminCancel then return '__ownership_mismatch__' end
 end
 if ARGV[2] == 'cancel' then value.cancelRequested = true end
-if value.handedOff and ARGV[2] == 'confirm' then return '__handed_off__' end
+if value.handedOff and ARGV[2] == 'confirm' then
+  if ARGV[12] ~= '1' or value.cancelRequested then return '__handed_off__' end
+  value.handedOff = nil
+  value.confirmSearchId = nil
+  value.confirmCreatedAt = nil
+end
 local now = tonumber(ARGV[4])
 if value.claimToken and tonumber(value.claimUntil or 0) > now then
   redis.call('SET', KEYS[1], cjson.encode(value), 'KEEPTTL')
@@ -664,6 +676,7 @@ export class RedisConnectSessionRegistry implements ConnectSessionRegistry {
     private readonly keyPrefix = 'sentinel:connect-session',
     private readonly nowMs: () => number = () => Date.now(),
     private readonly encryptor: EnvelopeCrypto,
+    private readonly reuseWarmSessions = false,
   ) {}
 
   async put(connectId: string, session: DurableConnectSession): Promise<void> {
@@ -789,6 +802,7 @@ export class RedisConnectSessionRegistry implements ConnectSessionRegistry {
       principal ? this.ownerDigest(principal.tenantId, principal.actorUserId) : '',
       principal?.allowTenantAdmin ? '1' : '0',
       principal ? '0' : '1',
+      this.reuseWarmSessions ? '1' : '0',
     );
     if (raw === '__ownership_mismatch__') return { status: 'ownership-mismatch' };
     if (raw === '__busy__') return { status: 'busy' };
@@ -1088,7 +1102,7 @@ const DEFAULT_PROVIDER_FACTORY: DistributorConnectProviderFactory = {
 };
 
 /**
- * "Connect distributor & scan" — the one-click automation. The user logs into their
+ * "Connect distributor & scan", the one-click automation. The user logs into their
  * distributor inside an interactive Steel session; we then
  * read their real catalogue over that same session and scan it against the stores.
  *
@@ -1256,7 +1270,7 @@ export class DistributorConnect {
   /**
    * After the user confirms login: persist a PENDING search immediately, return its id, and
    * run the catalogue read + scan in the BACKGROUND. Reading a real catalogue means visiting
-   * each release's detail page over a remote browser — that can take minutes, far longer than
+   * each release's detail page over a remote browser, that can take minutes, far longer than
    * an HTTP request should ever block (a synchronous version times the proxy out → 500). The
    * catalogue page polls this record and fills in live when the background read completes.
    */
@@ -1269,8 +1283,8 @@ export class DistributorConnect {
       connectClaimVisibilityMs(this.env),
       proposedWork,
     );
-    // The connect id alone must NOT be authorization. It travels in a URL path — browser history,
-    // referrers, proxy logs — so treating possession as permission would let anyone who saw it
+    // The connect id alone must NOT be authorization. It travels in a URL path, browser history,
+    // referrers, proxy logs, so treating possession as permission would let anyone who saw it
     // consume a live, logged-in distributor session and read that account's catalogue.
     if (durable.status === 'ownership-mismatch') {
       const err = new Error('connect session belongs to another tenant');
@@ -1340,7 +1354,7 @@ export class DistributorConnect {
           tenantId,
           // The lock this keys is "one concurrent catalogue read per distributor account". We
           // never store account credentials, so tenant+distributor is the strongest identifier
-          // available — it errs toward serializing, which is the rate-limit-safe direction.
+          // available, it errs toward serializing, which is the rate-limit-safe direction.
           connectionId: `${tenantId}:${distributor}`,
           snapshotId: rec.id,
           distributor,
@@ -1571,6 +1585,16 @@ function positiveVisibility(value: number): number {
 
 function sessionBatchLimit(value: number): number {
   return Number.isFinite(value) ? Math.max(1, Math.min(500, Math.floor(value))) : 100;
+}
+
+/**
+ * Testing keep-alive: when enabled, a distributor session already handed off to a scan can be
+ * re-confirmed (a warm rescan) instead of being strictly one-shot. Reuse still re-authorizes the
+ * caller in `claim()` (ownership + workspace), and only the cookies-live-in-Steel reference is
+ * retained, never credentials. Disabled (default) = today's one-shot behavior.
+ */
+export function sessionReuseEnabled(env: NodeJS.ProcessEnv): boolean {
+  return /^(1|true|yes|on)$/i.test((env.DISTRIBUTOR_SESSION_REUSE ?? '').trim());
 }
 
 export function connectClaimVisibilityMs(env: NodeJS.ProcessEnv): number {

@@ -8,7 +8,7 @@ import {
 /**
  * Build a real {@link S3Backend} over the AWS SDK. The SDK packages are imported
  * DYNAMICALLY so `@sentinel/engine` compiles and its tests run without them
- * installed — they're only needed when S3 is actually configured at runtime.
+ * installed, they're only needed when S3 is actually configured at runtime.
  *
  * Requires `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner`.
  */

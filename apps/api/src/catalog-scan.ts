@@ -77,11 +77,11 @@ export async function runCatalogScan(artist: string, opts: { limit?: number; fas
     else byKey.set(k, { ...cur, isrc: cur.isrc ?? t.isrc, artworkUrl: cur.artworkUrl ?? t.artworkUrl, album: cur.album ?? t.album });
   }
   // `fast` (the default for the HTTP endpoints): scan Deezer + Apple only, in-memory
-  // index compare, whole catalogue in ~1s — NEVER run rate-limited web queries in the
+  // index compare, whole catalogue in ~1s, NEVER run rate-limited web queries in the
   // request path (that's what the background deep scan is for). Non-fast keeps the old
   // bounded synchronous multi-platform behaviour (used by CLIs / tests).
   const fast = opts.fast ?? false;
-  const webActive = !fast && (Boolean(process.env.BRAVE_SEARCH_API_KEY) || Boolean(process.env.SEARXNG_URL) || /^(1|true|yes|on)$/i.test(process.env.ENABLE_WEB_SEARCH_STORES ?? ''));
+  const webActive = !fast && (Boolean(process.env.SERPER_API_KEY) || /^(1|true|yes|on)$/i.test(process.env.ENABLE_WEB_SEARCH_STORES ?? ''));
   const limit = opts.limit ?? (webActive ? Number(process.env.CATALOG_SCAN_WEB_LIMIT || 8) : 150);
   const unified = [...byKey.values()].slice(0, limit);
   const released: ReleasedTrack[] = unified.map((t) => ({ title: t.title, primaryArtist: artist, isrc: t.isrc }));
@@ -126,11 +126,11 @@ export async function runCatalogScan(artist: string, opts: { limit?: number; fas
 /**
  * Scan an AUTHORITATIVE released catalogue (from the distributor login) against the
  * music platforms. Same store scan as above, but the released set is the artist's
- * real distributor catalogue — so a NOT-LIVE result means genuinely distributed but
+ * real distributor catalogue, so a NOT-LIVE result means genuinely distributed but
  * missing, which is exactly what the support report needs.
  */
 export async function scanReleasedCatalog(artist: string, released: ReleasedTrack[], artists?: string[]): Promise<CatalogScanResult> {
-  // If the distributor read returned nothing, don't spin the store scan — return an
+  // If the distributor read returned nothing, don't spin the store scan, return an
   // explicit empty result so the UI can say "read 0 tracks" (a selector-tuning signal)
   // rather than showing a blank scan.
   if (released.length === 0) {
@@ -139,12 +139,12 @@ export async function scanReleasedCatalog(artist: string, released: ReleasedTrac
       summary: { tracks: 0, live: 0, notLive: 0, wrongProfile: 0, needsReview: 0 },
       generatedAt: new Date().toISOString(),
       warnings: ['No releases were read from the distributor page.'],
-      note: 'Connected to your distributor, but no releases were read from the catalogue page. This usually means the page layout needs a selector update — the page was captured for tuning.',
+      note: 'Connected to your distributor, but no releases were read from the catalogue page. This usually means the page layout needs a selector update, the page was captured for tuning.',
     };
   }
   // Fast stores only (Deezer + Apple) so the WHOLE catalogue scans in seconds. The slow
-  // Brave web-search platforms (Audiomack, Spotify, etc. — 1 query/sec) run as a
-  // separate background deep scan; a synchronous full-catalogue Brave pass would take
+  // web-search platforms (Audiomack, Spotify, etc., rate-limited via Serper) run as a
+  // separate background deep scan; a synchronous full-catalogue web pass would take
   // many minutes and time the request out.
   // Quick, index-only compare so a large distributor catalogue (hundreds of tracks)
   // scans in seconds without per-track network calls timing the request out. The

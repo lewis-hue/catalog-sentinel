@@ -60,7 +60,7 @@ export class DistroKidAdapter extends GenericCsvDistributorAdapter {
         throw new AdapterUnavailableError('distrokid', 'partner-api', 'DistroKid partner API client not yet implemented.');
       case 'attended-browser-assist':
         this.assertBrowserAssistAllowed();
-        // TODO(prod): Playwright attended flow — user logs in directly; extract only
+        // TODO(prod): Playwright attended flow, user logs in directly; extract only
         // authorized metadata; encrypt any ephemeral session; capture redacted
         // screenshots for evidence; never bypass CAPTCHA/2FA; rate-limit + log.
         throw new AdapterUnavailableError(

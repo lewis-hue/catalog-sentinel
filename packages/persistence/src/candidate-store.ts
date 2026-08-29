@@ -4,13 +4,13 @@ import type { CandidateScope, CandidateStore, StoredCandidate } from '@sentinel/
 /**
  * DURABLE, tenant-scoped endpoint-candidate store.
  *
- * Candidates are the automatic answer to "which endpoint serves catalog data?" — the thing that
+ * Candidates are the automatic answer to "which endpoint serves catalog data?", the thing that
  * replaces an operator reading raw logs after every dashboard change. Keeping them in process
  * memory undid that: an admin querying replica B saw nothing for a scan that ran on replica A,
  * and a restart erased the evidence from the run you were trying to diagnose.
  *
  * SAFETY PROPERTIES
- *  - Every write carries `{tenantId, scanId}` explicitly. There is no ambient "current scan" — a
+ *  - Every write carries `{tenantId, scanId}` explicitly. There is no ambient "current scan", a
  *    shared mutable cursor is how concurrent scans contaminate each other.
  *  - Every read is filtered by tenant AND scan, so one tenant can never see another's endpoints.
  *  - Sanitized SHAPE only: method, host, masked path, query KEY names, GraphQL operation name,
@@ -30,7 +30,7 @@ export class PostgresCandidateStore implements CandidateStore {
    * best-effort at the call site: recording a candidate must never fail a user's catalogue read.
    */
   async write(c: CandidateLike, scope: CandidateScope): Promise<void> {
-    // Enforce the cap for NEW fingerprints only — an existing row must still be updatable, or a
+    // Enforce the cap for NEW fingerprints only, an existing row must still be updatable, or a
     // busy scan would stop counting observations for endpoints it already knows about.
     const countRes = await this.pool.query<{ n: string }>(
       `SELECT COUNT(*)::text AS n FROM "DistributorEndpointCandidate" WHERE "tenantId" = $1 AND "scanId" = $2`,
@@ -65,7 +65,7 @@ export class PostgresCandidateStore implements CandidateStore {
         scope.tenantId, scope.scanId, this.distributor, c.fingerprint,
         c.identity.method, c.identity.host, c.identity.pathPattern, c.identity.queryKeys,
         c.identity.graphqlOperationName ?? null,
-        // Drop redaction markers before persisting — a masked key name is noise, not a key.
+        // Drop redaction markers before persisting, a masked key name is noise, not a key.
         c.schemaKeys.filter((k) => k !== '{redacted}').slice(0, 60),
         c.schemaHash, c.score, c.bodyBytes, c.observedAt,
       ],
@@ -131,7 +131,7 @@ function toStored(row: CandidateRow): StoredCandidate {
     pathPattern: row.maskedPath,
     queryKeys: q,
     ...(row.operationName ? { graphqlOperationName: row.operationName } : {}),
-    // Not persisted — an HTTP status/content-type of a single observation says nothing useful
+    // Not persisted, an HTTP status/content-type of a single observation says nothing useful
     // once a candidate has been seen many times.
     status: 200,
     contentType: 'application/json',

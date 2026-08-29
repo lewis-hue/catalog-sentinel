@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ReleaseExtractionOutcome, CanonicalDistributorRelease } from '@sentinel/browser-assist';
-import { present, absentAtSource, notCaptured } from '@sentinel/browser-assist';
+import {
+  DistroKidCatalogIndexError,
+  present, absentAtSource, notCaptured,
+} from '@sentinel/browser-assist';
 import { InMemorySnapshotStore, type ReleaseRefRecord } from './snapshot-store';
 import { InMemoryConnectionLock, backoffWithJitter, startLockHeartbeat, type HeldLock } from './locks';
 import {
@@ -66,7 +69,7 @@ function harness(overrides: Partial<PipelineDeps> = {}) {
 describe('pipeline: idempotent job ids', () => {
   it('is stable per (tenant, connection, snapshot, chunk) so duplicates are no-ops', () => {
     // This deliberately asserts PROPERTIES, not a literal. It used to pin the exact string
-    // `distrokid-release-chunk:t1:c1:s1:3` — which BullMQ rejects outright ("Custom Id cannot
+    // `distrokid-release-chunk:t1:c1:s1:3`, which BullMQ rejects outright ("Custom Id cannot
     // contain :"), so the test was locking in a format that could never enqueue. Pinning the
     // literal made the broken format look intentional; see packages/contracts/src/job-ids.test.ts.
     expect(jobIds.chunk(REF, 3)).not.toContain(':');
@@ -340,13 +343,36 @@ describe('pipeline: reconcile + finalize', () => {
     expect(h.enqueued.finalize.length).toBe(0); // NOT marked complete
   });
 
-  it('finalizes as PARTIAL_RETRYABLE once retries are exhausted — never silently "complete"', async () => {
+  it('finalizes as PARTIAL_RETRYABLE once retries are exhausted, never silently "complete"', async () => {
     const h = harness();
     await h.store.putIndex('s1', refs(2));
     await h.store.putOutcomes('s1', [completed('R0'), failed('R1')]);
     const { status } = await reconcileDistroKidSnapshot({ ...REF, pass: 99 }, h.deps);
     expect(status).toBe('PARTIAL_RETRYABLE');
     expect(h.enqueued.finalize.length).toBe(1);
+  });
+
+  it('persists one allowlisted catalog-index failure code without raw error text', async () => {
+    const h = harness();
+    const error = new DistroKidCatalogIndexError(
+      'NO_RECOGNIZABLE_RELEASES',
+      'controlled diagnostic that must not become snapshot data',
+    );
+
+    const tombstone = await terminalizeDistroKidFailure(
+      REF,
+      'distrokid-catalog-index',
+      error,
+      h.deps,
+    );
+
+    expect(tombstone.kind).toBe('TERMINAL');
+    if (tombstone.kind !== 'TERMINAL') throw new Error('expected terminal tombstone');
+    expect(tombstone.finalizeJob.completeness.failureReasons).toEqual({
+      NO_RECOGNIZABLE_RELEASES: 1,
+    });
+    expect(tombstone.reason).toBe('distrokid-catalog-index:NO_RECOGNIZABLE_RELEASES');
+    expect(JSON.stringify(tombstone)).not.toContain('controlled diagnostic');
   });
 
   it('checkpoints the terminal projection before session cleanup and retries cleanup only', async () => {
@@ -420,7 +446,7 @@ describe('backoff + observability', () => {
     expect(m.avgChunkMs).toBe(1200);
   });
 
-  it('structured logs carry ids + fingerprint only — never secrets or bodies', () => {
+  it('structured logs carry ids + fingerprint only, never secrets or bodies', () => {
     const line = extractionLog({
       tenantId: 't1', connectionId: 'c1', scanId: 's1', releaseId: 'R1',
       endpointFingerprint: 'abcdef0123456789deadbeef', parserVersion: 'distrokid-parser-v1',
@@ -437,7 +463,7 @@ describe('pipeline: the account lock is renewed on a TIMER, not on checkpoint ca
   it('renews the lock while a slow release runs, without any checkpoint being written', async () => {
     // The defect: renewal only happened when a checkpoint batch was written (every 10 releases).
     // A single release slower than the 120s TTL let the lock expire mid-chunk, so a second worker
-    // could start reading the same distributor account — the exact thing the lock prevents,
+    // could start reading the same distributor account, the exact thing the lock prevents,
     // happening when the account is already slowest.
     vi.useFakeTimers();
     try {
@@ -460,7 +486,7 @@ describe('pipeline: the account lock is renewed on a TIMER, not on checkpoint ca
     }
   });
 
-  it('reports the lock LOST when renewal fails — the caller must abort, not carry on', async () => {
+  it('reports the lock LOST when renewal fails, the caller must abort, not carry on', async () => {
     vi.useFakeTimers();
     try {
       let lost: string | null = null;

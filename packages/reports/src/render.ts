@@ -67,9 +67,9 @@ export function renderHtml(data: SupportPacketData, subject: string, bodyMarkdow
       (r) => `<tr>
       <td>${esc(r.releaseTitle)}</td>
       <td>${esc(r.trackTitle)}</td>
-      <td class="mono">${esc(r.isrc ?? '—')}</td>
-      <td class="mono">${esc(r.upc ?? '—')}</td>
-      <td>${r.distributorUrl ? `<a href="${esc(r.distributorUrl)}">link</a>` : '—'}</td>
+      <td class="mono">${esc(r.isrc ?? '-')}</td>
+      <td class="mono">${esc(r.upc ?? '-')}</td>
+      <td>${r.distributorUrl ? `<a href="${esc(r.distributorUrl)}">link</a>` : '-'}</td>
       <td>${esc(r.expectedStatus)}</td>
       <td>${esc(r.evidence)}</td>
       <td><span class="badge" style="background:${BAND_COLOR[r.confidenceBand] ?? '#666'}">${r.confidence.toFixed(2)}</span></td>

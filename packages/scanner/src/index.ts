@@ -1,5 +1,5 @@
 /**
- * @sentinel/scanner — distributor deep-scan. Scanner contract + DistroKid adapter
+ * @sentinel/scanner, distributor deep-scan. Scanner contract + DistroKid adapter
  * (resilient locators), canonical normalization, issue detection, and the
  * rate-limited, resumable orchestration used by the deep-scan worker.
  */

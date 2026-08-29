@@ -8,7 +8,7 @@ import type { Page } from 'playwright';
  * context → `ReferenceError: __name is not defined`, and the scan fails.
  *
  * Fix: define `__name` in every page before any evaluate runs. We inject it as a
- * STRING init script (not a function — a function would itself be transpiled and
+ * STRING init script (not a function, a function would itself be transpiled and
  * reintroduce a `__name` reference). The implementation matches esbuild's own
  * `__name` (sets the function's name, returns it), so it's a faithful shim.
  */

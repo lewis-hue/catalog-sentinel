@@ -6,7 +6,7 @@ web app. **Server-component friendly** (no hooks). Two styling conventions coexi
 - **Inline-styled** components (`StatCard`, `Card`, `SeverityBadge`, …) carry their own colors
   and render anywhere with no CSS pipeline.
 - **Class-based** components (`Readout`, `NoAudit`) use the app's `globals.css` token classes
-  (`.cat-identity`, `.cat-stat`, `.cat-empty`, `.btn`, …) — they only render *styled* inside the
+  (`.cat-identity`, `.cat-stat`, `.cat-empty`, `.btn`, …), they only render *styled* inside the
   web app that ships those tokens. This keeps the enterprise design system as the single source
   of truth for color/spacing.
 
@@ -23,10 +23,10 @@ web app. **Server-component friendly** (no hooks). Two styling conventions coexi
 
 ### Consumers
 
-- `Readout` — Catalog, Coverage, Manual review, Support center headers.
-- `NoAudit` — the empty state on all four audit pages.
-- `platformCode` / `statusClass` — Catalog + Manual review pip strips.
-- `downloadCsv` / `csvEscape` — Catalog CSV + Support-center evidence exports.
+- `Readout`, Catalog, Coverage, Manual review, Support center headers.
+- `NoAudit`, the empty state on all four audit pages.
+- `platformCode` / `statusClass`, Catalog + Manual review pip strips.
+- `downloadCsv` / `csvEscape`, Catalog CSV + Support-center evidence exports.
 
 ### Example
 

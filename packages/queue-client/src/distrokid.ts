@@ -11,7 +11,7 @@ import {
  * This exists so the API can START a snapshot without importing `@sentinel/worker`. Previously
  * the six-stage pipeline had workers but NO producer: the API enqueued the older `catalogue-read`
  * job instead, so the pipeline's queues sat empty forever while tests passed. A consumer with no
- * producer is not "wired" — this module is the missing half.
+ * producer is not "wired", this module is the missing half.
  */
 
 /** Must mirror the worker's `defaultJobOptions` so a job's retry policy doesn't depend on who enqueued it. */
@@ -31,7 +31,7 @@ export interface DistroKidProducer {
    * opening a second browser session against the same account.
    *
    * `accepted` means "this snapshot is queued", NOT "this call created the job". Whether *this*
-   * call or a concurrent one won the race is not knowable from `add()` alone — BullMQ returns the
+   * call or a concurrent one won the race is not knowable from `add()` alone, BullMQ returns the
    * existing job with the requested id on collision, so an equality check on the returned id
    * reports "created" for both. Rather than report that unreliably, we don't claim it: callers
    * want to know the work is queued, and that is exactly what this says.

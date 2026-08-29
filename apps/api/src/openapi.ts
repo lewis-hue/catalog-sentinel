@@ -4,8 +4,8 @@ export function openApiDocument(baseUrl: string, _options: { production?: boolea
   const json = (ref: string) => ({ content: { 'application/json': { schema: { $ref: `#/components/schemas/${ref}` } } } });
   const errorDescriptions: Record<number, string> = {
     400: 'Invalid request', 401: 'Authentication required', 403: 'Insufficient role',
-    404: 'Not found', 409: 'Resource state conflict', 429: 'Rate limit exceeded', 502: 'Upstream operation failed',
-    503: 'Required cleanup or dependency is not yet confirmed',
+    404: 'Not found', 409: 'Resource state conflict', 422: 'Nothing to process', 429: 'Rate limit exceeded',
+    502: 'Upstream operation failed', 503: 'Required cleanup or dependency is not yet confirmed',
   };
   const errors = (...codes: number[]) => Object.fromEntries(codes.map((code) => [String(code), { description: errorDescriptions[code] }]));
   const activePaths = {
@@ -90,7 +90,7 @@ export function openApiDocument(baseUrl: string, _options: { production?: boolea
     },
     '/api/consent': { post: { summary: 'Grant scoped DistroKid catalog-read consent', responses: { '201': ok, ...errors(400, 401, 403, 429) } } },
     '/api/consent/{id}/revoke': { post: { summary: 'Revoke consent and terminate associated Steel sessions', parameters: [pathId()], responses: { '200': ok, '202': { description: 'Consent is revoked; durable Steel cleanup remains pending' }, ...errors(401, 403, 404, 503) } } },
-    '/api/connect': { post: { summary: 'Open an attended Steel DistroKid session', responses: { '200': ok, ...errors(400, 401, 403, 429, 502) } } },
+    '/api/connect': { post: { summary: 'Open an attended Steel DistroKid session', responses: { '200': ok, ...errors(400, 401, 403, 429, 502, 503) } } },
     '/api/connect/{id}/scan': { post: { summary: 'Confirm login and enqueue the durable catalog pipeline', parameters: [pathId()], responses: { '200': ok, ...errors(401, 403, 404, 502) } } },
     '/api/connect/{id}/cancel': { post: { summary: 'Terminate an attended Steel session', parameters: [pathId()], responses: { '204': { description: 'Steel session terminated' }, ...errors(401, 403, 404, 502) } } },
     '/api/searches': {
@@ -127,6 +127,30 @@ export function openApiDocument(baseUrl: string, _options: { production?: boolea
         parameters: [pathId()],
         requestBody: json('RescanCatalogSearch'),
         responses: { '201': { description: 'Platform recheck created and queued' }, ...errors(400, 401, 403, 404, 409, 502, 503) },
+      },
+    },
+    '/api/searches/{id}/catalogue': {
+      get: {
+        summary: 'Read the scraped distributor catalogue for a search',
+        description: 'Releases, tracks, metadata, cover art and ISRCs from the authoritative outcome tables, independent of store-presence verification. This is the standalone catalogue the dashboard renders and exports.',
+        parameters: [pathId()],
+        responses: { '200': ok, ...errors(401, 403, 404, 503) },
+      },
+    },
+    '/api/searches/{id}/store-check': {
+      post: {
+        summary: 'Run on-demand store-presence verification for a scraped catalogue',
+        description: 'Starts (or re-runs) the multi-store presence check in place on this search, so its per-store results join back to the same catalogue. Scraping is decoupled from verification; this is the explicit trigger. Idempotent while a check is already in flight (409).',
+        parameters: [pathId()],
+        responses: { '202': { description: 'Store-presence check queued' }, ...errors(401, 403, 404, 409, 422, 503) },
+      },
+    },
+    '/api/searches/{id}/lyrics-check': {
+      post: {
+        summary: 'Run on-demand lyric-availability verification (LRCLIB) for a scraped catalogue',
+        description: 'Starts (or re-runs) the fault-isolated lyric check in place on this search, resolving whether plain and time-synced lyrics exist for each track. Independent of the store-presence check (they can run concurrently); only the scrape reading state blocks it.',
+        parameters: [pathId()],
+        responses: { '202': { description: 'Lyric check queued' }, ...errors(401, 403, 404, 409, 422, 503) },
       },
     },
     '/api/searches/{id}/manual-review': { get: { summary: 'List principal-scoped manual-review items', parameters: [pathId()], responses: { '200': ok, ...errors(401, 403, 404) } } },

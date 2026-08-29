@@ -1,5 +1,5 @@
 /**
- * Performance sweep — Core Web Vitals per route, measured in the scanner image's Chromium
+ * Performance sweep, Core Web Vitals per route, measured in the scanner image's Chromium
  * against the internal web service (production `next start`). A Lighthouse-equivalent gate
  * without Lighthouse's dependency tree (which isn't in the image).
  *

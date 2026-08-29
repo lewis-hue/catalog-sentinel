@@ -23,13 +23,32 @@ const AUTH_ALLOW_RE = /(signin|sign-in|login|log-in|auth|session|oauth|token|cap
  * the user needs to log in. Read (GET/HEAD) requests are never blocked.
  */
 export function shouldBlockRequest(method: string, url: string, extractionMode: boolean, postData?: string | null): boolean {
-  if (!MUTATION_METHODS.has(method.toUpperCase())) return false;
+  const upper = method.toUpperCase();
+  if (!MUTATION_METHODS.has(upper)) return false; // GET/HEAD are always reads
   const looksLikeMutation = MUTATION_PATH_RE.test(url);
   const isAuth = AUTH_ALLOW_RE.test(url);
-  // Opaque endpoints can mutate state without a mutation-shaped path. Once extraction starts,
-  // fail closed except for an explicitly recognizable GraphQL query (never a mutation).
-  if (extractionMode) return !isExplicitReadQuery(url, postData);
+  if (extractionMode) {
+    // Block by mutation INTENT, not by "any POST". A blanket POST block is fail-safe on paper but
+    // makes real extraction impossible: distributor SPAs (DistroKid included) load per-release
+    // catalogue data via READ POSTs, and blocking those starves the network-first capture so
+    // every release times out with zero data. Read-only means "never change the account", not
+    // "never send a POST".
+    //
+    //  - PUT/PATCH/DELETE are mutations by HTTP semantics → always blocked. Catalogue reads never
+    //    use them.
+    //  - GraphQL carries intent in the BODY, not the path → parse it: allow a lone query, block a
+    //    mutation (or anything we cannot prove is a query).
+    //  - Any other POST → intent is in the PATH → block only a mutation-shaped path; a read POST
+    //    (a data fetch) is observed, never a state change.
+    if (upper !== 'POST') return true;
+    if (isGraphqlEndpoint(url)) return !isExplicitReadQuery(url, postData);
+    return looksLikeMutation;
+  }
   return looksLikeMutation && !isAuth;
+}
+
+function isGraphqlEndpoint(url: string): boolean {
+  return /\/graphql(?:[/?#]|$)/i.test(url);
 }
 
 function isExplicitReadQuery(url: string, postData?: string | null): boolean {

@@ -29,7 +29,7 @@ export type {
 } from '@sentinel/contracts';
 
 /**
- * In-memory store — tests and single-process runs ONLY.
+ * In-memory store, tests and single-process runs ONLY.
  *
  * Not durable and not shared: promotions are forgotten on restart, and two API/worker replicas
  * will disagree about which endpoint is ACTIVE. Production uses the Postgres store in
@@ -49,7 +49,7 @@ export class InMemoryEndpointRegistryStore implements EndpointRegistryStore {
   }
 }
 
-/** Promotion thresholds — a candidate must actually work before production relies on it. */
+/** Promotion thresholds, a candidate must actually work before production relies on it. */
 export const VALIDATION_CAPTURES_REQUIRED = 3;
 /** Consecutive failures before an ACTIVE endpoint is demoted. */
 export const DEGRADE_AFTER_FAILURES = 3;
@@ -86,7 +86,7 @@ export class EndpointRegistry {
           queryKeyShape: candidate.identity.queryKeys,
           ...(candidate.identity.graphqlOperationName ? { graphqlOperationName: candidate.identity.graphqlOperationName } : {}),
           schemaHash: candidate.schemaHash,
-          // KEY NAMES only, and redaction markers dropped — a masked key is noise, not a key.
+          // KEY NAMES only, and redaction markers dropped, a masked key is noise, not a key.
           schemaKeys: candidate.schemaKeys.filter((k) => k !== '{redacted}').slice(0, 60),
           parserVersion,
           candidateScore: candidate.rank,
@@ -146,7 +146,7 @@ export class EndpointRegistry {
       fingerprint,
     });
     // Count the drift durably. It is the metric that tells you whether an endpoint is having a
-    // bad day or has genuinely moved — and it is most needed right after the restart that a
+    // bad day or has genuinely moved, and it is most needed right after the restart that a
     // drift tends to cause, which is exactly when an in-memory counter is gone.
     const next: DistributorEndpointProfile = {
       ...p, status: 'DEGRADED', schemaDriftCount: (p.schemaDriftCount ?? 0) + 1, lastSeenAt: nowIso(),
@@ -171,7 +171,7 @@ export class EndpointRegistry {
   async list(): Promise<DistributorEndpointProfile[]> { return this.store.list(this.scope); }
 }
 
-/** Does a response identity match a registered profile? (Shape match — never values.) */
+/** Does a response identity match a registered profile? (Shape match, never values.) */
 export function matchesProfile(profile: DistributorEndpointProfile, identity: EndpointIdentity): boolean {
   return (
     profile.method === identity.method &&

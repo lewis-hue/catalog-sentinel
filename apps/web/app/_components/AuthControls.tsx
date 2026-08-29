@@ -27,7 +27,14 @@ export function AuthControls() {
 
   if (unavailable) return <span className="status wrong">Authentication unavailable</span>;
   if (!session) return <span className="status unk">Checking session…</span>;
-  if (!session.authenticated) return <a className="btn" href="/auth/login">Sign in</a>;
+  if (!session.authenticated) {
+    return (
+      <>
+        <a className="btn ghost" href="/auth/register">Create account</a>
+        <a className="btn" href="/auth/login">Sign in</a>
+      </>
+    );
+  }
 
   const initial = (session.displayName ?? '?').trim().charAt(0).toUpperCase() || '?';
   return (

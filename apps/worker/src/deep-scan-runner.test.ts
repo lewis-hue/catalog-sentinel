@@ -17,7 +17,7 @@ import { executeDeepScanRun } from './deep-scan-runner';
 
 const T: TenantContext = { tenantId: 'tenant-otel-1' };
 
-describe('executeDeepScanRun — telemetry instrumentation', () => {
+describe('executeDeepScanRun, telemetry instrumentation', () => {
   it('emits started/completed counters, a duration histogram, and an ok span', async () => {
     const repo = new InMemoryDistributorLinkRepository();
     const encryptor = new EnvelopeEncryptor();

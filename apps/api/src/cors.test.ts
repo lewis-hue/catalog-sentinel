@@ -3,7 +3,7 @@ import { resolveCorsOrigin } from './cors';
 
 /**
  * The defect: `Access-Control-Allow-Origin: *` whenever APP_BASE_URL was unset. With bearer auth
- * that lets any website call this API from a logged-in user's browser and read the response —
+ * that lets any website call this API from a logged-in user's browser and read the response -
  * and nothing in the config announced it.
  */
 describe('resolveCorsOrigin', () => {
@@ -14,7 +14,7 @@ describe('resolveCorsOrigin', () => {
     expect(resolveCorsOrigin({ APP_BASE_URL: 'https://app.example.com' })).toBe('https://app.example.com');
   });
 
-  it('sends NO header when nothing is configured — fails closed, not open', () => {
+  it('sends NO header when nothing is configured, fails closed, not open', () => {
     expect(resolveCorsOrigin({})).toBeNull();
     expect(resolveCorsOrigin({ NODE_ENV: 'production' })).toBeNull();
   });

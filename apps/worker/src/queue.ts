@@ -2,7 +2,7 @@
  * In-process job queue with a BullMQ-shaped surface. Every job is idempotent
  * (dedup by idempotency key), retryable (bounded attempts + backoff), and
  * observable (structured log lines). In production this is swapped for BullMQ on
- * Redis (or Temporal) behind the same `enqueue` contract — see docs/runbook.md.
+ * Redis (or Temporal) behind the same `enqueue` contract, see docs/runbook.md.
  */
 export interface JobContext {
   attempt: number;

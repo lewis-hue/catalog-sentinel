@@ -18,7 +18,7 @@ import {
 } from './composition';
 
 /**
- * BOOT test — the gap this closes: the pipeline was fully unit-tested but nothing in the worker
+ * BOOT test, the gap this closes: the pipeline was fully unit-tested but nothing in the worker
  * ever consumed its queues, so it could pass every test while never running in production.
  *
  * These tests assert the WIRING contract rather than the extraction internals:
@@ -41,7 +41,7 @@ const completed = (id: string): ReleaseExtractionOutcome => ({
   source: 'NETWORK_JSON', elapsedMs: 5,
 });
 
-describe('worker composition — the six-stage pipeline actually runs', () => {
+describe('worker composition, the six-stage pipeline actually runs', () => {
   it('a started snapshot flows through ALL SIX stages and finalizes', async () => {
     const store = new InMemorySnapshotStore();
     const lock = new InMemoryConnectionLock();
@@ -49,7 +49,7 @@ describe('worker composition — the six-stage pipeline actually runs', () => {
     const sessionsAttached: Array<string | undefined> = [];
     const finalized: FinalizeJob[] = [];
 
-    // A queue that DISPATCHES to the real handlers — this is what the BullMQ workers do.
+    // A queue that DISPATCHES to the real handlers, this is what the BullMQ workers do.
     const queue: Array<() => Promise<void>> = [];
     const deps: PipelineDeps = {
       store,
@@ -73,7 +73,7 @@ describe('worker composition — the six-stage pipeline actually runs', () => {
       async persistSnapshot() { stagesRun.push('persisted'); },
     };
 
-    // Stage 1 — exactly what the API's startSnapshot triggers.
+    // Stage 1, exactly what the API's startSnapshot triggers.
     await extractDistroKidCatalogIndex({ ...REF, artists: ['Lewis KE'] } as CatalogIndexJob, deps);
     // Drain the queue like the workers would.
     for (let guard = 0; guard < 200 && queue.length; guard++) await queue.shift()!();
@@ -189,7 +189,7 @@ describe('composition uses DURABLE checkpoints', () => {
     await store.putIndex('s1', [{ releaseId: 'R0', dashboardUrl: 'u' }]);
     await store.putOutcomes('s1', [completed('R0')]);
     await store.putOutcomes('s1', [completed('R0')]); // duplicate delivery / retry
-    expect((await store.getOutcomes('s1')).length).toBe(1); // idempotent — not 2
+    expect((await store.getOutcomes('s1')).length).toBe(1); // idempotent, not 2
     await store.markChunkComplete('s1', 1, 0);
     await store.markChunkComplete('s1', 1, 0);
     expect(await store.completedChunks('s1', 1)).toEqual([0]);

@@ -71,7 +71,7 @@ export interface SnapshotCheckpointStore {
   /** Persist the catalog index (the authoritative expectation). */
   putIndex(snapshotId: string, releases: ReleaseRefRecord[]): Promise<void>;
   getIndex(snapshotId: string): Promise<ReleaseRefRecord[]>;
-  /** Idempotent by (snapshotId, releaseId) — a retried chunk overwrites, never duplicates. */
+  /** Idempotent by (snapshotId, releaseId), a retried chunk overwrites, never duplicates. */
   putOutcomes(snapshotId: string, outcomes: ReleaseExtractionOutcome[]): Promise<void>;
   getOutcomes(snapshotId: string): Promise<ReleaseExtractionOutcome[]>;
   putProgress(progress: SnapshotProgress): Promise<void>;
@@ -79,11 +79,11 @@ export interface SnapshotCheckpointStore {
   /**
    * Chunk completion is tracked PER PASS. Pass 1 is the initial sweep; pass N>1 is the Nth
    * retry-failed-only sweep, whose chunk indices restart at 0. Without the pass in the key, a
-   * retry chunk 0 would look like the initial chunk 0 — so a retry pass would appear complete the
+   * retry chunk 0 would look like the initial chunk 0, so a retry pass would appear complete the
    * instant it started, and its reconciliation would run against results that hadn't arrived.
    */
   markChunkComplete(snapshotId: string, pass: number, chunkIndex: number): Promise<void>;
-  /** Chunks already done in ONE pass — lets a resumed run skip them entirely. */
+  /** Chunks already done in ONE pass, lets a resumed run skip them entirely. */
   completedChunks(snapshotId: string, pass: number): Promise<number[]>;
   /** Durable, ordered work plan for one extraction pass. */
   putPassPlan(snapshotId: string, pass: number, releaseIdChunks: string[][]): Promise<void>;
@@ -96,7 +96,7 @@ export interface SnapshotCheckpointStore {
 const outcomeId = (o: ReleaseExtractionOutcome): string =>
   o.kind === 'COMPLETED' ? o.release.distributorReleaseId : o.distributorReleaseId;
 
-/** In-memory store — tests and single-process runs. */
+/** In-memory store, tests and single-process runs. */
 export class InMemorySnapshotStore implements SnapshotCheckpointStore {
   private readonly bindings = new Map<string, SnapshotCheckpointBinding>();
   private readonly index = new Map<string, ReleaseRefRecord[]>();
@@ -191,8 +191,8 @@ export class RedisSnapshotStore implements SnapshotCheckpointStore {
     // Tenant/connection are deliberately NOT in the key. That looks like weaker isolation but is
     // stronger: the key would then have to be built from job fields at every call site, and a
     // caller passing the wrong tenant would silently read an empty checkpoint set and re-extract
-    // a whole catalogue. Isolation is enforced where the data leaves the system — the API's
-    // tenant-scoped reads and the Postgres unique key `(tenantId, snapshotId)` — while the
+    // a whole catalogue. Isolation is enforced where the data leaves the system, the API's
+    // tenant-scoped reads and the Postgres unique key `(tenantId, snapshotId)`, while the
     // checkpoint namespace stays a simple, unforgeable function of one server-minted id.
     assertKeySegment(snapshotId, 'snapshotId');
     return `dk:snap:${snapshotId}:${part}`;
@@ -243,7 +243,7 @@ export class RedisSnapshotStore implements SnapshotCheckpointStore {
   }
   async markChunkComplete(snapshotId: string, pass: number, chunkIndex: number): Promise<void> {
     const key = this.k(snapshotId, `chunks:${pass}`);
-    // `${pass}:${chunkIndex}` — a retry sweep restarts its chunk indices at 0, so without the
+    // `${pass}:${chunkIndex}`, a retry sweep restarts its chunk indices at 0, so without the
     // pass a retry chunk 0 would be indistinguishable from the initial chunk 0.
     await this.redis.sadd(key, String(chunkIndex));
     await this.redis.expire(key, this.ttlSeconds);

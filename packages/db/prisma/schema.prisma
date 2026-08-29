@@ -952,6 +952,14 @@ model DistributorExtractionSnapshot {
   startedAt   DateTime  @default(now())
   finalizedAt DateTime?
 
+  /// Progress for the independent store-lyrics check (LRCLIB). Lives here, not on the search record,
+  /// so it never contends with the store-presence deep scan. storeLyricsStatus: idle|queued|running|done|error.
+  storeLyricsStatus    String    @default("idle")
+  storeLyricsChecked   Int       @default(0)
+  storeLyricsTotal     Int       @default(0)
+  storeLyricsError     String?
+  storeLyricsCheckedAt DateTime?
+
   releases DistributorReleaseOutcome[]
 
   @@unique([tenantId, snapshotId])
@@ -985,6 +993,12 @@ model DistributorReleaseOutcome {
   /// REAUTH_REQUIRED | NOT_AUTHORIZED | UNKNOWN
   upcStatus     String @default("UNKNOWN")
   artworkStatus String @default("UNKNOWN")
+
+  /// Stores DistroKid reports it submitted this release to, read from the album page's "Submitted to
+  /// X" icons: `[{ store, url }]` (url = DistroKid's deep-link on that store, when provided). The
+  /// authoritative delivery signal shown as "Delivered by DistroKid" where independent verification
+  /// can't confirm a store.
+  submittedStores Json?
 
   // Provenance: which tier produced this, parsed by which parser, from which endpoint shape.
   source              String? // NETWORK_JSON | PAGE_STATE | DOM | CSV | DIRECT_JSON
@@ -1022,6 +1036,27 @@ model DistributorTrackOutcome {
   // Track-level identifier + WHY it is absent when it is. No `upc` here, by design.
   isrc       String?
   isrcStatus String  @default("UNKNOWN")
+
+  /// Distributor-side lyric availability per type: present | processing | none | unknown.
+  /// `unknown` (the default) means the scrape did not read the cell — never rendered as "missing".
+  plainLyricsStatus  String @default("unknown")
+  syncedLyricsStatus String @default("unknown")
+
+  /// Store-side lyric availability, verified against the stores' lyric provider (LRCLIB), kept next
+  /// to the distributor-side status so one track row carries BOTH facts for the missing-lyrics
+  /// comparison. Written by the independent lyrics-verification worker (not the store-presence scan).
+  /// storeLyricStatus: found | not-found | unverifiable | unknown ('unknown' = not yet checked).
+  storeLyricStatus    String    @default("unknown")
+  storeHasPlain       Boolean   @default(false)
+  storeHasSynced      Boolean   @default(false)
+  storeLyricSource    String?
+  storeLyricCheckedAt DateTime?
+
+  /// Manual per-track status override from the store-health grid (curates the missing-songs list).
+  /// NULL = no manual mark; the automated verdict stands. mark: 'missing' | 'resolved'.
+  mark     String?
+  markNote String?
+  markedAt DateTime?
 
   source        String?
   parserVersion String?

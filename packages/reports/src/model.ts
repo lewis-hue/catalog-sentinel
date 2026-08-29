@@ -33,7 +33,7 @@ export type PacketTemplateId =
   | 'audiomack-verify';
 
 /**
- * Everything a support packet needs — deliberately free of secrets. The
+ * Everything a support packet needs, deliberately free of secrets. The
  * `distributorAccountRef` is an account LABEL or masked email, never a password.
  */
 export interface SupportPacketData {

@@ -41,7 +41,7 @@ export interface LinkRecordDelegate {
 
 /**
  * Postgres-backed, tenant-scoped store. Every query filters by `tenantId`, so a
- * caller can never read/write another tenant's rows — the same guarantee the
+ * caller can never read/write another tenant's rows, the same guarantee the
  * isolated-test adapter gives, now durable. Records are stored per-kind in the
  * `DistributorLinkRecord` operational table (JSON payload). The rich normalized
  * catalog models (DistributorRelease/Track/…) are written by the normalization

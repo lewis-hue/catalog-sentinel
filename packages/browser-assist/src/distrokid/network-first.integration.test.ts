@@ -45,7 +45,7 @@ async function routeFakeDistroKid(page: Page, opts: { renderDom?: boolean; delay
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ event: 'pageview', featureFlags: { a: 1 } }) });
     }
     if (url.includes('/bank/') || url.includes('/api/profile')) {
-      // Sensitive route — must never be inspected.
+      // Sensitive route, must never be inspected.
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ iban: 'GB33BUKB20201555555555', email: 'a@b.com', isrc: 'FAKE12345678' }) });
     }
     return route.fulfill({ status: 404, body: '' });
@@ -170,7 +170,7 @@ describe('network-first extraction (real browser)', () => {
 
   it('falls back to the DOM only when no catalog JSON is served', async () => {
     const page = await (await browser.newContext()).newPage();
-    // No JSON endpoint at all — the DOM carries the data.
+    // No JSON endpoint at all, the DOM carries the data.
     await page.route('**/*', async (route) => {
       const url = route.request().url();
       if (url.includes('/dashboard/album')) return route.fulfill({ contentType: 'text/html', body: '<html><body>UPC 199751675992 · ISRC QT6ED2521965</body></html>' });

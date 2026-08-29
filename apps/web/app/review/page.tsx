@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { ManualReview } from './ManualReview';
 
-export const metadata = { title: 'Manual review — Catalog Sentinel' };
+export const metadata = { title: 'Manual review, Catalog Sentinel' };
 // Reads the live review queue at request time.
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,7 @@ export default function ReviewPage() {
           <div className="eyebrow">Operate</div>
           <h1 className="page-title" style={{ margin: '6px 0 4px' }}>Manual review</h1>
           <p className="page-sub" style={{ margin: 0 }}>
-            Cells a web check couldn&apos;t confirm are never called present or missing on their own — they wait here for a
+            Cells a web check couldn&apos;t confirm are never called present or missing on their own, they wait here for a
             human decision. Each decision becomes authoritative and updates the catalog.
           </p>
         </div>

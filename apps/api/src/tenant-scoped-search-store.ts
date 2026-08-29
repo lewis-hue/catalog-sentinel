@@ -34,13 +34,13 @@ export function parseSearchHistoryPageLimit(value: unknown): number {
  *
  * The vulnerability this closes: the API read searches by id alone (`searchStore.get(id)`) and
  * listed them with no filter at all (`searchStore.list()`). With multi-tenant auth enabled, any
- * authenticated caller could read another tenant's scan — their artists, their unreleased
- * catalogue, their ISRCs — by knowing or guessing a search id, and `GET /api/searches` returned
+ * authenticated caller could read another tenant's scan, their artists, their unreleased
+ * catalogue, their ISRCs, by knowing or guessing a search id, and `GET /api/searches` returned
  * every tenant's scans to everyone. The record type didn't even carry a `tenantId`, so there was
  * nothing to filter on.
  *
  * Why a wrapper rather than a `tenantId` parameter on every store method: a parameter is a rule
- * that 50 call sites must each remember, and the one that forgets is invisible — it looks like
+ * that 50 call sites must each remember, and the one that forgets is invisible, it looks like
  * working code and returns data. Here the tenant is bound ONCE, and a route physically cannot ask
  * for another tenant's record: there is no argument for it.
  *
@@ -56,7 +56,7 @@ export class TenantScopedSearchStore {
   }
 
   /**
-   * Returns null — NOT 403 — for another tenant's record.
+   * Returns null, NOT 403, for another tenant's record.
    *
    * A 403 confirms the id exists, which turns id-guessing into a working enumeration oracle for
    * other tenants' scans. "Not found" is both true from this tenant's perspective and silent.

@@ -47,7 +47,7 @@ for (const r of report) {
   if (r.ok) { console.log(`\n✓ ${r.path}  no WCAG 2.1 A/AA violations`); continue; }
   console.log(`\n● ${r.path}  ${r.violations.length} violation type(s)`);
   for (const v of r.violations) {
-    console.log(`   [${(v.impact || 'n/a').toUpperCase()}] ${v.id} ×${v.nodes} — ${v.help}`);
+    console.log(`   [${(v.impact || 'n/a').toUpperCase()}] ${v.id} ×${v.nodes}, ${v.help}`);
     for (const t of v.targets) console.log(`        ↳ ${t}`);
   }
 }

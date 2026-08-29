@@ -16,34 +16,19 @@ export interface SearchResult { url: string; title: string; description: string 
  *  search-engine HTML scraping is blocked from servers, so it's a weak fallback. */
 export type SearchBackend = (query: string) => Promise<SearchResult[]>;
 
-/**
- * Brave Search API backend — REAL, reliable, structured. Needs BRAVE_SEARCH_API_KEY
- * (free tier at api.search.brave.com). This is the recommended backend for accurate
- * web confirmation on no-API stores. Docs: https://brave.com/search/api/
- */
-export function createBraveSearch(apiKey: string, fetchImpl: FetchLike = defaultFetch, opts: { minIntervalMs?: number; nowMs?: () => number } = {}): SearchBackend {
-  // Brave's free tier is 1 query/sec — serialize calls with a minimum spacing.
-  const minInterval = opts.minIntervalMs ?? 1100;
-  const now = opts.nowMs ?? (() => Date.now());
-  let nextAllowedAt = 0;
-  return async (query) => {
-    const wait = Math.max(0, nextAllowedAt - now());
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    nextAllowedAt = now() + minInterval;
-    try {
-      const resp = await fetchImpl(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=10`, {
-        headers: { 'X-Subscription-Token': apiKey, Accept: 'application/json' },
-      });
-      if (!resp.ok) return [];
-      const data = (await resp.json()) as { web?: { results?: Array<{ url: string; title?: string; description?: string }> } };
-      return (data.web?.results ?? []).map((r) => ({ url: r.url, title: r.title ?? '', description: r.description ?? '' }));
-    } catch {
-      return [];
-    }
-  };
+/** How many `site:` domains to pack into one grouped `OR` query. Kept conservative: well under
+ *  Google's ~32-word cap, and small enough that a long `OR` chain doesn't crowd out per-domain
+ *  results. ~18 site-searchable platforms → 3 grouped queries + 1 broad = 4 requests/song (was 19). */
+const SITE_GROUP_SIZE = 6;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const groups: T[][] = [];
+  for (let i = 0; i < items.length; i += size) groups.push(items.slice(i, i + size));
+  return groups;
 }
 
-/** DuckDuckGo HTML backend (no key). Often blocked from server IPs — weak fallback. */
+/** DuckDuckGo HTML backend (no key). Often blocked from server IPs, dev-only weak fallback.
+ *  Production web verification uses Serper (see search-provider.ts). */
 export function createDuckDuckGoSearch(fetchImpl: FetchLike = defaultFetch): SearchBackend {
   return async (query) => {
     try {
@@ -66,11 +51,19 @@ export interface WebPlatformConfig {
   domains: string[];
   /** URL pattern that identifies a single track/song page on this platform. */
   trackPathRe: RegExp;
+  /**
+   * When false, skip the per-platform `site:` follow-up query and rely only on the ONE shared broad
+   * query. Set for stores with no reliable public per-track page (B2B/library/social) where a
+   * targeted search wastes the search query budget and rarely improves recall, those stores
+   * simply read `unverifiable` when the broad query doesn't surface them (never a false "not live").
+   * Defaults to true (targeted follow-up on a miss).
+   */
+  followUp?: boolean;
 }
 
 /**
  * Confirmation for stores WITHOUT a public API: find the song via a search backend,
- * then VERIFY. Accuracy over coverage — "found" only when a track page on the
+ * then VERIFY. Accuracy over coverage, "found" only when a track page on the
  * platform's own domain has text matching BOTH the exact title and the artist. A
  * miss is reported by the scan as `unverifiable`, never a false `not live`.
  */
@@ -86,7 +79,7 @@ export class WebSearchStore implements StoreCatalogProvider, TitleSearchProvider
     this.store = cfg.store;
     this.fetchImpl = opts.fetchImpl ?? defaultFetch;
     this.search = opts.search ?? createDuckDuckGoSearch(this.fetchImpl);
-    // Reliable backends (Brave) give trustworthy title/description, so a page fetch
+    // Reliable backends (Serper) give trustworthy title/description, so a page fetch
     // isn't required; enable it for extra strictness when desired.
     this.verifyByPage = opts.verifyByPage ?? false;
     this.needsCredential = false;
@@ -113,7 +106,7 @@ export class WebSearchStore implements StoreCatalogProvider, TitleSearchProvider
       // 1) Verify from the search result's own title + description.
       if (verifyText(`${c.title} ${c.description}`, title, artist)) return { found: true, url: c.url };
       // 2) Fallback: fetch the track page and verify its real metadata (higher recall,
-      //    same precision — the page must still contain both the title and the artist).
+      //    same precision, the page must still contain both the title and the artist).
       if (this.verifyByPage) {
         const meta = await this.fetchPageMeta(c.url);
         if (meta && verifyText(`${meta.ogTitle} ${meta.ogDescription} ${meta.pageTitle} ${meta.ld}`, title, artist)) return { found: true, url: c.url };
@@ -181,13 +174,15 @@ function decodeDdg(href: string): string {
 }
 
 /**
- * Track-page URL patterns per platform. Spotify + YouTube are here too, so a single
- * Brave key can confirm them by web search (their official APIs remain available and
- * take precedence when their own keys are provided).
+ * Track-page URL patterns per platform. Spotify + YouTube are here too, so the web-verification
+ * backend (Serper) can confirm them by search (their official APIs remain available
+ * and take precedence when their own keys are provided).
  */
 export const WEB_PLATFORMS: WebPlatformConfig[] = [
   { store: 'Spotify', domains: ['open.spotify.com'], trackPathRe: /open\.spotify\.com\/track\//i },
-  { store: 'YouTube Music', domains: ['music.youtube.com', 'youtube.com', 'youtu.be'], trackPathRe: /(music\.youtube\.com\/watch|youtube\.com\/watch|youtu\.be\/)/i },
+  // youtube.com first: the targeted follow-up query uses domains[0], and music.youtube.com app pages
+  // aren't indexed by search engines, whereas youtube.com/watch videos (which are on YT Music too) are.
+  { store: 'YouTube Music', domains: ['youtube.com', 'music.youtube.com', 'youtu.be'], trackPathRe: /(music\.youtube\.com\/watch|youtube\.com\/watch|youtu\.be\/)/i },
   { store: 'Audiomack', domains: ['audiomack.com'], trackPathRe: /audiomack\.com\/[^/]+\/song\//i },
   { store: 'SoundCloud', domains: ['soundcloud.com', 'on.soundcloud.com'], trackPathRe: /soundcloud\.com\/[^/]+\/(?!sets|tracks|albums|reposts|likes|following|followers|popular-tracks)[^/?#]+/i },
   { store: 'Amazon Music', domains: ['music.amazon.com'], trackPathRe: /music\.amazon\.com\/.*(tracks?|albums)\//i },
@@ -196,6 +191,25 @@ export const WEB_PLATFORMS: WebPlatformConfig[] = [
   { store: 'Anghami', domains: ['anghami.com', 'play.anghami.com'], trackPathRe: /anghami\.com\/song\//i },
   { store: 'Pandora', domains: ['pandora.com'], trackPathRe: /pandora\.com\/artist\/.+\/.+\/[A-Za-z0-9]+/i },
   { store: 'Napster', domains: ['napster.com', 'us.napster.com'], trackPathRe: /napster\.com\/.+\/track\//i },
+  // --- Remaining DistroKid delivery targets (added for full store coverage) ---
+  // Consumer DSPs with real per-track pages: keep the targeted follow-up on a miss.
+  { store: 'iHeartRadio', domains: ['iheart.com'], trackPathRe: /iheart\.com\/artist\/.+\/(songs|albums)\//i },
+  { store: 'JioSaavn', domains: ['jiosaavn.com', 'saavn.com'], trackPathRe: /jiosaavn\.com\/song\//i },
+  { store: 'NetEase', domains: ['music.163.com', 'y.music.163.com'], trackPathRe: /music\.163\.com\/.*(song|#\/song)/i },
+  { store: 'Tencent', domains: ['y.qq.com'], trackPathRe: /y\.qq\.com\/.*song/i },
+  { store: 'Qobuz', domains: ['qobuz.com', 'open.qobuz.com'], trackPathRe: /qobuz\.com\/.*\/(track|album)\//i },
+  { store: 'JOOX', domains: ['joox.com'], trackPathRe: /joox\.com\/.*(single|song)/i },
+  { store: 'FLO', domains: ['music-flo.com'], trackPathRe: /music-flo\.com\/.*(song|track|detail)/i },
+  { store: 'TikTok', domains: ['tiktok.com'], trackPathRe: /tiktok\.com\/(music|@[^/]+\/(video|music))\//i },
+  // Social + B2B/library outlets with no reliable public per-track page: broad query only
+  // (followUp:false), so they read `unverifiable` on a miss rather than burning query budget.
+  { store: 'Instagram/Facebook', domains: ['instagram.com', 'facebook.com', 'fb.watch'], trackPathRe: /(instagram\.com\/(reels?|p)\/|facebook\.com\/(reel|watch))/i, followUp: false },
+  { store: 'Snapchat', domains: ['snapchat.com'], trackPathRe: /snapchat\.com\//i, followUp: false },
+  { store: 'Claro Música', domains: ['claromusica.com'], trackPathRe: /claromusica\.com\//i, followUp: false },
+  { store: 'TouchTunes', domains: ['touchtunes.com'], trackPathRe: /touchtunes\.com\//i, followUp: false },
+  { store: 'Kuack Media', domains: ['kuack.media', 'kuackmedia.com'], trackPathRe: /kuack/i, followUp: false },
+  { store: 'Adaptr', domains: ['adaptr.com'], trackPathRe: /adaptr\.com\//i, followUp: false },
+  { store: 'MediaNet', domains: ['mndigital.com'], trackPathRe: /mndigital\.com\//i, followUp: false },
 ];
 
 /**
@@ -217,22 +231,27 @@ export class WebPresenceResolver {
     const cached = this.cache.get(key);
     if (cached) return cached;
 
-    const hits = new Map<string, string | null>();
-    // 1) One broad query for the whole song.
-    for (const r of await this.search(`"${artist}" "${title}"`)) {
-      for (const p of this.platforms) {
-        if (hits.get(p.store)) continue;
-        if (matches(p, r.url) && verifyText(`${r.title} ${r.description}`, title, artist)) hits.set(p.store, r.url);
-      }
+    // Platforms with a real per-track page get a targeted `site:` lookup; long-tail B2B/social
+    // stores (followUp === false) are only ever matched from the broad query, never a `site:` one.
+    const followUp = this.opts.followUpMisses === false ? [] : this.platforms.filter((p) => p.followUp !== false);
+
+    // ONE broad query + a FEW grouped `site: OR` queries (≤ SITE_GROUP_SIZE domains each, to stay
+    // under Google's ~32-word query limit) instead of one query PER platform. A song that used to
+    // cost 1 + N requests now costs 1 + ceil(N / SITE_GROUP_SIZE), and they run concurrently. Each
+    // result is still domain-matched + on-page verified, so precision is unchanged.
+    const queries = [`"${artist}" "${title}"`];
+    for (const group of chunk(followUp, SITE_GROUP_SIZE)) {
+      queries.push(`"${title}" ${artist} (${group.map((p) => `site:${p.domains[0]}`).join(' OR ')})`);
     }
-    // 2) Targeted follow-up only for platforms the broad search didn't confirm.
-    if (this.opts.followUpMisses !== false) {
-      for (const p of this.platforms) {
-        if (hits.get(p.store)) continue;
-        const found = (await this.search(`"${title}" ${artist} site:${p.domains[0]}`)).find(
-          (r) => matches(p, r.url) && verifyText(`${r.title} ${r.description}`, title, artist),
-        );
-        hits.set(p.store, found?.url ?? null);
+    const resultSets = await Promise.all(queries.map((query) => this.search(query)));
+
+    const hits = new Map<string, string | null>();
+    for (const results of resultSets) {
+      for (const r of results) {
+        for (const p of this.platforms) {
+          if (hits.get(p.store)) continue;
+          if (matches(p, r.url) && verifyText(`${r.title} ${r.description}`, title, artist)) hits.set(p.store, r.url);
+        }
       }
     }
     for (const p of this.platforms) if (!hits.has(p.store)) hits.set(p.store, null);

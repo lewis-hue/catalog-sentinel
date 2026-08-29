@@ -15,7 +15,7 @@ export interface LockRedis {
   set(key: string, value: string, mode: 'PX', duration: number, flag: 'NX'): Promise<unknown>;
   get(key: string): Promise<string | null>;
   /**
-   * Redis server-side Lua (the EVAL command) — NOT JavaScript eval. Used for the standard
+   * Redis server-side Lua (the EVAL command), NOT JavaScript eval. Used for the standard
    * atomic compare-and-delete release, so we can never delete a lock another worker now owns.
    */
   eval(script: string, numKeys: number, ...args: string[]): Promise<unknown>;
@@ -45,13 +45,13 @@ export interface HeldLock {
   release(): Promise<void>;
 }
 
-/** Default lock TTL. Renewal must run well inside this — see {@link startLockHeartbeat}. */
+/** Default lock TTL. Renewal must run well inside this, see {@link startLockHeartbeat}. */
 export const LOCK_TTL_MS = 120_000;
 
 /**
  * Renew a held lock on a TIMER, independent of how work is progressing.
  *
- * Renewal used to happen only when a checkpoint batch was written — every 10 releases. One
+ * Renewal used to happen only when a checkpoint batch was written, every 10 releases. One
  * release taking longer than the 120s TTL (a heavy SPA page, a slow retry, a stalled navigation)
  * would let the lock expire mid-chunk while we were still driving the browser. A second worker
  * could then take the same account and read it concurrently: the exact thing the lock exists to
@@ -93,7 +93,7 @@ export function startLockHeartbeat(
           lastConfirmedAt = Date.now();
         }
       } catch (err) {
-        // A renewal error is not yet a lost lock — Redis may blip. The NEXT tick decides, and the
+        // A renewal error is not yet a lost lock, Redis may blip. The NEXT tick decides, and the
         // third-of-TTL cadence leaves room for that.
         opts.log?.('lock renewal failed; will retry', { error: err instanceof Error ? err.name : 'Error' });
       } finally {
@@ -156,7 +156,7 @@ export class InMemoryConnectionLock {
   }
 }
 
-/** Exponential backoff with FULL JITTER — avoids retry storms synchronizing across workers. */
+/** Exponential backoff with FULL JITTER, avoids retry storms synchronizing across workers. */
 export function backoffWithJitter(attempt: number, baseMs = 1000, maxMs = 60_000, rand: () => number = Math.random): number {
   const exp = Math.min(maxMs, baseMs * 2 ** Math.max(0, attempt - 1));
   return Math.floor(rand() * exp);

@@ -10,7 +10,7 @@ import type { FindMissingAudiomackResult } from './workflow';
 
 const clock = fixedClock('2026-07-07T00:00:00.000Z');
 
-describe('findMissingAudiomackSongs — deterministic Lewis KE fixture', () => {
+describe('findMissingAudiomackSongs, deterministic Lewis KE fixture', () => {
   let result: FindMissingAudiomackResult;
   const fixture = buildLewisKeWorkflowFixture();
 
@@ -44,7 +44,7 @@ describe('findMissingAudiomackSongs — deterministic Lewis KE fixture', () => {
 
   it('produces a DistroKid support packet with a CSV listing every missing track', () => {
     const distro = result.packets.find((p) => p.template === 'distrokid-missing-audiomack')!;
-    expect(distro.subject).toBe('Audiomack Reinstatement Request — Lewis KE — 100 Missing Songs');
+    expect(distro.subject).toBe('Audiomack Reinstatement Request, Lewis KE, 100 Missing Songs');
     expect(distro.missingCount).toBe(100);
     const csv = distro.artifacts.find((a) => a.format === 'csv');
     expect(csv).toBeDefined();

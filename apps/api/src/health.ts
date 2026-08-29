@@ -2,7 +2,11 @@ import type { Redis } from 'ioredis';
 import type { Pool } from 'pg';
 import { createSearchProvider, type SearchProvider } from '@sentinel/adapters';
 import { probeSteelHealth, isSteelRequired, type SteelHealth } from '@sentinel/steel';
-import { isProductionEnvironment } from '@sentinel/security';
+import {
+  assertDistroKidLiveScannerAllowed,
+  InsecureConfigurationError,
+  isProductionEnvironment,
+} from '@sentinel/security';
 import { assertScanRecordsSchema } from '@sentinel/search-store';
 
 export type DepStatus = 'ok' | 'down' | 'degraded' | 'disabled' | 'not-configured';
@@ -23,7 +27,16 @@ export interface HealthDeps {
   env?: NodeJS.ProcessEnv;
 }
 
-/** Per-platform integration posture. Never carries secret values — only config presence. */
+export interface DistributorLoginHealth extends SteelHealth {
+  /**
+   * Steel can be healthy while the operator's legal/live-scan gate is disabled. Keep that
+   * distinction explicit so the Connect page never advertises a flow that /api/connect must
+   * reject.
+   */
+  connectionPolicyReady: boolean;
+}
+
+/** Per-platform integration posture. Never carries secret values, only config presence. */
 export interface PlatformCredential {
   platform: string;
   mode: 'official-api' | 'web-verify';
@@ -44,7 +57,7 @@ const msg = (e: unknown): string => REDACT(e instanceof Error ? e.message : Stri
 /**
  * Dependency health for /health/* and the ops status endpoints. Every probe is bounded
  * by a timeout and never throws; a disabled dependency reports `disabled`, not `down`.
- * No secrets are emitted — URLs are credential-stripped and only names/status/latency are
+ * No secrets are emitted, URLs are credential-stripped and only names/status/latency are
  * returned.
  */
 export class HealthChecker {
@@ -103,17 +116,6 @@ export class HealthChecker {
     }
   }
 
-  async searxng(): Promise<DepResult> {
-    const url = this.env.SEARXNG_URL;
-    if (!url || (this.env.SEARCH_PROVIDER ?? 'searxng') !== 'searxng') return { name: 'searxng', status: 'disabled' };
-    const t0 = Date.now();
-    try {
-      const resp = await timeout(fetch(`${url.replace(/\/+$/, '')}/healthz`), 3000, 'searxng');
-      return { name: 'searxng', status: resp.ok ? 'ok' : 'degraded', latencyMs: Date.now() - t0, detail: resp.ok ? undefined : `HTTP ${resp.status}` };
-    } catch (e) {
-      return { name: 'searxng', status: 'down', detail: msg(e) };
-    }
-  }
 
   async keycloak(): Promise<DepResult> {
     if (!/^(1|true|yes|on)$/i.test(this.env.ENABLE_KEYCLOAK_AUTH ?? '')) return { name: 'keycloak', status: 'disabled', detail: 'authentication disabled' };
@@ -169,7 +171,7 @@ export class HealthChecker {
   }
 
   /**
-   * Per-platform credential status. NEVER returns secret values — only whether the
+   * Per-platform credential status. NEVER returns secret values, only whether the
    * required config keys are present, which keys are still needed, and the public
    * profile URL (not a secret) when one is configured.
    */
@@ -209,10 +211,33 @@ export class HealthChecker {
     return probeSteelHealth(this.env as Record<string, string | undefined>);
   }
 
+  /**
+   * User-facing attended-login readiness. This is deliberately stricter than dependency health:
+   * a reachable Steel control plane is not authorization to run the DistroKid workflow.
+   */
+  async distributorLogin(): Promise<DistributorLoginHealth> {
+    const steel = await this.steel();
+    try {
+      assertDistroKidLiveScannerAllowed(this.env);
+      return { ...steel, connectionPolicyReady: true };
+    } catch (error) {
+      if (!(error instanceof InsecureConfigurationError)) throw error;
+      return {
+        ...steel,
+        liveLoginAvailable: false,
+        loginMode: 'disabled',
+        connectionPolicyReady: false,
+        message: steel.status === 'READY'
+          ? 'Steel is ready, but DistroKid live login is disabled by deployment policy.'
+          : steel.message,
+      };
+    }
+  }
+
   /** Full dependency snapshot. `status` is the worst non-disabled dependency state. */
   async dependencies(): Promise<{ status: 'ok' | 'degraded' | 'down'; checkedAt: string; deps: DepResult[]; searchProvider: ReturnType<HealthChecker['searchProviderStatus']>; steel: SteelHealth }> {
     const [core, steel] = await Promise.all([
-      Promise.all([this.redis(), this.scanPostgres(), this.searxng(), this.keycloak(), this.queue(), this.workerHeartbeat(), this.pipelineHeartbeat()]),
+      Promise.all([this.redis(), this.scanPostgres(), this.keycloak(), this.queue(), this.workerHeartbeat(), this.pipelineHeartbeat()]),
       this.steel(),
     ]);
     const deps = [...core, steelToDep(steel)];

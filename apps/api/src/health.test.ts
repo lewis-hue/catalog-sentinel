@@ -35,7 +35,7 @@ const pgWithSchema = (schemaRows = healthySchemaRows): Pool => ({
 }) as unknown as Pool;
 const okPg = pgWithSchema();
 const downPg = { query: async () => { throw new Error('ECONNREFUSED'); } } as unknown as Pool;
-// The health check only needs queue DEPTH, so the fake is just that — no `as unknown as Queue`
+// The health check only needs queue DEPTH, so the fake is just that, no `as unknown as Queue`
 // cast pretending a whole BullMQ Queue exists just to read five numbers off it.
 const okCounts = async (): Promise<Record<string, number>> => ({ active: 0, waiting: 1, completed: 5, failed: 0, delayed: 0 });
 
@@ -93,6 +93,23 @@ describe('HealthChecker', () => {
   it('ready: STEEL_REQUIRED=true fails readiness when Steel is not READY', async () => {
     const env = { STEEL_REQUIRED: 'true', STEEL_CONNECTOR_MODE: 'unsupported' } as NodeJS.ProcessEnv;
     expect((await new HealthChecker({ redis: okRedis, pgPool: okPg, env }).ready()).ready).toBe(false);
+  });
+
+  it('keeps Steel dependency health separate from the live-login policy gate', async () => {
+    const connector = { NODE_ENV: 'test', STEEL_CONNECTOR_MODE: 'unsupported' } as NodeJS.ProcessEnv;
+    const blocked = await new HealthChecker({ env: connector }).distributorLogin();
+    const allowed = await new HealthChecker({
+      env: {
+        ...connector,
+        ENABLE_DISTROKID_LIVE_SCANNER: 'true',
+        LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED: 'true',
+      },
+    }).distributorLogin();
+
+    expect(blocked.connectionPolicyReady).toBe(false);
+    expect(blocked.liveLoginAvailable).toBe(false);
+    expect(blocked.loginMode).toBe('disabled');
+    expect(allowed.connectionPolicyReady).toBe(true);
   });
 
   it('dependencies: includes a misconfigured Steel connector and degrades overall', async () => {

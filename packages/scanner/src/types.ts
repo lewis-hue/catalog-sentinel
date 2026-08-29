@@ -121,7 +121,7 @@ export interface DistributorReleaseSnapshot {
 /**
  * Distributor scanner contract (spec "DistroKid adapter"). Adapters own their
  * distributor-specific, resilient locators; the deep-scan worker orchestrates.
- * When a field cannot be read confidently, return UNKNOWN — never guess.
+ * When a field cannot be read confidently, return UNKNOWN, never guess.
  */
 export interface DistributorScanner {
   readonly distributor: DistributorProviderName;
@@ -133,7 +133,7 @@ export interface DistributorScanner {
   scanCreditsStatus(page: Page, track: TrackIndexItem, ctx: ScanContext): Promise<CreditsStatusSnapshot>;
 }
 
-/** Thrown when a page shape is unrecognized — worker converts to a NEEDS_MAINTENANCE issue. */
+/** Thrown when a page shape is unrecognized, worker converts to a NEEDS_MAINTENANCE issue. */
 export class PageShapeError extends Error {
   constructor(
     public readonly pageKind: string,

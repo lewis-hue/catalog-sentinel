@@ -10,7 +10,7 @@ export interface DispatchableScan {
 
 export interface DeepScanDispatcher {
   /**
-   * Hand off an already-persisted, QUEUED scan for execution. Returns promptly —
+   * Hand off an already-persisted, QUEUED scan for execution. Returns promptly -
    * it does NOT wait for the scan to finish (callers poll the scan row).
    */
   dispatch(ctx: TenantContext, scan: DispatchableScan): Promise<void>;
@@ -20,7 +20,7 @@ export interface DeepScanDispatcher {
 /**
  * Enqueues the scan onto the Redis `deep-scan` BullMQ queue; a separate worker
  * process consumes it and runs it against the SHARED database. This is the
- * production "celery-style" handoff — heavy scans never run in the API request
+ * production "celery-style" handoff, heavy scans never run in the API request
  * path. `jobId = scan.id` makes the enqueue idempotent (a scan can't be double-run).
  *
  * The worker attaches to the durable Steel session referenced by the queued job.

@@ -154,6 +154,40 @@ describe('pipeline terminal convergence', () => {
     expect(progress).toMatchObject({ distroKidTerminalFailureHandled: true });
   });
 
+  it('recovers an allowlisted catalog-index code from failedReason without persisting its text', async () => {
+    const privateText = 'provider-response-with-sensitive-detail';
+    let progress: unknown = {};
+    const failedJob = {
+      id: 'failed-index-with-code',
+      data: REF,
+      attemptsMade: 3,
+      opts: { attempts: 3 },
+      failedReason: `[DISTROKID_CATALOG_INDEX:NO_RECOGNIZABLE_RELEASES] ${privateText}`,
+      get progress() { return progress; },
+      async updateProgress(next: unknown) { progress = next; },
+      async retry() {},
+    };
+    const queue = {
+      name: DK_QUEUES.index,
+      async getFailed() { return [failedJob]; },
+    } as unknown as FailedRecoveryQueue;
+    const finalizers: FinalizeJob[] = [];
+    const deps = depsWith();
+    deps.enqueue.finalize = async (job) => { finalizers.push(job); };
+
+    const recovered = await recoverFailedDistroKidJobs([queue], deps);
+
+    expect(recovered).toMatchObject({ terminalized: 1, failed: 0 });
+    expect(finalizers).toHaveLength(1);
+    expect(finalizers[0]?.completeness.failureReasons).toEqual({
+      NO_RECOGNIZABLE_RELEASES: 1,
+    });
+    const tombstone = await deps.store.getTerminal(REF.snapshotId);
+    expect(tombstone?.reason).toBe('distrokid-catalog-index:NO_RECOGNIZABLE_RELEASES');
+    expect(JSON.stringify(tombstone)).not.toContain(privateText);
+    expect(progress).toMatchObject({ distroKidTerminalFailureHandled: true });
+  });
+
   it('retries an exhausted finalizer with a durable cooldown instead of mis-projecting it', async () => {
     let progress: unknown = {};
     const retry = vi.fn(async () => undefined);

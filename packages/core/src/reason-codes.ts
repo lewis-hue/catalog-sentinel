@@ -232,7 +232,7 @@ export const REASON_CODE_REGISTRY: Record<IssueReasonCode, ReasonCodeMeta> = {
   },
   UNKNOWN_NEEDS_REVIEW: {
     code: 'UNKNOWN_NEEDS_REVIEW',
-    title: 'Unknown — needs review',
+    title: 'Unknown, needs review',
     description: 'Platform data was incomplete or ambiguous; a human must confirm before action.',
     defaultSeverity: 'low',
     category: 'process',

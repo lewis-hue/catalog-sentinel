@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 
 /**
- * @sentinel/shared-ui — small, dependency-free presentational components used by
+ * @sentinel/shared-ui, small, dependency-free presentational components used by
  * the dashboard. Server-component friendly (no hooks). Colors are inline so the
  * package needs no CSS pipeline.
  */
@@ -119,6 +119,9 @@ export function EmptyState({ children }: { children: ReactNode }) {
 export const PLATFORM_CODE: Record<string, string> = {
   Deezer: 'DZ', 'Apple Music / iTunes': 'AP', 'Apple Music': 'AP', Spotify: 'SP', 'YouTube Music': 'YT',
   Audiomack: 'AM', SoundCloud: 'SC', TIDAL: 'TD', 'Amazon Music': 'AZ', Boomplay: 'BP', Anghami: 'AN', Pandora: 'PD', Napster: 'NP',
+  // Remaining DistroKid delivery targets.
+  iHeartRadio: 'IH', JioSaavn: 'JS', NetEase: 'NE', Tencent: 'QQ', Qobuz: 'QB', JOOX: 'JX', FLO: 'FL', TikTok: 'TK',
+  'Instagram/Facebook': 'IG', Snapchat: 'SN', 'Claro Música': 'CM', TouchTunes: 'TT', 'Kuack Media': 'KM', Adaptr: 'AD', MediaNet: 'MN',
 };
 export const platformCode = (store: string): string => PLATFORM_CODE[store] ?? store.slice(0, 2).toUpperCase();
 

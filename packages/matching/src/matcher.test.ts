@@ -4,7 +4,7 @@ import { scoreMatch, matchAgainstCatalog, detectDuplicateIsrcs } from './matcher
 
 const subj = (o: Parameters<typeof toNormalizedItem>[0]) => toNormalizedItem(o);
 
-describe('scoreMatch — identifier-first cascade', () => {
+describe('scoreMatch, identifier-first cascade', () => {
   it('confirms an ISRC exact match at 1.0 regardless of title casing/separators', () => {
     const a = subj({ id: 'a', title: 'My Song', artistNames: ['Lewis KE'], isrc: 'US-RC1-17-00001', durationSec: 200 });
     const b = subj({ id: 'b', title: 'my song', artistNames: ['Lewis KE'], isrc: 'usrc11700001', durationSec: 260 });
@@ -31,7 +31,7 @@ describe('scoreMatch — identifier-first cascade', () => {
   });
 });
 
-describe('scoreMatch — penalties', () => {
+describe('scoreMatch, penalties', () => {
   it('penalizes a remix vs the original as a version mismatch (different recording)', () => {
     const a = subj({ id: 'a', title: 'Lagos City Nights', artistNames: ['Lewis KE'] });
     const b = subj({ id: 'b', title: 'Lagos City Nights (Remix)', artistNames: ['Lewis KE'] });
@@ -57,7 +57,7 @@ describe('scoreMatch — penalties', () => {
   });
 });
 
-describe('matchAgainstCatalog — decisions', () => {
+describe('matchAgainstCatalog, decisions', () => {
   const subject = subj({ id: 's', title: 'Lagos City Nights', artistNames: ['Lewis KE'], isrc: 'US-RC1-17-00001' });
 
   it('marks a subject MISSING (unmatched) when no candidate matches', () => {

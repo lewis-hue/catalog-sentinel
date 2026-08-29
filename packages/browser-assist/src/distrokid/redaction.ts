@@ -9,7 +9,7 @@
  *  - Same-origin ALLOWLIST: only the distributor's own hosts are ever inspected.
  *  - Sensitive-path DENYLIST: money/identity/auth routes are never read at all.
  *  - Size caps: never buffer an unbounded body.
- *  - Values are never retained — only key NAMES, shapes, and hashes.
+ *  - Values are never retained, only key NAMES, shapes, and hashes.
  *  - Raw debug artifacts are opt-in, TTL'd, sample-capped, and redacted.
  */
 

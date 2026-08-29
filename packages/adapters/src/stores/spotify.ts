@@ -25,7 +25,7 @@ export interface SpotifyOptions {
 }
 
 /**
- * Spotify store provider — REAL Web API. Client-credentials auth (a free Spotify
+ * Spotify store provider, REAL Web API. Client-credentials auth (a free Spotify
  * app: client id + secret). Implements all three checks:
  *   - listArtistCatalog : GET /v1/search?q=artist:"…"&type=track  (tracks + ISRC + open.spotify.com URL)
  *   - lookupIsrc        : GET /v1/search?q=isrc:…&type=track       (exact, artist-agnostic → wrong-profile)

@@ -103,6 +103,9 @@ export function OrganizationManager() {
     try {
       const workspaceResponse = await apiFetch('/api/organization/workspace-memberships');
       if (!workspaceResponse.ok) throw new Error(await responseError(workspaceResponse, 'Workspace memberships could not be loaded'));
+      // apiFetch may have recovered from a revoked/stale stored selector. Keep the visible form in
+      // sync so the user cannot accidentally reopen the discarded value.
+      setOrganizationId(activeOrganizationId());
       const workspacePayload = (await workspaceResponse.json()) as {
         memberships?: WorkspaceMembership[];
         workspaces?: WorkspaceSummary[];
@@ -141,14 +144,35 @@ export function OrganizationManager() {
     void load();
   }, [load]);
 
-  function activateOrganization(event: FormEvent) {
+  async function activateOrganization(event: FormEvent) {
     event.preventDefault();
-    selectActiveOrganization(organizationId);
-    setMembers(null);
-    setCapabilities(NO_ORGANIZATION_CAPABILITIES);
-    setWorkspaceMemberships([]);
-    setWorkspaces([]);
-    void load();
+    const candidate = organizationId.trim();
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      if (candidate) {
+        // Validate membership with the candidate as a request-only override. Persisting it first
+        // would let a typo or revoked membership poison every subsequent application request.
+        const response = await apiFetch('/api/organization/workspace-memberships', {
+          organizationId: candidate,
+        });
+        if (!response.ok) {
+          throw new Error(await responseError(response, 'This organization could not be opened'));
+        }
+      }
+      selectActiveOrganization(candidate);
+      setMembers(null);
+      setCapabilities(NO_ORGANIZATION_CAPABILITIES);
+      setWorkspaceMemberships([]);
+      setWorkspaces([]);
+      await load();
+      setNotice(candidate ? 'Organization opened.' : 'Using your personal workspace.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'This organization could not be opened.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function mutate(path: string, init: RequestInit, success: string): Promise<Response | null> {
@@ -313,12 +337,12 @@ export function OrganizationManager() {
 
       <section className="card" aria-labelledby="active-organization-title">
         <div className="eyebrow">Active data boundary</div>
-        <h2 id="active-organization-title">Select organization</h2>
+        <h2 id="active-organization-title">Switch organization (optional)</h2>
         <p className="rail-sub">
           The organization identifier selects a workspace boundary; it grants no access by itself.
           Every request is checked against your signed identity and durable membership.
         </p>
-        <form className="org-form-grid" onSubmit={activateOrganization}>
+        <form className="org-form-grid" onSubmit={(event) => void activateOrganization(event)}>
           <label style={{ gridColumn: '1 / -2' }}><span className="field-label">Organization ID</span><input className="field mono" value={organizationId} onChange={(event) => setOrganizationId(event.target.value)} placeholder="Use blank for your identity home organization" /></label>
           <button className="btn" disabled={busy}>Open organization</button>
         </form>
@@ -438,7 +462,7 @@ export function OrganizationManager() {
               <thead><tr><th className="track-col">Resource</th><th>Status</th><th>Deleted</th><th>Legal basis</th></tr></thead>
               <tbody>{erasureRequest.steps.map((step) => <tr key={step.resource}>
                 <td className="track-col"><span className="tk-title">{step.resource}</span></td>
-                <td>{step.status}</td><td>{step.deletedCount}</td><td>{step.legalBasis ?? '—'}</td>
+                <td>{step.status}</td><td>{step.deletedCount}</td><td>{step.legalBasis ?? ''}</td>
               </tr>)}</tbody>
             </table></div></div>
             <button className="btn ghost" type="button" disabled={busy} onClick={() => void refreshErasure()}>Refresh status</button>

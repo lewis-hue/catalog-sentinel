@@ -10,7 +10,7 @@ interface Row {
 const A: TenantContext = { tenantId: 'tenant-A' };
 const B: TenantContext = { tenantId: 'tenant-B' };
 
-describe('TenantStore — cross-tenant isolation', () => {
+describe('TenantStore, cross-tenant isolation', () => {
   it('refuses to write a row for a different tenant', async () => {
     const store = new InMemoryTenantStore<Row>();
     await expect(store.put(A, { id: 'r1', tenantId: 'tenant-B', value: 'x' })).rejects.toThrow(CrossTenantError);
@@ -36,7 +36,7 @@ describe('TenantStore — cross-tenant isolation', () => {
   });
 });
 
-describe('InMemoryDistributorLinkRepository — tenant deletion', () => {
+describe('InMemoryDistributorLinkRepository, tenant deletion', () => {
   const scan = (id: string, tenantId: string): LinkDeepScan => ({
     id,
     tenantId,

@@ -106,10 +106,10 @@ function organizationService(overrides: Partial<NonNullable<AppDeps['organizatio
 
 async function bearer(
   roles: string[],
-  claims: { sub?: string; email?: string; emailVerified?: boolean; tenantId?: string } = {},
+  claims: { sub?: string; email?: string; emailVerified?: boolean; tenantId?: string; omitTenantId?: boolean } = {},
 ): Promise<string> {
   return new SignJWT({
-    tenant_id: claims.tenantId ?? 'tenant-a',
+    ...(!claims.omitTenantId ? { tenant_id: claims.tenantId ?? 'tenant-a' } : {}),
     realm_access: { roles },
     ...(claims.email ? { email: claims.email, email_verified: claims.emailVerified === true } : {}),
   })
@@ -178,6 +178,93 @@ describe('organization membership API', () => {
       headers: { authorization: `Bearer ${await bearer(['artist_manager'], { sub: 'subject-2', tenantId: 'managed-org' })}` },
     });
     expect(organization.provisionPersonalOrganization).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back from an unauthorized broker tenant claim to a personal workspace keyed by Keycloak subject', async () => {
+    const listWorkspaceMemberships = vi.fn(async (actor: { tenantId: string; subjectId: string }) => {
+      if (actor.tenantId === 'google-external-subject') throw new GovernanceAuthorizationError();
+      return [{ ...workspaceMembership, tenantId: actor.tenantId, subjectId: actor.subjectId }];
+    });
+    const organization = organizationService({ listWorkspaceMemberships });
+    const app = await testApp(organization);
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/organization/workspace-memberships',
+      headers: {
+        authorization: `Bearer ${await bearer(['artist_manager'], {
+          sub: 'keycloak-user-id',
+          tenantId: 'google-external-subject',
+        })}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(organization.provisionPersonalOrganization).toHaveBeenCalledWith(
+      'keycloak-user-id',
+      'keycloak-user-id',
+    );
+    expect(listWorkspaceMemberships).toHaveBeenCalledWith({
+      tenantId: 'google-external-subject',
+      subjectId: 'keycloak-user-id',
+    });
+    expect(listWorkspaceMemberships).toHaveBeenCalledWith(
+      { tenantId: 'keycloak-user-id', subjectId: 'keycloak-user-id' },
+      undefined,
+    );
+  });
+
+  it('provisions a personal workspace for a signed token without a custom tenant claim', async () => {
+    const organization = organizationService();
+    const app = await testApp(organization);
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/organization/workspace-memberships',
+      headers: {
+        authorization: `Bearer ${await bearer(['user'], {
+          sub: 'self-registered-user',
+          omitTenantId: true,
+        })}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(organization.provisionPersonalOrganization).toHaveBeenCalledWith(
+      'self-registered-user',
+      'self-registered-user',
+    );
+  });
+
+  it('lets an ordinary user grant scan consent in the provisioned personal workspace without an organization field', async () => {
+    const organization = organizationService();
+    const app = await testApp(organization);
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/consent',
+      headers: {
+        authorization: `Bearer ${await bearer(['user'], {
+          sub: 'personal-scan-user',
+          omitTenantId: true,
+        })}`,
+      },
+      payload: {
+        distributor: 'distrokid',
+        scope: 'distributor:read-catalog',
+        provider: 'steel',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(organization.hasWorkspaceCapability).toHaveBeenCalledWith(
+      { tenantId: 'personal-scan-user', subjectId: 'personal-scan-user' },
+      'workspace-1',
+      'EDIT',
+    );
   });
 
   it('uses only the verified tenant and subject when listing membership and capabilities', async () => {
@@ -442,7 +529,30 @@ describe('organization membership API', () => {
     });
     expect(response.statusCode).toBe(403);
     expect(response.json()).toEqual({ error: 'organization access denied' });
+    expect(response.headers['x-sentinel-organization-selection']).toBe('invalid');
     expect(organization.hasWorkspaceCapability).not.toHaveBeenCalled();
+  });
+
+  it('keeps Steel readiness independent from an unauthorized optional organization selector', async () => {
+    const organization = organizationService({
+      listWorkspaceMemberships: vi.fn(async () => {
+        throw new GovernanceAuthorizationError();
+      }),
+    });
+    const app = await testApp(organization);
+    openApps.push(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/integrations/steel/status',
+      headers: {
+        authorization: `Bearer ${await bearer(['user'], { sub: 'personal-user' })}`,
+        'x-sentinel-organization-id': 'revoked-team',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(organization.listWorkspaceMemberships).not.toHaveBeenCalled();
   });
 
   it('keeps selected-organization history, queue jobs, and audit records in one tenant context', async () => {

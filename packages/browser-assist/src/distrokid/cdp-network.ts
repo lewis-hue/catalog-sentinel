@@ -12,7 +12,7 @@ import { correlateRequest, type CapturedResponse } from './network-discovery';
  * the browser over CDP, so we can attach a CDP session and pull the body from the Network
  * domain directly via `Network.getResponseBody`.
  *
- * Bodies are processed IN MEMORY and discarded — we persist only normalized catalog metadata
+ * Bodies are processed IN MEMORY and discarded, we persist only normalized catalog metadata
  * and sanitized fingerprints, never raw bodies.
  */
 
@@ -62,7 +62,7 @@ export async function attachCdpNetworkCapture(page: Page, opts: { origin: string
   });
 
   // requestId → sanitized REQUEST metadata. Captured on requestWillBeSent because the response
-  // event alone doesn't carry the method or the GraphQL operation — without these, a POST/GraphQL
+  // event alone doesn't carry the method or the GraphQL operation, without these, a POST/GraphQL
   // endpoint would be misfingerprinted as GET and lose its identity.
   const requests = new Map<string, PendingRequest>();
   const pending = new Map<string, PendingResponse>();

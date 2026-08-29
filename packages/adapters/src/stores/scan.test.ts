@@ -49,7 +49,7 @@ function fakeStore(name: string, opts: {
   return { catalog, isrc, title };
 }
 
-describe('scanStorePresence — not-live + wrong-profile detection', () => {
+describe('scanStorePresence, not-live + wrong-profile detection', () => {
   it('marks LIVE when the ISRC resolves under the expected artist', async () => {
     const store = fakeStore('Deezer', { catalog: [], isrcTable: { QZK6K2090500: { artist: 'Lewis KE' } } });
     const rep = await scanStorePresence({ expectedArtist: 'Lewis KE', releasedTracks: [track('Icy Love', 'QZK6K2090500')], stores: [store] });

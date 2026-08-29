@@ -1,6 +1,6 @@
 import { HistoryList } from './HistoryList';
 
-export const metadata = { title: 'Audit history — Catalog Sentinel' };
+export const metadata = { title: 'Audit history, Catalog Sentinel' };
 
 export default function HistoryPage() {
   return (

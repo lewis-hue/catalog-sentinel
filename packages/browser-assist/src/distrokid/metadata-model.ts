@@ -1,7 +1,7 @@
 import type { MetadataField, MetadataFieldStatus, MetadataSource } from '@sentinel/contracts';
 
 /**
- * Canonical distributor metadata model — constructors and predicates.
+ * Canonical distributor metadata model, constructors and predicates.
  *
  * The TYPES live in `@sentinel/contracts` because they cross process boundaries (extractor →
  * pipeline → persistence) and the Postgres layer must be able to name them without importing this
@@ -12,7 +12,7 @@ import type { MetadataField, MetadataFieldStatus, MetadataSource } from '@sentin
 export type {
   MetadataFieldStatus, MetadataSource, MetadataField,
   CanonicalDistributorTrack, CanonicalDistributorRelease,
-  ReleaseExtractionOutcome, ReleaseFailureReason,
+  ReleaseExtractionOutcome, ReleaseFailureReason, LyricStatus,
 } from '@sentinel/contracts';
 
 const now = (): string => new Date().toISOString();
@@ -34,7 +34,7 @@ export function notCaptured<T>(status: Exclude<MetadataFieldStatus, 'PRESENT' | 
 
 /** True only when the distributor was actually read and reported nothing. */
 export const isAbsentAtSource = (f: MetadataField<unknown>): boolean => f.status === 'ABSENT_AT_SOURCE';
-/** True when our extraction failed — the value may well exist at the distributor. */
+/** True when our extraction failed, the value may well exist at the distributor. */
 export const isExtractionFailure = (f: MetadataField<unknown>): boolean =>
   f.status !== 'PRESENT' && f.status !== 'ABSENT_AT_SOURCE';
 
@@ -43,11 +43,11 @@ export function explainField(f: MetadataField<unknown>, label: string): string {
   switch (f.status) {
     case 'PRESENT': return `${label}: ${String(f.value)}`;
     case 'ABSENT_AT_SOURCE': return `${label}: none at distributor`;
-    case 'TIMEOUT': return `${label}: not captured — distributor metadata request timed out`;
-    case 'REQUEST_FAILED': return `${label}: not captured — distributor metadata request failed`;
-    case 'PARSE_FAILED': return `${label}: not captured — distributor response could not be parsed`;
-    case 'REAUTH_REQUIRED': return `${label}: not captured — distributor login expired`;
-    case 'NOT_AUTHORIZED': return `${label}: not captured — not authorized`;
+    case 'TIMEOUT': return `${label}: not captured, distributor metadata request timed out`;
+    case 'REQUEST_FAILED': return `${label}: not captured, distributor metadata request failed`;
+    case 'PARSE_FAILED': return `${label}: not captured, distributor response could not be parsed`;
+    case 'REAUTH_REQUIRED': return `${label}: not captured, distributor login expired`;
+    case 'NOT_AUTHORIZED': return `${label}: not captured, not authorized`;
     case 'NOT_CAPTURED': return `${label}: not captured`;
     default: return `${label}: unknown`;
   }

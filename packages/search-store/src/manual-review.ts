@@ -5,7 +5,7 @@ import type { CatalogTrackLike, PerStoreLike, SearchRecord } from './search-stor
  * search couldn't confirm a platform, so we NEVER assert present/missing) become review
  * tasks. A human confirms present / missing / wrong-profile / dismiss, and the decision
  * is written back to the presence matrix (the scan record) as an authoritative,
- * confidence-1.0 result. Items are DERIVED from the record — no duplicated state.
+ * confidence-1.0 result. Items are DERIVED from the record, no duplicated state.
  */
 export type ManualReviewDecision = 'CONFIRMED_PRESENT' | 'CONFIRMED_MISSING' | 'WRONG_PROFILE' | 'DISMISSED';
 export const MANUAL_REVIEW_DECISIONS: ManualReviewDecision[] = ['CONFIRMED_PRESENT', 'CONFIRMED_MISSING', 'WRONG_PROFILE', 'DISMISSED'];
@@ -48,8 +48,8 @@ export function decodeItemId(itemId: string): { trackIndex: number; platform: st
 
 function reasonFor(p: PerStoreLike): string {
   if (p.reviewDecision) return `Resolved: ${p.reviewDecision}`;
-  if (p.status === 'unverifiable') return 'Web search could not confirm presence on this platform (no official API / weak index) — verify manually.';
-  return `Low confidence (${p.confidence.toFixed(2)}) — verify manually.`;
+  if (p.status === 'unverifiable') return 'Web search could not confirm presence on this platform (no official API / weak index), verify manually.';
+  return `Low confidence (${p.confidence.toFixed(2)}), verify manually.`;
 }
 
 /** Every cell needing review (open first), across the whole catalogue. */

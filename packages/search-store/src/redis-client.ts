@@ -3,7 +3,7 @@ import type { RedisLike } from './search-store';
 
 /**
  * Shared Redis client (ioredis). Used both as the SearchStore backend (records shared
- * across the API + workers) and — via connectionFromUrl in bullmq.ts — as the BullMQ
+ * across the API + workers) and, via connectionFromUrl in bullmq.ts, as the BullMQ
  * broker. `maxRetriesPerRequest: null` is required by BullMQ and harmless for the store.
  */
 export function createRedis(url: string): Redis {

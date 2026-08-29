@@ -11,17 +11,17 @@ import type {
  * and wrong for a deployment in two specific ways:
  *
  *  1. A restart forgets every promotion. The registry's whole job is to remember which endpoint
- *     works so production stops guessing — memory that evaporates on deploy doesn't do that, and
+ *     works so production stops guessing, memory that evaporates on deploy doesn't do that, and
  *     each restart silently reverts extraction to shape-guessing until it revalidates.
  *  2. Two replicas disagree. Worker A promotes an endpoint to ACTIVE while worker B still has it
  *     as CANDIDATE, so the same account extracts differently depending on which worker picked up
- *     the chunk — a bug that reproduces only under concurrency.
+ *     the chunk, a bug that reproduces only under concurrency.
  *
  * Every read and write is filtered by `tenantId` AND `distributor`. The unique key
  * `(tenantId, distributor, fingerprint)` is what makes concurrent promotion safe: two workers
  * observing the same endpoint converge on one row instead of racing to insert two.
  *
- * Stores endpoint SHAPE only — method, host, masked path, query KEY names, GraphQL operation
+ * Stores endpoint SHAPE only, method, host, masked path, query KEY names, GraphQL operation
  * name, schema KEY names and hashes. The schema has nowhere to put a value, a cookie, a token or
  * a response body.
  */
@@ -86,7 +86,7 @@ export class PostgresEndpointRegistryStore implements EndpointRegistryStore {
         profile.method, profile.hostPattern, profile.pathPattern, profile.queryKeyShape,
         profile.graphqlOperationName ?? null,
         profile.schemaHash,
-        // These were previously written as an empty array and a hard-coded zero — the table
+        // These were previously written as an empty array and a hard-coded zero, the table
         // promised more than the repository preserved, so a restart silently dropped the endpoint's
         // schema shape and reset its drift history to "never happened".
         profile.schemaKeys ?? [],

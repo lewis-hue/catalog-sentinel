@@ -39,6 +39,22 @@ async function readyApp(options: Partial<AppDeps>): Promise<FastifyInstance> {
   return app;
 }
 
+/** In-memory stand-in for the Postgres outcome repo the lyrics-check + marks endpoints use. The
+ *  store-lyrics check now records its progress here (keyed by snapshot id), NOT on the search record. */
+function fakeCatalogueRepo(seed: Record<string, string> = {}): NonNullable<AppDeps['catalogueRepo']> {
+  const progress = new Map<string, { status: string; checked: number; total: number; error: string | null; checkedAt: string | null }>();
+  for (const [id, status] of Object.entries(seed)) progress.set(id, { status, checked: 0, total: 0, error: null, checkedAt: null });
+  return {
+    async readCatalogue() { return null; },
+    async setStoreLyricsProgress(_t: string, snapshotId: string, p: { status: string; checked?: number; total?: number; error?: string | null }) {
+      const cur = progress.get(snapshotId) ?? { status: 'idle', checked: 0, total: 0, error: null, checkedAt: null };
+      progress.set(snapshotId, { status: p.status, checked: p.checked ?? cur.checked, total: p.total ?? cur.total, error: p.error ?? null, checkedAt: cur.checkedAt });
+    },
+    async readStoreLyricsProgress(_t: string, snapshotId: string) { return progress.get(snapshotId) ?? { status: 'idle', checked: 0, total: 0, error: null, checkedAt: null }; },
+    async updateTrackMarks() { return 0; },
+  };
+}
+
 describe('scan history name validation', () => {
   it('normalizes a valid display name and rejects empty, invisible, and overlong labels', () => {
     expect(validateScanName('  July   catalogue audit  ')).toEqual({ ok: true, name: 'July catalogue audit' });
@@ -204,6 +220,104 @@ describe('scan history mutation routes', () => {
     await store.update(body.id, (record) => ({ ...record, sourceSearchId: 'rewritten-source' }));
     expect((await store.get(body.id))?.sourceSearchId).toBe(source.id);
     expect((await audit.list()).map((entry) => entry.action)).toEqual(['catalog.search.platform-recheck.created']);
+  });
+
+  it('triggers an on-demand store-presence check in place on an unchecked catalogue', async () => {
+    const store = new InMemorySearchStore();
+    const audit = new InMemoryAuditLogger();
+    const enqueue = vi.fn(async () => {});
+    const released: ReleasedTrackLike[] = [{
+      title: 'Track One', primaryArtist: 'Private Artist', isrc: 'QZABC1234567', releaseTitle: 'Release One',
+    }];
+    const saved = await store.save(
+      { tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result(), released,
+    );
+    // The decoupled scrape leaves a terminal "unchecked" record, no presence job queued.
+    await store.update(saved.id, (record) => ({
+      ...record,
+      deepScan: { status: 'unchecked', platformsPending: [], platformsDone: ['Deezer'] },
+    }));
+
+    const app = await readyApp({ searchStore: store, auditLogger: audit, enqueueDeepScan: enqueue });
+    const response = await app.inject({ method: 'POST', url: `/api/searches/${saved.id}/store-check` });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({
+      id: saved.id, operation: 'STORE_PRESENCE_CHECK', deepScan: { status: 'queued' },
+    });
+    // In place: THIS record is queued (results join back to the same catalogue), no new record derived.
+    expect(enqueue).toHaveBeenCalledWith(saved.id, 'default');
+    const after = await store.get(saved.id);
+    expect(after?.deepScan).toMatchObject({ status: 'queued', platformsDone: [] });
+    expect(await store.listForTenant('default')).toHaveLength(1);
+    expect((await audit.list()).map((entry) => entry.action)).toContain('catalog.search.store-check.triggered');
+  });
+
+  it('guards the store check: 404 across tenants, 409 while in flight, 422 with no verified tracks', async () => {
+    const store = new InMemorySearchStore();
+    const enqueue = vi.fn(async () => {});
+    const released: ReleasedTrackLike[] = [{ title: 'Track One', primaryArtist: 'Private Artist', isrc: 'QZABC1234567' }];
+
+    const foreign = await store.save({ tenantId: 'tenant-other', artist: 'Secret', distributor: 'distrokid' }, result('Secret'), released);
+    const inFlight = await store.save({ tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result(), released);
+    await store.update(inFlight.id, (record) => ({ ...record, deepScan: { status: 'running', platformsPending: ['Spotify'], platformsDone: [] } }));
+    const empty = await store.save(
+      { tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' },
+      { ...result(), tracks: [], summary: { tracks: 0, live: 0, notLive: 0, wrongProfile: 0, needsReview: 0 } },
+      [],
+    );
+    await store.update(empty.id, (record) => ({ ...record, deepScan: { status: 'done', platformsPending: [], platformsDone: [] } }));
+
+    const app = await readyApp({ searchStore: store, enqueueDeepScan: enqueue });
+    const acrossTenant = await app.inject({ method: 'POST', url: `/api/searches/${foreign.id}/store-check` });
+    const running = await app.inject({ method: 'POST', url: `/api/searches/${inFlight.id}/store-check` });
+    const noTracks = await app.inject({ method: 'POST', url: `/api/searches/${empty.id}/store-check` });
+
+    expect([acrossTenant.statusCode, running.statusCode, noTracks.statusCode]).toEqual([404, 409, 422]);
+    expect(running.json()).toMatchObject({ status: 'running' });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('triggers an on-demand lyric check in place, independent of a running store check', async () => {
+    const store = new InMemorySearchStore();
+    const audit = new InMemoryAuditLogger();
+    const enqueue = vi.fn(async () => {});
+    const saved = await store.save({ tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    // A store-presence scan is in flight, it must NOT block the independent lyrics check.
+    await store.update(saved.id, (record) => ({ ...record, deepScan: { status: 'running', platformsPending: ['Spotify'], platformsDone: [] } }));
+
+    const app = await readyApp({ searchStore: store, auditLogger: audit, enqueueLyricsCheck: enqueue, catalogueRepo: fakeCatalogueRepo() });
+    const response = await app.inject({ method: 'POST', url: `/api/searches/${saved.id}/lyrics-check` });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json()).toMatchObject({ id: saved.id, operation: 'LYRICS_CHECK', lyricsScan: { status: 'queued' } });
+    expect(enqueue).toHaveBeenCalledWith(saved.id, 'default');
+    const after = await store.get(saved.id);
+    // Independence: the lyrics check writes Postgres (not the record), so the store-presence state is untouched.
+    expect(after?.deepScan?.status).toBe('running');
+    expect(await store.listForTenant('default')).toHaveLength(1);
+    expect((await audit.list()).map((entry) => entry.action)).toContain('catalog.search.lyrics-check.triggered');
+  });
+
+  it('guards the lyrics check: 404 across tenants, 409 while in flight, 422 with no tracks', async () => {
+    const store = new InMemorySearchStore();
+    const enqueue = vi.fn(async () => {});
+    const foreign = await store.save({ tenantId: 'tenant-other', artist: 'Secret', distributor: 'distrokid' }, result('Secret'));
+    const inFlight = await store.save({ tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    const empty = await store.save(
+      { tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' },
+      { ...result(), tracks: [], summary: { tracks: 0, live: 0, notLive: 0, wrongProfile: 0, needsReview: 0 } },
+    );
+
+    // The "already running" state now lives on the snapshot's Postgres progress, not the record.
+    const app = await readyApp({ searchStore: store, enqueueLyricsCheck: enqueue, catalogueRepo: fakeCatalogueRepo({ [inFlight.id]: 'running' }) });
+    const acrossTenant = await app.inject({ method: 'POST', url: `/api/searches/${foreign.id}/lyrics-check` });
+    const running = await app.inject({ method: 'POST', url: `/api/searches/${inFlight.id}/lyrics-check` });
+    const noTracks = await app.inject({ method: 'POST', url: `/api/searches/${empty.id}/lyrics-check` });
+
+    expect([acrossTenant.statusCode, running.statusCode, noTracks.statusCode]).toEqual([404, 409, 422]);
+    expect(running.json()).toMatchObject({ status: 'running' });
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('rejects a saved-snapshot platform recheck while the source is still active', async () => {

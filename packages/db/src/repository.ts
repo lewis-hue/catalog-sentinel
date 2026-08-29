@@ -43,7 +43,7 @@ export interface Repository {
   scanRuns: Collection<ScanRun>;
   auditLogs: Collection<AuditLog>;
 
-  /** Delete ALL data for a workspace (tenant data deletion — PRD §K/§U). */
+  /** Delete ALL data for a workspace (tenant data deletion, PRD §K/§U). */
   deleteWorkspace(workspaceId: string): void;
   /** Wipe everything (test isolation). */
   reset(): void;

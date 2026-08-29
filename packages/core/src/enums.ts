@@ -103,7 +103,7 @@ export const ALBUM_EXTRAS = [
 ] as const;
 export type AlbumExtra = (typeof ALBUM_EXTRAS)[number];
 
-/** How a given piece of data was obtained — recorded on every evidence item. */
+/** How a given piece of data was obtained, recorded on every evidence item. */
 export const DATA_SOURCE_MODES = [
   'official-api',
   'partner-api',

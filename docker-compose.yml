@@ -33,23 +33,6 @@ services:
       timeout: 3s
       retries: 10
 
-  # Self-hosted SearXNG — INTERNAL metasearch for web verification of platforms with no
-  # official API. NOT published to the host: the API + worker reach it over the compose
-  # network at http://searxng:8080. Best-effort EVIDENCE only, never a source of truth.
-  # No Tor/Privoxy/proxy-rotation. See docs/searxng-provider.md.
-  searxng:
-    image: searxng/searxng:latest
-    environment:
-      SEARXNG_BASE_URL: http://searxng:8080/
-    volumes:
-      - ./docker/searxng:/etc/searxng:ro
-    # No `ports:` — internal only.
-    healthcheck:
-      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://localhost:8080/healthz']
-      interval: 10s
-      timeout: 5s
-      retries: 6
-
   # Self-hosted Keycloak (OIDC) — authentication + RBAC + per-tenant identity. Its own
   # Postgres (keycloak-db). The imported realm contains roles, clients, identity-provider
   # mappers, and a credentialless worker service account, but no interactive demo user.
@@ -101,6 +84,9 @@ services:
       WEB_POST_LOGOUT_REDIRECT_URIS: ${WEB_POST_LOGOUT_REDIRECT_URIS:-http://localhost:3000/*}
     volumes:
       - ./docker/keycloak:/opt/keycloak/data/import:ro
+      # Custom login theme (clean tech-SaaS look matching apps/web). Mounted as its own
+      # theme dir alongside the built-ins; realm "sentinel" selects it via loginTheme.
+      - ./docker/keycloak/themes/sentinel:/opt/keycloak/themes/sentinel:ro
     ports:
       - '127.0.0.1:8080:8080' # loopback-only: the local browser can reach OIDC without LAN exposure
     depends_on: [keycloak-db]
@@ -131,6 +117,10 @@ services:
       LOG_LEVEL: info
       NODE_ENV: development
       FEATURE_BROWSER_ASSIST_ENABLED: 'true'
+      # TESTING-ONLY: /api/dev/rescan trigger (re-run scans on the retained warm session). Never prod.
+      # Hardened: refuses to boot in prod, loopback-only, requires DEV_RESCAN_SECRET.
+      ENABLE_DEV_RESCAN: ${ENABLE_DEV_RESCAN:-}
+      DEV_RESCAN_SECRET: ${DEV_RESCAN_SECRET:-}
       APP_BASE_URL: http://localhost:3000
       DATABASE_URL: postgresql://sentinel:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/sentinel
       BROWSER_LINK_PROVIDER: steel
@@ -147,6 +137,8 @@ services:
       STEEL_CDP_INTERNAL: ${STEEL_CDP_INTERNAL:-}
       STEEL_REQUIRED: 'true'
       STEEL_SESSION_TIMEOUT_MS: ${STEEL_SESSION_TIMEOUT_MS:-}
+      # TESTING keep-alive: reuse the logged-in Steel session for repeated scans (no re-login).
+      DISTRIBUTOR_SESSION_REUSE: ${DISTRIBUTOR_SESSION_REUSE:-}
       # Catalogue reads always use the six-stage network-first pipeline with durable checkpoints.
       # Catalogue-read tuning (DistroKid dashboard is a heavy SPA). Tune via .env + recreate,
       # no rebuild needed. Low concurrency + generous per-page timeout avoids goto timeouts.
@@ -156,6 +148,11 @@ services:
       CATALOG_READ_WAIT_UNTIL: ${CATALOG_READ_WAIT_UNTIL:-commit}
       CATALOG_READ_CONTENT_TIMEOUT_MS: ${CATALOG_READ_CONTENT_TIMEOUT_MS:-30000}
       CATALOG_READ_MAX_DURATION_MS: ${CATALOG_READ_MAX_DURATION_MS:-600000}
+      # Attended live scanning (the /api/connect flow) is legal-review gated: it refuses to start
+      # a Steel session until the operator attests authorization. Default OFF → connect returns
+      # 502 InsecureConfigurationError until both are true.
+      ENABLE_DISTROKID_LIVE_SCANNER: ${ENABLE_DISTROKID_LIVE_SCANNER:-false}
+      LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED: ${LEGAL_REVIEW_DISTROKID_SCANNER_APPROVED:-false}
       # Direct authenticated JSON reads are a GATED optimization: BOTH flags must be true, and
       # legal review must actually have happened. Default = passive network capture only.
       ENABLE_DISTROKID_DIRECT_JSON_READER: ${ENABLE_DISTROKID_DIRECT_JSON_READER:-false}
@@ -172,6 +169,9 @@ services:
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      # YouTube Data API is OFF by default (its 10k/day quota can't cover a real catalogue). YouTube
+      # Music web-verifies via the search provider instead. Set true only with a high-quota key.
+      YOUTUBE_USE_API: ${YOUTUBE_USE_API:-}
       AUDIOMACK_CONSUMER_KEY: ${AUDIOMACK_CONSUMER_KEY:-}
       AUDIOMACK_CONSUMER_SECRET: ${AUDIOMACK_CONSUMER_SECRET:-}
       AUDIOMACK_PROFILE_URL: ${AUDIOMACK_PROFILE_URL:-}
@@ -181,22 +181,24 @@ services:
       TIDAL_CLIENT_ID: ${TIDAL_CLIENT_ID:-}
       TIDAL_CLIENT_SECRET: ${TIDAL_CLIENT_SECRET:-}
       TIDAL_PROFILE_URL: ${TIDAL_PROFILE_URL:-}
-      # Web verification for no-API stores. Default backend is the internal SearXNG
-      # (self-hosted); Brave is an optional fallback. Missing platform API keys → those
-      # platforms auto-fall-through to this web backend. Never a source of truth.
-      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-searxng}
-      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
-      SEARXNG_TIMEOUT_MS: ${SEARXNG_TIMEOUT_MS:-8000}
-      SEARXNG_MAX_RPS: ${SEARXNG_MAX_RPS:-2}
-      SEARXNG_CACHE_TTL_SECONDS: ${SEARXNG_CACHE_TTL_SECONDS:-300}
-      SEARXNG_CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${SEARXNG_CIRCUIT_BREAKER_FAILURE_THRESHOLD:-5}
-      SEARXNG_CIRCUIT_BREAKER_RESET_SECONDS: ${SEARXNG_CIRCUIT_BREAKER_RESET_SECONDS:-30}
-      ENABLE_SEARXNG_PROVIDER: ${ENABLE_SEARXNG_PROVIDER:-true}
-      ENABLE_BRAVE_PROVIDER: ${ENABLE_BRAVE_PROVIDER:-false}
+      # Web verification for no-API stores via Serper (hosted Google SERP API). Set SERPER_API_KEY to
+      # enable it; missing platform API keys → those platforms auto-fall-through to web verification.
+      # Best-effort EVIDENCE only, never a source of truth. SEARCH_PROVIDER is normally left empty
+      # (auto = Serper when the key is set); pin SEARCH_PROVIDER=serper to force it.
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
+      # Serper.dev — sign up at serper.dev (2,500 free queries), put the key in .env. The reliable
+      # web-verification path for large/obscure catalogues.
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      SERPER_ENDPOINT: ${SERPER_ENDPOINT:-}
+      SERPER_TIMEOUT_MS: ${SERPER_TIMEOUT_MS:-8000}
+      SERPER_MAX_RPS: ${SERPER_MAX_RPS:-10}
+      SERPER_NUM: ${SERPER_NUM:-30}
+      SERPER_CACHE_TTL_SECONDS: ${SERPER_CACHE_TTL_SECONDS:-3600}
+      SERPER_CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${SERPER_CIRCUIT_BREAKER_FAILURE_THRESHOLD:-6}
+      SERPER_CIRCUIT_BREAKER_RESET_SECONDS: ${SERPER_CIRCUIT_BREAKER_RESET_SECONDS:-30}
       ENABLE_SEARCH_WEB_VERIFY: ${ENABLE_SEARCH_WEB_VERIFY:-true}
-      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       ENABLE_WEB_SEARCH_STORES: ${ENABLE_WEB_SEARCH_STORES:-false}
-      # Brave is 1 query/sec, so the live web scan is bounded (full scan is the CLI).
+      # Web search is rate-limited, so the live web scan is bounded (full scan is the CLI).
       CATALOG_SCAN_WEB_LIMIT: ${CATALOG_SCAN_WEB_LIMIT:-5}
       # Background multi-platform deep scan: the API enqueues to Redis (BullMQ); the
       # worker container consumes it. Redis coordinates queues and hot state in this local stack;
@@ -205,6 +207,7 @@ services:
       DEEP_SCAN_DISPATCH: bullmq
       # Supports very large catalogues (labels with many artists → thousands of tracks).
       DEEP_SCAN_MAX_TRACKS_PER_SCAN: ${DEEP_SCAN_MAX_TRACKS_PER_SCAN:-20000}
+      DEEP_SCAN_TRACK_CONCURRENCY: ${DEEP_SCAN_TRACK_CONCURRENCY:-8}
       DEEP_SCAN_TRACK_CHUNK_SIZE: ${DEEP_SCAN_TRACK_CHUNK_SIZE:-25}
       DEEP_SCAN_CHECKPOINT_INTERVAL: ${DEEP_SCAN_CHECKPOINT_INTERVAL:-25}
       # Authentication (Keycloak/OIDC). The API verifies bearer tokens: RS256 signature + issuer
@@ -223,7 +226,6 @@ services:
     # cold `docker compose up`.
     depends_on:
       redis: { condition: service_healthy }
-      searxng: { condition: service_healthy }
       postgres: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     # The API is reachable only through the web BFF. No local browser or VNC port is
@@ -231,8 +233,8 @@ services:
 
   # Background deep-scan worker(s) — the Celery-equivalent (BullMQ on Redis). Consumes the
   # multi-platform deep-scan queue and writes results to the SHARED Redis store. Scale with
-  # `docker compose up --scale worker=3` (keep DEEP_SCAN_MAX_CONCURRENCY=1 per worker while
-  # Brave is the search backend — it's a global 1 query/sec per key).
+  # `docker compose up --scale worker=3` (keep DEEP_SCAN_MAX_CONCURRENCY=1 per worker so the
+  # Serper query budget isn't overwhelmed by parallel web-heavy scans).
   worker:
     image: sentinel-app
     command: ['npm', 'run', 'worker']
@@ -242,9 +244,17 @@ services:
       DEEP_SCAN_DISPATCH: bullmq
       # Supports very large catalogues (labels with many artists → thousands of tracks).
       DEEP_SCAN_MAX_TRACKS_PER_SCAN: ${DEEP_SCAN_MAX_TRACKS_PER_SCAN:-20000}
+      DEEP_SCAN_TRACK_CONCURRENCY: ${DEEP_SCAN_TRACK_CONCURRENCY:-8}
       DEEP_SCAN_TRACK_CHUNK_SIZE: ${DEEP_SCAN_TRACK_CHUNK_SIZE:-25}
       DEEP_SCAN_CHECKPOINT_INTERVAL: ${DEEP_SCAN_CHECKPOINT_INTERVAL:-25}
       DEEP_SCAN_MAX_CONCURRENCY: ${DEEP_SCAN_MAX_CONCURRENCY:-1}
+      # Decouple scraping from verification: when unset/false the DistroKid scrape does NOT
+      # auto-fire the store-presence check — a user triggers it on demand (POST /store-check).
+      # Set true to restore the legacy "scrape then immediately verify" chain.
+      SCAN_STORE_PRESENCE_AUTO: ${SCAN_STORE_PRESENCE_AUTO:-}
+      # Lyric-availability verification (Missing Lyrics module) via LRCLIB — KEYLESS. Blank uses the
+      # public host (lrclib.net); point at a self-hosted mirror if desired. No key ever required.
+      LYRICS_VERIFY_BASE_URL: ${LYRICS_VERIFY_BASE_URL:-}
       DATABASE_URL: postgresql://sentinel:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/sentinel
       BROWSER_LINK_PROVIDER: steel
       # Steel (same key as the API) so the durable extraction pipeline can re-attach to the
@@ -252,10 +262,29 @@ services:
       STEEL_CONNECTOR_MODE: ${STEEL_CONNECTOR_MODE:-cloud}
       STEEL_API_KEY: ${STEEL_API_KEY:-}
       STEEL_SESSION_TIMEOUT_MS: ${STEEL_SESSION_TIMEOUT_MS:-}
+      # TESTING keep-alive: reuse the logged-in Steel session for repeated scans (no re-login).
+      DISTRIBUTOR_SESSION_REUSE: ${DISTRIBUTOR_SESSION_REUSE:-}
+      # Index pagination is independent from release-detail extraction. Keep enough bounded
+      # rounds for 1,000+ single-release catalogues that load incrementally.
+      CATALOG_READ_MAX_RELEASES: ${CATALOG_READ_MAX_RELEASES:-5000}
+      CATALOG_INDEX_MAX_SCROLL_ROUNDS: ${CATALOG_INDEX_MAX_SCROLL_ROUNDS:-500}
+      # Per-release extraction tuning. DistroKid album pages expose NO JSON endpoint, so the
+      # network-first wait is pure overhead before the DOM reader runs — keep it short. And run
+      # several release tabs on the one session so a large catalogue finishes inside the Steel
+      # session window (bounded concurrency keeps the request rate on the user's own account modest).
+      CATALOG_READ_CONTENT_TIMEOUT_MS: ${CATALOG_READ_CONTENT_TIMEOUT_MS:-30000}
+      CATALOG_READ_GOTO_TIMEOUT_MS: ${CATALOG_READ_GOTO_TIMEOUT_MS:-30000}
+      DISTROKID_RELEASE_CONCURRENCY: ${DISTROKID_RELEASE_CONCURRENCY:-4}
+      # Dedicated sequential lyric pass (reads DistroKid's lazy-rendered plain/synced lyric state per
+      # album, after the fast metadata scrape). Best-effort + deadline-aware. Unset to disable.
+      DISTROKID_LYRIC_PASS: ${DISTROKID_LYRIC_PASS:-}
       # Same store-scan credentials as the API so the deep scan can hit every platform.
       SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
       SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      # YouTube Data API is OFF by default (its 10k/day quota can't cover a real catalogue). YouTube
+      # Music web-verifies via the search provider instead. Set true only with a high-quota key.
+      YOUTUBE_USE_API: ${YOUTUBE_USE_API:-}
       AUDIOMACK_CONSUMER_KEY: ${AUDIOMACK_CONSUMER_KEY:-}
       AUDIOMACK_CONSUMER_SECRET: ${AUDIOMACK_CONSUMER_SECRET:-}
       AUDIOMACK_PROFILE_URL: ${AUDIOMACK_PROFILE_URL:-}
@@ -265,24 +294,34 @@ services:
       TIDAL_CLIENT_ID: ${TIDAL_CLIENT_ID:-}
       TIDAL_CLIENT_SECRET: ${TIDAL_CLIENT_SECRET:-}
       TIDAL_PROFILE_URL: ${TIDAL_PROFILE_URL:-}
-      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       ENABLE_WEB_SEARCH_STORES: ${ENABLE_WEB_SEARCH_STORES:-false}
-      # Web-verification backend for the deep scan (same defaults as the API).
-      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-searxng}
-      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
-      SEARXNG_TIMEOUT_MS: ${SEARXNG_TIMEOUT_MS:-8000}
-      SEARXNG_MAX_RPS: ${SEARXNG_MAX_RPS:-2}
-      SEARXNG_CACHE_TTL_SECONDS: ${SEARXNG_CACHE_TTL_SECONDS:-300}
-      ENABLE_SEARXNG_PROVIDER: ${ENABLE_SEARXNG_PROVIDER:-true}
-      ENABLE_BRAVE_PROVIDER: ${ENABLE_BRAVE_PROVIDER:-false}
+      # Web-verification backend for the deep scan (same defaults as the API): Serper (hosted SERP
+      # API) when SERPER_API_KEY is set, else official APIs only. SEARCH_PROVIDER normally left empty.
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      SERPER_ENDPOINT: ${SERPER_ENDPOINT:-}
+      SERPER_TIMEOUT_MS: ${SERPER_TIMEOUT_MS:-8000}
+      SERPER_MAX_RPS: ${SERPER_MAX_RPS:-10}
+      SERPER_NUM: ${SERPER_NUM:-30}
+      SERPER_CACHE_TTL_SECONDS: ${SERPER_CACHE_TTL_SECONDS:-3600}
+      SERPER_CIRCUIT_BREAKER_FAILURE_THRESHOLD: ${SERPER_CIRCUIT_BREAKER_FAILURE_THRESHOLD:-6}
+      SERPER_CIRCUIT_BREAKER_RESET_SECONDS: ${SERPER_CIRCUIT_BREAKER_RESET_SECONDS:-30}
       ENABLE_SEARCH_WEB_VERIFY: ${ENABLE_SEARCH_WEB_VERIFY:-true}
       ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?Set ENCRYPTION_MASTER_KEY}
+      # DIAGNOSTIC album-page capture — off unless DISTROKID_ALBUM_CAPTURE_DIR is set (e.g. to
+      # /capture). When set, one real album page's HTML/scripts/response-manifest is written to the
+      # mounted ./.capture dir so the DOM reader can be built/verified against DistroKid's markup.
+      DISTROKID_ALBUM_CAPTURE_DIR: ${DISTROKID_ALBUM_CAPTURE_DIR:-}
+      # Capture a SPECIFIC release (by album UUID) instead of the first, for targeted inspection.
+      DISTROKID_ALBUM_CAPTURE_UUID: ${DISTROKID_ALBUM_CAPTURE_UUID:-}
+    volumes:
+      # Host ./captures is already gitignored (real account data — never committed).
+      - ./captures:/capture
     # Wait for HEALTHY, not merely started: Postgres rejects connections with FATAL 57P03
     # ("the database system is starting up") during boot, which would crash this service on a
     # cold `docker compose up`.
     depends_on:
       redis: { condition: service_healthy }
-      searxng: { condition: service_healthy }
       postgres: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
 

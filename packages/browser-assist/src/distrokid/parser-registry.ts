@@ -35,7 +35,7 @@ export class ParserRegistry {
   get versions(): string[] { return this.variants.map((v) => v.version); }
 
   /**
-   * Try every compatible parser, newest first. Only a total failure is SCHEMA_CHANGED —
+   * Try every compatible parser, newest first. Only a total failure is SCHEMA_CHANGED -
    * a single variant failing while another succeeds is normal during a migration.
    */
   parse(payload: unknown, source: MetadataSource = 'NETWORK_JSON'): ParseOutcome {

@@ -37,7 +37,7 @@ describe('buildSupportPacket', () => {
   const packet = buildSupportPacket(data);
 
   it('produces a subject with the artist and missing count', () => {
-    expect(packet.subject).toBe('Audiomack Reinstatement Request — Lewis KE — 2 Missing Songs');
+    expect(packet.subject).toBe('Audiomack Reinstatement Request, Lewis KE, 2 Missing Songs');
     expect(packet.missingCount).toBe(2);
   });
 

@@ -2,7 +2,7 @@ import type { StoreCheckMethod } from './types';
 
 /**
  * Honest coverage map for the requested stores. `method` states HOW presence can
- * actually be determined for each — no store is marked verifiable unless a real
+ * actually be determined for each, no store is marked verifiable unless a real
  * data path exists. `needsKey` flags official APIs that require a credential.
  *
  *  - api                  : real public/official API (verifiable now or with a key)

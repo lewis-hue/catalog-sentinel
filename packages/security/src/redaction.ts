@@ -43,7 +43,7 @@ export interface RedactOptions {
 /**
  * Deep-redact a value for safe logging/evidence. Sensitive keys are replaced
  * wholesale; string values are scrubbed for token/secret patterns; emails are
- * masked. Returns a NEW structure — never mutates the input.
+ * masked. Returns a NEW structure, never mutates the input.
  */
 export function redact(value: unknown, opts: RedactOptions = {}): unknown {
   const maskEmails = opts.maskEmails ?? true;
@@ -74,7 +74,7 @@ export function redact(value: unknown, opts: RedactOptions = {}): unknown {
   return walk(value, 0);
 }
 
-/** True if a key name would be redacted — useful for schema/lint checks. */
+/** True if a key name would be redacted, useful for schema/lint checks. */
 export function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY_RE.test(key);
 }

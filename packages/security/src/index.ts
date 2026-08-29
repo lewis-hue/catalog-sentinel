@@ -1,5 +1,5 @@
 /**
- * @sentinel/security — redaction, encryption/secrets, RBAC, signed URLs, audit
+ * @sentinel/security, redaction, encryption/secrets, RBAC, signed URLs, audit
  * logging, and screenshot-redaction contracts. No raw passwords are ever handled
  * or stored anywhere in the system.
  */

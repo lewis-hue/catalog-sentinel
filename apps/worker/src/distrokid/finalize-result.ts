@@ -19,6 +19,11 @@ export function projectFinalizedSnapshot(
   job: FinalizeJob,
   outcomes: readonly ReleaseExtractionOutcome[],
   nowIso = new Date().toISOString(),
+  // When false, the catalogue is projected but store-presence verification is NOT queued, it
+  // waits for an explicit on-demand trigger. The record lands on `idle` (a CTA state), never
+  // `queued`, so the UI does not poll for a job that will never arrive. Defaults true so existing
+  // callers and tests keep the legacy scrape→verify chain unless a caller opts out.
+  autoPresence = true,
 ): SearchRecord {
   if (ownerOf(record) !== job.tenantId) {
     throw new Error('finalized snapshot tenant does not own the target search record');
@@ -99,7 +104,13 @@ export function projectFinalizedSnapshot(
   if (skipped.length) warnings.push(`${skipped.length} release(s) were not extracted and remain unverified.`);
   if (!released.length) warnings.push('No tracks were verified from the distributor snapshot.');
 
-  const willDeepScan = released.length > 0;
+  const hasReleased = released.length > 0;
+  const willDeepScan = hasReleased && autoPresence;
+  const note = !hasReleased
+    ? 'The distributor snapshot reached a terminal state, but no tracks were verified. Retry the attended connection or use a distributor export.'
+    : willDeepScan
+      ? `Verified ${job.completeness.completedReleases}/${job.completeness.expectedReleases} distributor release(s). Store-presence verification is queued; no missing-store claim is made until that evidence arrives.`
+      : `Verified ${job.completeness.completedReleases}/${job.completeness.expectedReleases} distributor release(s). Run a store-presence check to verify each track's availability across stores; no missing-store claim is made until then.`;
   return {
     ...record,
     tenantId: job.tenantId,
@@ -123,12 +134,12 @@ export function projectFinalizedSnapshot(
           failureReasons: { ...job.completeness.failureReasons },
         },
       },
-      note: willDeepScan
-        ? `Verified ${job.completeness.completedReleases}/${job.completeness.expectedReleases} distributor release(s). Store-presence verification is queued; no missing-store claim is made until that evidence arrives.`
-        : 'The distributor snapshot reached a terminal state, but no tracks were verified. Retry the attended connection or use a distributor export.',
+      note,
     },
     deepScan: {
-      status: willDeepScan ? 'queued' : 'done',
+      // hasReleased && !auto → `unchecked` (terminal CTA state), never `idle` (which the active-scan
+      // guard would treat as still-in-progress and block deletion / re-trigger).
+      status: willDeepScan ? 'queued' : hasReleased ? 'unchecked' : 'done',
       platformsPending: [],
       platformsDone: [],
       updatedAt: nowIso,

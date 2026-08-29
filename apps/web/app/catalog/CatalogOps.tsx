@@ -1,10 +1,13 @@
 'use client';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { platformCode, statusClass, downloadCsv, NoAudit, Readout } from '@sentinel/shared-ui';
 import { apiErrorMessage, apiFetch } from '@/lib/api-client';
+import { failureReasonSummary } from './failure-reasons';
+import { useStorePresence, StoreCheckBar, deliveredMapFrom } from '../catalogue/store-presence';
+import { useLyricsCheck, LyricsCheckBar, computeLyricsCoverage, type TrackLyrics } from '../catalogue/lyrics-check';
 
-// Matches READING_SENTINEL in apps/api/src/distributor-connect.ts — marks a record whose
+// Matches READING_SENTINEL in apps/api/src/distributor-connect.ts, marks a record whose
 // catalogue is still being read in the background so the page polls until it fills in.
 const READING_SENTINEL = '__reading_in_progress__';
 
@@ -29,8 +32,16 @@ interface ScanResult { artist: string; stores: string[]; tracks: Track[]; summar
 interface DeepScanState { status: 'idle' | 'queued' | 'running' | 'done' | 'error'; platformsPending: string[]; platformsDone: string[]; error?: string }
 interface SearchRecord { id: string; artist: string; distributor?: string; createdAt: string; result: ScanResult; deepScan?: DeepScanState }
 
-interface Row { title: string; artist: string | null; featuredArtists: string[]; isrc: string | null; album: string | null; art: string | null; label: string | null; upc: string | null; releaseDate: string | null; uploadDate: string | null; metadata?: TrackMetadata; cells: PerStore[]; worst: 'wrong' | 'gap' | 'unk' | 'pending' | 'live'; live: number; issues: number }
+interface Row { title: string; artist: string | null; featuredArtists: string[]; isrc: string | null; album: string | null; art: string | null; label: string | null; upc: string | null; releaseDate: string | null; uploadDate: string | null; metadata?: TrackMetadata; cells: PerStore[]; worst: 'wrong' | 'gap' | 'unk' | 'pending' | 'live'; live: number; issues: number; mark: string | null; markRef: { releaseId: string; trackIndex: number } | null }
 interface Group { key: string; title: string; artist: string | null; art: string | null; label: string | null; upc: string | null; releaseDate: string | null; uploadDate: string | null; metadata?: TrackMetadata; rows: Row[] }
+
+// A manual track mark is stored per (releaseId, trackIndex) in Postgres and served on catalogue
+// tracks. This grid is record-based, so we join to the catalogue by ISRC (reliable) then by
+// release+title (fallback) to attach each row's mark + its write key.
+interface MarkInfo { releaseId: string; trackIndex: number; mark: string | null }
+const isrcMarkKey = (isrc: string | null | undefined): string | null => (isrc && isrc.trim() ? `i:${isrc.trim().toUpperCase()}` : null);
+const contentMarkKey = (album: string | null | undefined, title: string | null | undefined): string => `c:${(album ?? '').trim().toLowerCase()}::${(title ?? '').trim().toLowerCase()}`;
+const selId = (ref: { releaseId: string; trackIndex: number }): string => `${ref.releaseId}:${ref.trackIndex}`;
 
 // DistroKid rows read as "Title Single Artist"; strip the trailing release-type word and the
 // artist so the title reads cleanly (mirrors the scraper's cleanup for older saved records).
@@ -52,7 +63,7 @@ function Cover({ art, title, size = 48 }: { art: string | null; title: string; s
   const initial = (title || '?').trim().charAt(0).toUpperCase() || '♪';
   if (!art || failed) return <div className="rel-cover ph" style={{ width: size, height: size }} aria-hidden>{initial}</div>;
   // A plain <img>, deliberately. Artwork URLs come from whatever CDN the user's distributor
-  // happens to serve, which we cannot know ahead of time — `next/image` requires every remote
+  // happens to serve, which we cannot know ahead of time, `next/image` requires every remote
   // host to be pre-declared in `remotePatterns`, so it would silently fail to render art from
   // any host we hadn't listed. Optimizing someone else's CDN image also buys little here: these
   // are already-small square thumbnails, and they are lazy-loaded.
@@ -62,6 +73,7 @@ function Cover({ art, title, size = 48 }: { art: string | null; title: string; s
 
 const FILTERS: Array<{ key: string; label: string; cls?: string; test: (r: Row) => boolean }> = [
   { key: 'all', label: 'All', test: () => true },
+  { key: 'marked-missing', label: 'Marked missing', cls: 'bad', test: (r) => r.mark === 'missing' },
   { key: 'not-confirmed', label: 'Not confirmed', cls: 'warn', test: (r) => r.cells.some((c) => c.status === 'not-live') },
   { key: 'unverifiable', label: 'Unverifiable', cls: 'ghost', test: (r) => r.cells.some((c) => c.status === 'unverifiable') },
   { key: 'wrong', label: 'Wrong profile', cls: 'bad', test: (r) => r.cells.some((c) => c.status === 'wrong-profile') },
@@ -72,7 +84,7 @@ const FILTERS: Array<{ key: string; label: string; cls?: string; test: (r: Row) 
 ];
 
 const fmtDate = (d?: string | null): string => {
-  if (!d) return '—';
+  if (!d) return '';
   const dt = new Date(d);
   return Number.isNaN(dt.getTime()) ? d : dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 };
@@ -90,9 +102,9 @@ const CAPTURE_REASON: Record<Exclude<MetadataFieldStatus, 'PRESENT' | 'ABSENT_AT
 function evidenceText(value: string | null | undefined, evidence?: MetadataField, format: (value: string) => string = (item) => item): string {
   if (!evidence) return value ? format(value) : 'Capture status unknown';
   if (evidence.status === 'ABSENT_AT_SOURCE') return 'Not provided by distributor';
-  if (evidence.status !== 'PRESENT') return `Not captured — ${CAPTURE_REASON[evidence.status]}`;
+  if (evidence.status !== 'PRESENT') return `Not captured, ${CAPTURE_REASON[evidence.status]}`;
   const capturedValue = evidence.value ?? value;
-  return capturedValue ? format(capturedValue) : 'Not captured — recorded value unavailable';
+  return capturedValue ? format(capturedValue) : 'Not captured, recorded value unavailable';
 }
 
 function evidenceTitle(evidence?: MetadataField): string | undefined {
@@ -133,16 +145,22 @@ function ExtractionBanner({ extraction }: { extraction?: DistributorExtraction }
   const tracks = c.expectedTracksKnown
     ? `${c.extractedTracks}/${c.expectedTracks} tracks verified`
     : `${c.extractedTracks} tracks observed; the distributor did not expose an independent track total, so this does not prove every track was listed`;
-  const failures = Object.entries(c.failureReasons).map(([reason, count]) => `${reason} ${count}`).join(', ');
+  const failures = failureReasonSummary(c.failureReasons);
   const complete = extraction.status === 'COMPLETE' || extraction.status === 'COMPLETE_WITH_SOURCE_GAPS';
+  const indexNotEstablished = extraction.status === 'FAILED'
+    && c.expectedReleases === 0
+    && c.completedReleases === 0;
   return (
     <div
       className="notice-banner"
       role={complete ? 'status' : 'alert'}
       style={complete ? undefined : { borderColor: 'var(--gap-edge)', background: 'var(--gap-tint)', color: 'var(--gap)' }}
     >
-      Distributor extraction: {extraction.status.replaceAll('_', ' ').toLowerCase()}. {releases}; {tracks}.
-      {c.unresolvedReleaseIds.length > 0 ? ` ${c.unresolvedReleaseIds.length} release${c.unresolvedReleaseIds.length === 1 ? '' : 's'} remain unresolved${failures ? ` (${failures})` : ''}.` : ''}
+      {indexNotEstablished
+        ? 'Distributor extraction: failed. The distributor catalogue index could not be established, so no release or track total was verified. This result is not evidence that the account contains zero releases or zero tracks.'
+        : `Distributor extraction: ${extraction.status.replaceAll('_', ' ').toLowerCase()}. ${releases}; ${tracks}.`}
+      {c.unresolvedReleaseIds.length > 0 ? ` ${c.unresolvedReleaseIds.length} release${c.unresolvedReleaseIds.length === 1 ? '' : 's'} remain unresolved.` : ''}
+      {failures ? ` Failure codes: ${failures}.` : ''}
     </div>
   );
 }
@@ -154,11 +172,67 @@ export function CatalogOps() {
   const [loadError, setLoadError] = useState('');
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
+  // Manual marks: a lookup (by ISRC / release+title) → {releaseId, trackIndex, mark}, plus row selection.
+  const [markLookup, setMarkLookup] = useState<Map<string, MarkInfo>>(new Map());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [marking, setMarking] = useState(false);
+  const [markError, setMarkError] = useState('');
+  // Store-side lyric fields per track (from the catalogue) → the lyric-check coverage summary.
+  const [lyricTracks, setLyricTracks] = useState<TrackLyrics[]>([]);
+  // Per release (by album UUID) → normalized store → DistroKid deep-link. "Delivered by DistroKid".
+  const [deliveredByRelease, setDeliveredByRelease] = useState<Map<string, Map<string, string | null>>>(new Map());
+
+  const searchId = rec?.id ?? savedId ?? null;
+
+  // One catalogue fetch powers the manual-mark lookup, the store-lyric coverage, AND the DistroKid
+  // "Submitted to X" delivery overlay.
+  const loadCatalogueAux = useCallback(async (id: string) => {
+    try {
+      const res = await apiFetch(`/api/searches/${encodeURIComponent(id)}/catalogue`);
+      if (!res.ok) return;
+      const cat = (await res.json()) as { releases?: Array<{ releaseId: string; title: string | null; submittedStores?: Array<{ store: string; url: string | null }>; tracks: Array<{ title: string | null; isrc: string | null; trackIndex: number; mark: string | null; plainLyrics: string; syncedLyrics: string; storeLyricStatus: string; storeHasPlain: boolean; storeHasSynced: boolean }> }> };
+      const map = new Map<string, MarkInfo>();
+      const lyrics: TrackLyrics[] = [];
+      const delivered = new Map<string, Map<string, string | null>>();
+      for (const rel of cat.releases ?? []) {
+        delivered.set(rel.releaseId, deliveredMapFrom(rel.submittedStores));
+        for (const t of rel.tracks) {
+          const info: MarkInfo = { releaseId: rel.releaseId, trackIndex: t.trackIndex, mark: t.mark ?? null };
+          const ik = isrcMarkKey(t.isrc);
+          if (ik && !map.has(ik)) map.set(ik, info);
+          const ck = contentMarkKey(rel.title, t.title);
+          if (!map.has(ck)) map.set(ck, info);
+          lyrics.push({ plainLyrics: t.plainLyrics, syncedLyrics: t.syncedLyrics, storeLyricStatus: t.storeLyricStatus, storeHasPlain: t.storeHasPlain, storeHasSynced: t.storeHasSynced });
+        }
+      }
+      setMarkLookup(map);
+      setLyricTracks(lyrics);
+      setDeliveredByRelease(delivered);
+    } catch { /* best-effort; the grid still works without marks/lyric coverage */ }
+  }, []);
+
+  const presence = useStorePresence(searchId);
+  const lyrics = useLyricsCheck(searchId, { onCompleted: () => { if (searchId) void loadCatalogueAux(searchId); } });
+
+  // Keep the grid live while a store check triggered from THIS page runs (the base poll stops once a
+  // prior scan is done, so a fresh re-run wouldn't otherwise update the cells until a manual reload).
+  const refreshRecord = useCallback(async () => {
+    if (!searchId) return;
+    const r = await apiFetch(`/api/searches/${encodeURIComponent(searchId)}`);
+    if (r.ok) setRec((await r.json()) as SearchRecord);
+  }, [searchId]);
+  const storeCheckActive =
+    presence.triggering || ['idle', 'queued', 'running'].includes(presence.deepScan?.status ?? '');
+  useEffect(() => {
+    if (!storeCheckActive) return;
+    const t = setInterval(() => { void refreshRecord(); }, 4000);
+    return () => clearInterval(t);
+  }, [storeCheckActive, refreshRecord]);
 
   useEffect(() => {
     // The catalogue is read in the background after "connect & scan"; a fresh record starts
     // as a "reading" placeholder (a sentinel warning, 0 tracks). Poll until the read fills
-    // it in — then a normal load + the deep-scan polling elsewhere take over.
+    // it in, then a normal load + the deep-scan polling elsewhere take over.
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function load() {
@@ -183,6 +257,7 @@ export function CatalogOps() {
           timer = setTimeout(load, 3000);
         } else {
           setState('ready');
+          void loadCatalogueAux(id);
           // Presence verification writes one platform at a time into this same durable record.
           // Keep the catalog live while that background work is active instead of freezing the
           // first empty/partial matrix until the user manually refreshes the browser.
@@ -199,7 +274,7 @@ export function CatalogOps() {
     setState('loading');
     void load();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [savedId]);
+  }, [savedId, loadCatalogueAux]);
 
   const rows: Row[] = useMemo(() => {
     if (!rec) return [];
@@ -211,11 +286,13 @@ export function CatalogOps() {
       const album = cleanTitle(t.album, artist) || null;
       // Prefer a real per-track title; for singles it's blank/"Untitled" → use the release title.
       const title = isRealTitle(t.title) ? cleanTitle(t.title, artist) : album || t.title || 'Untitled';
+      const isrc = t.isrc ?? t.metadata?.isrc?.value ?? null;
+      const info = markLookup.get(isrcMarkKey(isrc) ?? '') ?? markLookup.get(contentMarkKey(album, title));
       return {
         title,
         artist,
         featuredArtists: [...(t.featuredArtists ?? [])],
-        isrc: t.isrc ?? t.metadata?.isrc?.value ?? null,
+        isrc,
         album,
         art: t.artworkUrl ?? t.metadata?.artworkUrl?.value ?? null,
         label: t.label ?? t.metadata?.label?.value ?? null,
@@ -227,9 +304,11 @@ export function CatalogOps() {
         worst,
         live: cells.filter((c) => c.status === 'live').length,
         issues: cells.filter((c) => c.status !== 'live').length,
+        mark: info?.mark ?? null,
+        markRef: info ? { releaseId: info.releaseId, trackIndex: info.trackIndex } : null,
       };
     });
-  }, [rec]);
+  }, [rec, markLookup]);
 
   const shown = useMemo(() => {
     const f = FILTERS.find((x) => x.key === filter) ?? FILTERS[0]!;
@@ -262,6 +341,43 @@ export function CatalogOps() {
     return out;
   }, [shown]);
 
+  const markedMissing = useMemo(() => rows.filter((r) => r.mark === 'missing').length, [rows]);
+  const selectableIds = useMemo(() => new Set(shown.filter((r) => r.markRef).map((r) => selId(r.markRef!))), [shown]);
+  const allShownSelected = selectableIds.size > 0 && [...selectableIds].every((k) => selected.has(k));
+
+  const toggleRow = (ref: { releaseId: string; trackIndex: number }) => {
+    const key = selId(ref);
+    setSelected((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  };
+  const toggleAll = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (selectableIds.size > 0 && [...selectableIds].every((k) => prev.has(k))) { for (const k of selectableIds) next.delete(k); }
+      else { for (const k of selectableIds) next.add(k); }
+      return next;
+    });
+  };
+  const applyMark = async (mark: string | null) => {
+    if (!searchId || selected.size === 0) return;
+    setMarking(true); setMarkError('');
+    try {
+      const marks = [...selected].map((k) => {
+        const i = k.lastIndexOf(':');
+        return { releaseId: k.slice(0, i), trackIndex: Number(k.slice(i + 1)), mark };
+      });
+      const res = await apiFetch(`/api/searches/${encodeURIComponent(searchId)}/track-marks`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ marks }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, 'Could not update the marks.'));
+      await loadCatalogueAux(searchId);
+      setSelected(new Set());
+    } catch (e) {
+      setMarkError(e instanceof Error ? e.message : 'Could not update the marks.');
+    } finally {
+      setMarking(false);
+    }
+  };
+
   function exportCsv() {
     if (!rec) return;
     const stores = rec.result.stores;
@@ -290,7 +406,7 @@ export function CatalogOps() {
     return (
       <div className="cat-empty">
         <p><span className="spinner" style={{ marginRight: 8 }} /><strong>Reading your catalogue in a real browser…</strong></p>
-        <p className="hint" style={{ marginTop: 8 }}>{rec?.result?.note ?? 'Visiting each release to read its tracks, ISRCs and metadata. This page updates automatically as soon as the read finishes — large catalogues can take a minute.'}</p>
+        <p className="hint" style={{ marginTop: 8 }}>{rec?.result?.note ?? 'Visiting each release to read its tracks, ISRCs and metadata. This page updates automatically as soon as the read finishes, large catalogues can take a minute.'}</p>
       </div>
     );
   }
@@ -302,7 +418,7 @@ export function CatalogOps() {
   }
 
   const s = rec.result.summary;
-  const colSpan = 3;
+  const colSpan = 4;
   return (
     <>
       <Readout
@@ -312,23 +428,19 @@ export function CatalogOps() {
           { value: s.tracks, label: 'tracks' },
           { value: s.live, label: 'confirmed', tone: 'ok' },
           { value: s.notLive, label: 'not confirmed', tone: s.notLive ? 'warn' : undefined },
+          ...(markedMissing ? [{ value: markedMissing, label: 'marked missing', tone: 'bad' as const }] : []),
           { value: s.needsReview, label: 'to review', tone: s.needsReview ? 'warn' : undefined },
         ]}
       />
 
       <ExtractionBanner extraction={rec.result.distributorExtraction} />
 
-      {(rec.deepScan?.status === 'idle' || rec.deepScan?.status === 'queued' || rec.deepScan?.status === 'running') && (
-        <div className="notice-banner" role="status" aria-live="polite">
-          Store verification is still running: {rec.deepScan.platformsDone.length} platform{rec.deepScan.platformsDone.length === 1 ? '' : 's'} complete
-          {rec.deepScan.platformsPending.length ? `, ${rec.deepScan.platformsPending.length} remaining` : ''}. This table updates automatically.
-        </div>
-      )}
-      {rec.deepScan?.status === 'error' && (
-        <div className="notice-banner" role="alert" style={{ borderColor: 'var(--wrong-edge)', background: 'var(--wrong-tint)', color: 'var(--wrong)' }}>
-          {rec.deepScan.error ?? 'Some platform checks could not finish. Their cells remain unverifiable and can be retried.'}
-        </div>
-      )}
+      {/* Re-run controls: verify store presence + reconcile lyrics on this already-scraped catalogue,
+          no re-scrape needed. Both are independent background jobs and can run at the same time. */}
+      <div style={{ margin: '4px 0 2px' }}>
+        <StoreCheckBar presence={presence} />
+        <LyricsCheckBar check={lyrics} coverage={computeLyricsCoverage(lyricTracks)} />
+      </div>
 
       <div className="cat-controls">
         <div className="cat-filters">
@@ -342,11 +454,35 @@ export function CatalogOps() {
         </div>
       </div>
 
+      {selected.size > 0 && (
+        <div
+          role="region"
+          aria-label="Bulk actions"
+          style={{
+            position: 'sticky', top: 8, zIndex: 5, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            padding: '10px 14px', margin: '0 0 12px', borderRadius: 10, border: '1px solid var(--line)',
+            background: 'var(--panel)', boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          <strong style={{ fontSize: 13 }}>{selected.size} selected</strong>
+          <span style={{ flex: 1 }} />
+          <button className="btn" onClick={() => void applyMark('missing')} disabled={marking}>Mark missing</button>
+          <button className="btn ghost" onClick={() => void applyMark('resolved')} disabled={marking}>Mark resolved</button>
+          <button className="btn ghost" onClick={() => void applyMark(null)} disabled={marking}>Clear mark</button>
+          <button className="btn ghost" onClick={() => setSelected(new Set())} disabled={marking}>Deselect</button>
+          {marking && <span className="spinner" aria-hidden />}
+          {markError && <span style={{ fontSize: 12, color: 'var(--wrong)' }}>{markError}</span>}
+        </div>
+      )}
+
       <div className="covmx">
         <div className="covmx-scroll">
           <table>
             <thead>
               <tr>
+                <th style={{ width: 34 }}>
+                  <input type="checkbox" checked={allShownSelected} onChange={toggleAll} aria-label="Select all shown tracks" disabled={selectableIds.size === 0} />
+                </th>
                 <th className="track-col" style={{ textAlign: 'left' }}>Track ({shown.length})</th>
                 <th>Platform coverage</th>
                 <th>Flag</th>
@@ -377,7 +513,17 @@ export function CatalogOps() {
                     </td>
                   </tr>
                   {g.rows.map((r, i) => (
-                    <tr key={`${g.key}-${r.isrc ?? r.title}-${i}`}>
+                    <tr key={`${g.key}-${r.isrc ?? r.title}-${i}`} className={r.markRef && selected.has(selId(r.markRef)) ? 'row-selected' : undefined}>
+                      <td style={{ textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!r.markRef && selected.has(selId(r.markRef))}
+                          onChange={() => r.markRef && toggleRow(r.markRef)}
+                          disabled={!r.markRef}
+                          aria-label={`Select ${r.title}`}
+                          title={r.markRef ? undefined : 'This track could not be matched to a catalogue entry for marking'}
+                        />
+                      </td>
                       <td className="track-col">
                         <span className="tk-title" title={r.title}>{r.title}</span>
                         <span className="tk-sub">
@@ -388,22 +534,43 @@ export function CatalogOps() {
                       <td>
                         <div style={{ display: 'inline-flex', gap: 3, flexWrap: 'wrap', justifyContent: 'center' }}>
                           {r.cells.length > 0
-                            ? r.cells.map((c) => (
-                                <span key={c.store} className={`pip ${statusClass(c.status)}`} title={`${c.store}: ${c.status}${c.foundArtist ? ` (${c.foundArtist})` : ''}`}>{platformCode(c.store)}</span>
-                              ))
+                            ? r.cells.map((c) => {
+                                const delivered = r.markRef ? deliveredByRelease.get(r.markRef.releaseId) : undefined;
+                                // An unverifiable cell that DistroKid reports it delivered → "Delivered".
+                                const isDelivered = c.status === 'unverifiable' && !!delivered?.has(c.store);
+                                const url = isDelivered ? (delivered!.get(c.store) || undefined) : (c.url || undefined);
+                                const pip = (
+                                  <span
+                                    className={`pip ${isDelivered ? 'delivered' : statusClass(c.status)}`}
+                                    title={isDelivered ? `${c.store}: Delivered by DistroKid (not independently verified)` : `${c.store}: ${c.status}${c.foundArtist ? ` (${c.foundArtist})` : ''}`}
+                                  >{platformCode(c.store)}</span>
+                                );
+                                return url
+                                  ? <a key={c.store} href={url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>{pip}</a>
+                                  : <Fragment key={c.store}>{pip}</Fragment>;
+                              })
                             : <span className="status unk">Checks pending</span>}
                         </div>
                       </td>
                       <td>
-                        {r.worst === 'pending'
-                          ? <span className="status unk">Store checks pending</span>
-                          : r.worst === 'live'
-                            ? <span className="status live">All confirmed</span>
-                          : r.worst === 'wrong'
-                            ? <span className="status wrong">Wrong profile</span>
-                            : r.worst === 'gap'
-                              ? <span className="status gap">{r.issues} not confirmed</span>
-                              : <span className="status unk">{r.issues} to review</span>}
+                        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                          {r.mark === 'missing' && <span className="status wrong" title="Manually marked missing">Marked missing</span>}
+                          {r.mark === 'resolved' && <span className="status live" title="Manually marked resolved">Resolved</span>}
+                          {(() => {
+                            const delivered = r.markRef ? deliveredByRelease.get(r.markRef.releaseId) : undefined;
+                            const n = delivered ? r.cells.filter((c) => c.status === 'unverifiable' && delivered.has(c.store)).length : 0;
+                            return n > 0 ? <span className="status delivered" title="Delivered by DistroKid but not independently verified">Delivered to {n}</span> : null;
+                          })()}
+                          {r.worst === 'pending'
+                            ? <span className="status unk">Store checks pending</span>
+                            : r.worst === 'live'
+                              ? <span className="status live">All confirmed</span>
+                            : r.worst === 'wrong'
+                              ? <span className="status wrong">Wrong profile</span>
+                              : r.worst === 'gap'
+                                ? <span className="status gap">{r.issues} not confirmed</span>
+                                : <span className="status unk">{r.issues} to review</span>}
+                        </span>
                       </td>
                     </tr>
                   ))}

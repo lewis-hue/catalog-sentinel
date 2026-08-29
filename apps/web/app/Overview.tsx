@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { StatCard } from '@sentinel/shared-ui';
 import { apiFetch } from '@/lib/api-client';
+import { computeHealth, type HealthScore, type ScoreCatalogue, type ScoreRecord } from './scorecard/score';
 
 const READING_SENTINEL = '__reading_in_progress__';
 const ACTIVE_REFRESH_MS = 4_000;
@@ -42,7 +43,7 @@ type ViewState =
   | { kind: 'loading' }
   | { kind: 'empty' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; record: SearchRecord; recentAuditCount: number };
+  | { kind: 'ready'; record: SearchRecord; recentAuditCount: number; health: HealthScore | null };
 
 type AuditPhase = 'reading' | 'scanning' | 'complete' | 'failed';
 
@@ -166,7 +167,14 @@ export function Overview() {
         if (!recordResponse.ok) throw new Error(await responseError(recordResponse, 'Could not load the latest audit'));
         const record = (await recordResponse.json()) as unknown;
         if (!isSearchRecord(record)) throw new Error('The latest audit response was invalid.');
-        setState({ kind: 'ready', record, recentAuditCount: searches.length });
+        // Health score (best-effort): the catalogue endpoint provides the metadata-completeness
+        // counts; the record provides store/identity/lyric results.
+        let health: HealthScore | null = null;
+        try {
+          const catRes = await apiFetch(`/api/searches/${encodeURIComponent(latest.id)}/catalogue`, { signal: controller.signal, cache: 'no-store' });
+          if (catRes.ok) health = computeHealth((await catRes.json()) as ScoreCatalogue, record as unknown as ScoreRecord);
+        } catch { /* best-effort, the overview still renders without a score */ }
+        setState({ kind: 'ready', record, recentAuditCount: searches.length, health });
 
         const phase = phaseOf(record);
         if (phase === 'reading' || phase === 'scanning') timer = setTimeout(() => void load(false), ACTIVE_REFRESH_MS);
@@ -224,12 +232,21 @@ export function Overview() {
     );
   }
 
-  const { record, recentAuditCount } = state;
+  const { record, recentAuditCount, health } = state;
   const currentPhase = phase ?? phaseOf(record);
   const phaseText = phaseCopy(record, currentPhase);
   const summary = record.result.summary;
   const idQuery = `?id=${encodeURIComponent(record.id)}`;
   const publicWarnings = record.result.warnings.filter((warning) => warning !== READING_SENTINEL);
+  const ringColor = (n: number | null): string => (n == null ? 'var(--line)' : n >= 80 ? 'var(--live)' : n >= 60 ? 'var(--gap)' : 'var(--wrong)');
+  const MODULES: Array<{ href: string; label: string; desc: string }> = [
+    { href: `/scorecard${idQuery}`, label: 'Health score', desc: 'Your catalogue health at a glance' },
+    { href: `/catalogue${idQuery}`, label: 'Catalogue', desc: 'Every release, metadata & art' },
+    { href: `/catalog${idQuery}`, label: 'Store health', desc: 'Live / missing across every store' },
+    { href: `/identity${idQuery}`, label: 'Identity guardian', desc: 'Wrong-profile & namesake checks' },
+    { href: `/fixer${idQuery}`, label: 'One-click fixer', desc: 'Prepared fixes for every gap' },
+    { href: '/alerts', label: 'Release alerts', desc: 'What changed since last scan' },
+  ];
 
   return (
     <>
@@ -254,6 +271,35 @@ export function Overview() {
         {record.result.note && currentPhase !== 'failed' && <p className="cat-note" style={{ marginTop: 10 }}>{record.result.note}</p>}
       </section>
 
+      {health && health.overall != null && (
+        <section className="card health-hero" aria-label={`Catalogue health ${health.overall} of 100, grade ${health.grade}`}>
+          <div>
+            <div className="eyebrow">Catalogue health</div>
+            <div className="hh-score-row">
+              <div className="hero-num" style={{ color: ringColor(health.overall) }}>{health.overall}</div>
+              <div className="hh-grade">Grade {health.grade} <small>/ 100</small></div>
+            </div>
+            <p className="hh-verdict">
+              {health.overall >= 80
+                ? <>A <em>healthy</em> catalogue, a few store gaps left to close.</>
+                : health.overall >= 60
+                  ? <>Solid overall, with <em>some gaps</em> worth closing.</>
+                  : <>Your catalogue <em>needs attention</em> across a few areas.</>}
+            </p>
+          </div>
+          <div className="hh-breakdown">
+            {health.components.map((c) => (
+              <div className="brk" key={c.key}>
+                <span className="brk-k">{c.label}</span>
+                <span className="brk-bar"><i style={{ width: `${c.score ?? 0}%`, background: c.score == null ? 'var(--line)' : c.score >= 80 ? 'var(--live)' : c.score >= 60 ? 'var(--gap)' : 'var(--wrong)' }} /></span>
+                <span className="brk-v">{c.score == null ? '-' : c.score}</span>
+              </div>
+            ))}
+          </div>
+          <Link className="btn" href={`/scorecard${idQuery}`}>View breakdown</Link>
+        </section>
+      )}
+
       <div className="row" style={{ marginBottom: 22 }}>
         <StatCard label="Catalog tracks" value={summary.tracks} />
         <StatCard label="Confirmed cells" value={summary.live} tone="good" />
@@ -274,9 +320,17 @@ export function Overview() {
       )}
 
       <section className="card">
-        <div className="section-header"><h2 style={{ margin: 0 }}>Continue this audit</h2></div>
-        <div className="row">
-          <Link className="btn" href={`/catalog${idQuery}`}>Open catalog</Link>
+        <div className="section-header"><h2 style={{ margin: 0 }}>Catalogue toolkit</h2></div>
+        <div className="mod-grid">
+          {MODULES.map((m) => (
+            <Link key={m.href} href={m.href} className="mod-card">
+              <h3>{m.label}</h3>
+              <p>{m.desc}</p>
+              <span className="mod-go">Open →</span>
+            </Link>
+          ))}
+        </div>
+        <div className="row" style={{ marginTop: 12 }}>
           <Link className="btn ghost" href={`/review${idQuery}`}>Manual review</Link>
           <Link className="btn ghost" href={`/support${idQuery}`}>Support center</Link>
           <Link className="btn ghost" href="/history">Audit history</Link>

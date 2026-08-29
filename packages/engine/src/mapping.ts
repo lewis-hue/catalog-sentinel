@@ -24,7 +24,7 @@ export interface MappedCatalog {
 /**
  * Map a distributor catalog snapshot onto canonical core entities, minting
  * STABLE ids (derived from UPC/ISRC/title) so re-importing the same catalog is
- * idempotent — no duplicate releases/tracks appear on rerun.
+ * idempotent, no duplicate releases/tracks appear on rerun.
  */
 export function mapDistributorSnapshot(
   snapshot: DistributorCatalogSnapshot,

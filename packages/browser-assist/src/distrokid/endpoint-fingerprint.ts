@@ -4,7 +4,7 @@ import { maskPath, sanitizedQueryKeys } from './redaction';
 /**
  * Endpoint fingerprinting.
  *
- * A fingerprint identifies an endpoint's SHAPE so we can recognize it again across scans —
+ * A fingerprint identifies an endpoint's SHAPE so we can recognize it again across scans -
  * without retaining anything sensitive. We hash: method, host, masked path, query KEY names
  * (never values), and the GraphQL operationName (never variables).
  */
@@ -52,7 +52,7 @@ export function fingerprintFromUrl(method: string, rawUrl: string, graphqlOperat
 }
 
 /**
- * Hash of a payload's SCHEMA (sorted key names) — not its data. Lets us detect schema drift:
+ * Hash of a payload's SCHEMA (sorted key names), not its data. Lets us detect schema drift:
  * if an ACTIVE endpoint's schemaHash changes, the parser may no longer be valid.
  */
 export function schemaHash(schemaKeys: string[]): string {
@@ -83,7 +83,7 @@ export function extractGraphqlOperationName(postData: string | null | undefined)
   }
 }
 
-/** GraphQL variable KEY names only (never values) — part of the endpoint shape. */
+/** GraphQL variable KEY names only (never values), part of the endpoint shape. */
 export function extractGraphqlVariableKeys(postData: string | null | undefined): string[] {
   if (!postData) return [];
   try {

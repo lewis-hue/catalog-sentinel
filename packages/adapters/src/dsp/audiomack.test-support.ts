@@ -39,7 +39,7 @@ export interface AudiomackAdapterOptions {
   /** Deterministic test data. */
   dataset?: AudiomackDataset;
   /** Real Audiomack Data API credentials. When present (and no dataset), the
-   *  adapter would call the live API — currently a documented TODO stub. */
+   *  adapter would call the live API, currently a documented TODO stub. */
   apiKey?: string;
   apiSecret?: string;
   pageSize?: number;
@@ -89,7 +89,7 @@ export class AudiomackAdapter implements DSPAdapter {
     const capturedAt = this.clockIso();
 
     if (!entry) {
-      // Profile not found on Audiomack — report clearly, never fabricate uploads.
+      // Profile not found on Audiomack, report clearly, never fabricate uploads.
       return {
         platform: this.platform,
         sourceMode: this.sourceMode,

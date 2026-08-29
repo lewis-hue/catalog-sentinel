@@ -21,7 +21,7 @@ export interface StoreTrack {
   artworkUrl: string | null;
 }
 
-/** Artist-agnostic ISRC lookup — the basis for wrong-profile detection. */
+/** Artist-agnostic ISRC lookup, the basis for wrong-profile detection. */
 export interface IsrcLookupResult {
   found: boolean;
   artist: string | null;
@@ -35,7 +35,7 @@ export interface IsrcLookupProvider {
   lookupIsrc(isrc: string): Promise<IsrcLookupResult>;
 }
 
-/** Artist-scoped title search — confirms a song exists on a store without ISRC. */
+/** Artist-scoped title search, confirms a song exists on a store without ISRC. */
 export interface TitleSearchResult {
   found: boolean;
   url: string | null;

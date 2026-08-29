@@ -15,7 +15,7 @@ export interface YouTubeOptions {
 }
 
 /**
- * YouTube Music store provider — REAL YouTube Data API v3 (free key). YouTube has
+ * YouTube Music store provider, REAL YouTube Data API v3 (free key). YouTube has
  * no public ISRC, so presence is confirmed by an artist+title search with STRICT
  * verification: a result counts only if its title contains the exact song title AND
  * the artist matches (the video title or the channel, incl. auto-generated
@@ -35,7 +35,7 @@ export class YouTubeMusicProvider implements StoreCatalogProvider, TitleSearchPr
     this.fetchImpl = opts.fetchImpl ?? ((url, init) => fetch(url, init as RequestInit) as unknown as ReturnType<FetchLike>);
   }
 
-  /** No reliable full-catalogue listing via search — presence is per-track. */
+  /** No reliable full-catalogue listing via search, presence is per-track. */
   async listArtistCatalog(): Promise<StoreArtistCatalog> {
     return {
       store: this.store,

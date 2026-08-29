@@ -12,7 +12,7 @@ import type { PipelineDeps, FinalizeJob } from './pipeline';
  * END-TO-END over REAL Redis and REAL BullMQ.
  *
  * The gap this closes: an audit found the pipeline's six workers were started but NOTHING
- * enqueued to them — the API still enqueued the older `catalogue-read` job, so the pipeline sat
+ * enqueued to them, the API still enqueued the older `catalogue-read` job, so the pipeline sat
  * idle forever. Every existing test passed anyway, because the boot test called the stage
  * functions directly and never touched a queue. A test that dispatches its own handlers cannot
  * detect a missing producer.
@@ -25,7 +25,7 @@ import type { PipelineDeps, FinalizeJob } from './pipeline';
  * If the API's producer and the worker's consumer ever disagree about a queue name or a payload
  * shape, this test fails. That disagreement is precisely what shipped.
  *
- * Requires REDIS_URL (CI provides a Redis service). Skipped locally without one — but never
+ * Requires REDIS_URL (CI provides a Redis service). Skipped locally without one, but never
  * silently: the skip is visible in the test name.
  */
 
@@ -47,7 +47,7 @@ const outcomeFor = (releaseId: string, attempt: number): ReleaseExtractionOutcom
   source: 'NETWORK_JSON', elapsedMs: 3,
 });
 
-describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis → six-stage worker', () => {
+describe.skipIf(!REDIS_URL)('DistroKid pipeline, API producer → real Redis → six-stage worker', () => {
   let connection: ConnectionOptions;
   let redis: SnapshotRedis & { quit(): Promise<unknown>; keys(p: string): Promise<string[]>; del(...k: string[]): Promise<number> };
   const cleanup: Array<() => Promise<void>> = [];
@@ -57,7 +57,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
    *
    * Required, and the reason is worth keeping: BullMQ retains completed jobs
    * (bounded completed-job retention), so a previous run's jobs can stay in Redis and THIS run's workers
-   * happily consume them. That produced a genuinely confusing failure — a stale snapshot's
+   * happily consume them. That produced a genuinely confusing failure, a stale snapshot's
    * finalize resolved this test's completion latch, so assertions ran against a half-finished
    * catalogue and reported duplicate extractions that never happened. The product was correct;
    * the test was reading another run's data.
@@ -81,7 +81,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
    * Tear the workers down AFTER EACH TEST, not at the end of the file.
    *
    * Each test starts its own worker set against the same queue names. With file-level cleanup,
-   * test 1's workers were still consuming while test 4 ran — so test 4's jobs were processed by
+   * test 1's workers were still consuming while test 4 ran, so test 4's jobs were processed by
    * test 1's `deps`, whose instrumentation belongs to a finished test. The pipeline was correct;
    * the harness had competing consumers. Closing per test makes each one the only consumer.
    */
@@ -107,7 +107,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
 
     const stagesRun: string[] = [];
     const sessionIdsSeen: Array<string | undefined> = [];
-    /** Releases actually EXTRACTED, by chunk index — the no-duplicate-work assertion. */
+    /** Releases actually EXTRACTED, by chunk index, the no-duplicate-work assertion. */
     const extractedByChunk = new Map<number, string[]>();
     const store = new RedisSnapshotStore(redis);
     const lock = new InMemoryConnectionLock();
@@ -123,7 +123,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
       async acquireLock(j) { return lock.acquire(j.tenantId, j.connectionId); },
       async readCatalogIndex(j) {
         stagesRun.push('1-catalog-index');
-        // The session handle must survive the process hop — that is the whole point of putting
+        // The session handle must survive the process hop, that is the whole point of putting
         // it on the job rather than in an API-local map.
         sessionIdsSeen.push(j.steelSessionId);
         return Array.from({ length: LARGE_RELEASE_COUNT }, (_, i) => ({ releaseId: `R${i}`, dashboardUrl: `https://distrokid.com/dashboard/album/?albumuuid=R${i}` }));
@@ -169,19 +169,19 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
     const workers = startDistroKidPipelineWorkers({ connection, deps, chunkConcurrency: 2 });
     cleanup.push(() => workers.close());
 
-    // THE ASSERTION THAT MATTERS: enqueue exactly as the API does — through the queue-client
+    // THE ASSERTION THAT MATTERS: enqueue exactly as the API does, through the queue-client
     // package, not by calling a handler. Nothing below this line knows it is a test.
     const producer = createDistroKidProducer(connection);
     cleanup.push(() => producer.close());
     const res = await producer.startSnapshot(job);
     expect(res.jobId).toBe(jobIds.index(job));
-    // BullMQ rejects an id containing ":" — asserted here too, because this is the exact call
+    // BullMQ rejects an id containing ":", asserted here too, because this is the exact call
     // that used to throw "Custom Id cannot contain :" for every job the product ever enqueued.
     expect(res.jobId).not.toContain(':');
 
     await Promise.race([
       done,
-      new Promise((_, rej) => setTimeout(() => rej(new Error(`pipeline did not finalize; stages reached: ${stagesRun.join(' → ') || '(none — nothing consumed the job)'}`)), 45_000)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`pipeline did not finalize; stages reached: ${stagesRun.join(' → ') || '(none, nothing consumed the job)'}`)), 45_000)),
     ]);
 
     // All six stages, in order, driven only by real queue delivery.
@@ -198,7 +198,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
     expect([...extractedByChunk.keys()].sort((a, b) => a - b)).toEqual(
       Array.from({ length: Math.ceil(LARGE_RELEASE_COUNT / 20) }, (_, index) => index),
     );
-    // No release is extracted twice — the lock serialized the account, and the defer/resume path
+    // No release is extracted twice, the lock serialized the account, and the defer/resume path
     // skipped work already done rather than repeating it.
     const allExtracted = [...extractedByChunk.values()].flat();
     expect(allExtracted).toHaveLength(LARGE_RELEASE_COUNT);
@@ -229,15 +229,15 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
    *
    *  1. `jobIds.reconcile` omitted the pass, so reconcile #2 reused reconcile #1's id. BullMQ
    *     retains completed jobs and returns the retained one for a colliding id, so reconcile #2
-   *     never ran and the snapshot never finalized — it just hung.
+   *     never ran and the snapshot never finalized, it just hung.
    *  2. The chunk→reconcile and reconcile→retry hops dropped `steelSessionId`, so retry chunks
    *     had no browser session and every retried release failed REAUTH_REQUIRED.
    *
    * The old load test called `reconcileDistroKidSnapshot(job, deps, attempt)` directly, hand-feeding
-   * the attempt number that the queue worker cannot supply — so it modelled a pipeline that
+   * the attempt number that the queue worker cannot supply, so it modelled a pipeline that
    * doesn't exist. Everything here goes through real queue delivery.
    */
-  it('a FAILED release is retried, re-reconciled and finalized COMPLETE — with the session intact', async () => {
+  it('a FAILED release is retried, re-reconciled and finalized COMPLETE, with the session intact', async () => {
     const snapshotId = `s-retry-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const job: CatalogIndexJob = {
       tenantId: 't-retry', connectionId: 't-retry:distrokid', snapshotId,
@@ -311,7 +311,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
       )), 25_000)),
     ]);
 
-    // BOTH reconciliations ran — the defect made the second one silently vanish.
+    // BOTH reconciliations ran, the defect made the second one silently vanish.
     expect(reconcilePasses).toContain(1);
     expect(reconcilePasses).toContain(2);
 
@@ -346,7 +346,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
     const second = await producer.startSnapshot(job);
     expect(second.jobId).toBe(first.jobId);
 
-    // Exactly one job exists on the queue — a double click cannot start a second read.
+    // Exactly one job exists on the queue, a double click cannot start a second read.
     const q = new Queue(DK_QUEUES.index, { connection });
     cleanup.push(() => q.close());
     const counts = await q.getJobCounts('waiting', 'active', 'delayed');
@@ -368,7 +368,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
     const store = new RedisSnapshotStore(redis);
 
     // Simulate: 45 releases indexed, chunk 0 already completed and checkpointed before the crash.
-    // `markChunkComplete` is the real checkpoint write — `putProgress.completedChunks` is a
+    // `markChunkComplete` is the real checkpoint write, `putProgress.completedChunks` is a
     // reporting field, not the source of truth, so writing only that would prove nothing.
     await store.putIndex(snapshotId, Array.from({ length: 45 }, (_, i) => ({ releaseId: `R${i}`, dashboardUrl: `u${i}` })));
     await store.markChunkComplete(snapshotId, 1, 0);
@@ -378,7 +378,7 @@ describe.skipIf(!REDIS_URL)('DistroKid pipeline — API producer → real Redis 
       chunkCount: 3, completedChunks: [0], startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
 
-    // A NEW store instance — i.e. the restarted process reads Redis, not its own memory.
+    // A NEW store instance, i.e. the restarted process reads Redis, not its own memory.
     const afterRestart = new RedisSnapshotStore(redis);
     expect(await afterRestart.completedChunks(snapshotId, 1)).toEqual([0]);
     expect((await afterRestart.getIndex(snapshotId)).length).toBe(45);

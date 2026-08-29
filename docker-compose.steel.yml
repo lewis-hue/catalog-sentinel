@@ -57,7 +57,6 @@ services:
       STEEL_CDP_INTERNAL: ${STEEL_CDP_INTERNAL:-steel:9223}
     depends_on:
       - redis
-      - searxng
       - postgres
       - steel
 

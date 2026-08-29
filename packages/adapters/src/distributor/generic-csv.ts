@@ -100,7 +100,7 @@ export class GenericCsvDistributorAdapter implements DistributorAdapter {
     return snapshot;
   }
 
-  /** Pure parse — exposed for testing and reuse without touching instance state. */
+  /** Pure parse, exposed for testing and reuse without touching instance state. */
   parseCatalog(csvText: string, artistName: string | null): DistributorCatalogSnapshot {
     const { headers, rows } = parseCsv(csvText);
     if (headers.length === 0) throw new AdapterInputError(this.provider, 'CSV had no header row.');
@@ -215,11 +215,11 @@ export class GenericCsvDistributorAdapter implements DistributorAdapter {
 
   private collectWarnings(cols: ColumnMap): string[] {
     const warnings: string[] = [];
-    if (!cols.trackTitle) warnings.push('No track/song title column detected — using "Untitled".');
-    if (!cols.isrc) warnings.push('No ISRC column detected — ISRC-based matching will be unavailable.');
-    if (!cols.upc) warnings.push('No UPC column detected — releases grouped by title.');
+    if (!cols.trackTitle) warnings.push('No track/song title column detected, using "Untitled".');
+    if (!cols.isrc) warnings.push('No ISRC column detected, ISRC-based matching will be unavailable.');
+    if (!cols.upc) warnings.push('No UPC column detected, releases grouped by title.');
     if (!cols.stores && !cols.audiomackFlag) {
-      warnings.push('No store-selection column detected — store coverage cannot be verified from the export.');
+      warnings.push('No store-selection column detected, store coverage cannot be verified from the export.');
     }
     return warnings;
   }

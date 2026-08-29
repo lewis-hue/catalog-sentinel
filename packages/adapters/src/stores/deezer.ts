@@ -15,7 +15,7 @@ import {
 } from './types';
 
 /**
- * Deezer store-presence provider — REAL public API, no credentials.
+ * Deezer store-presence provider, REAL public API, no credentials.
  *   - GET /search/artist?q=…            → resolve the artist id
  *   - GET /search?q=artist:"…"&limit=…  → the artist's tracks (incl. ISRC + links)
  *   - GET /track/isrc:{isrc}            → artist-agnostic ISRC lookup (wrong-profile)
@@ -90,12 +90,12 @@ export class DeezerStoreProvider implements StoreCatalogProvider, IsrcLookupProv
     else if (invalidCursor) warnings.push('Deezer returned an invalid or non-advancing pagination cursor; the catalog is incomplete.');
     else if (capped) warnings.push(`Deezer catalog reached the configured ${limit}-track limit before every page was fetched; the catalog is incomplete.`);
     else if (!complete) warnings.push('Deezer catalog is incomplete because pagination metadata was unavailable or inconsistent.');
-    if (tracks.length === 0 && complete) warnings.push('Deezer returned the artist but no tracks matched — the catalog may be empty or under a different artist entry.');
+    if (tracks.length === 0 && complete) warnings.push('Deezer returned the artist but no tracks matched, the catalog may be empty or under a different artist entry.');
     return { store: this.store, method: this.method, artist, tracks, pagination: { total, fetched, complete }, warnings };
   }
 
   /** Artist-agnostic ISRC lookup (exact): GET /track/isrc:{isrc}. Basis of
-   *  wrong-profile detection — returns whichever artist the ISRC is credited to. */
+   *  wrong-profile detection, returns whichever artist the ISRC is credited to. */
   async lookupIsrc(isrc: string): Promise<IsrcLookupResult> {
     const norm = normalizeIsrc(isrc);
     if (!norm) return { found: false, artist: null, title: null, url: null, artworkUrl: null };

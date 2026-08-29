@@ -2,7 +2,7 @@
  * Network-first DistroKid metadata extraction.
  *
  * The adapter is network-first, schema-versioned, resumable and DOM-independent:
- * DOM rendering is never the signal that data is available — the authenticated JSON response is.
+ * DOM rendering is never the signal that data is available, the authenticated JSON response is.
  * See docs/distrokid-network-first-extractor.md.
  */
 export * from './metadata-model';
@@ -18,3 +18,4 @@ export * from './parser-registry';
 export * from './direct-reader';
 export * from './completeness';
 export * from './extractor';
+export * from './album-page';

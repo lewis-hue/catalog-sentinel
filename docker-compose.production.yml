@@ -63,6 +63,7 @@ x-app-environment: &app-environment
   # a measured worst-case catalogue run; startup rejects missing/non-positive values.
   STEEL_SESSION_TIMEOUT_MS: ${STEEL_SESSION_TIMEOUT_MS:?Set the tested Steel lease duration in milliseconds}
   CATALOG_READ_MAX_RELEASES: ${CATALOG_READ_MAX_RELEASES:?Set the tested per-lease release capacity}
+  CATALOG_INDEX_MAX_SCROLL_ROUNDS: ${CATALOG_INDEX_MAX_SCROLL_ROUNDS:-500}
   STEEL_API_REQUEST_TIMEOUT_MS: ${STEEL_API_REQUEST_TIMEOUT_MS:-10000}
 
   # Redis-backed per-principal creation controls. An edge/WAF limit remains
@@ -124,10 +125,12 @@ x-app-environment: &app-environment
   TIDAL_CLIENT_SECRET: ${TIDAL_CLIENT_SECRET:-}
   TIDAL_PROFILE_URL: ${TIDAL_PROFILE_URL:-}
   ENABLE_SEARCH_WEB_VERIFY: ${ENABLE_SEARCH_WEB_VERIFY:-false}
-  SEARCH_PROVIDER: ${SEARCH_PROVIDER:-brave}
-  ENABLE_BRAVE_PROVIDER: ${ENABLE_BRAVE_PROVIDER:-false}
-  BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
-  ENABLE_SEARXNG_PROVIDER: "false"
+  # Web verification uses Serper (hosted Google SERP API). Set SERPER_API_KEY to enable it;
+  # unset degrades gracefully to official-API stores only. SEARCH_PROVIDER normally left empty.
+  SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
+  SERPER_API_KEY: ${SERPER_API_KEY:-}
+  SERPER_ENDPOINT: ${SERPER_ENDPOINT:-}
+  SERPER_MAX_RPS: ${SERPER_MAX_RPS:-10}
 
   # Durable artifact storage. Use workload identity; do not place cloud access keys here.
   ARTIFACT_S3_BUCKET: ${ARTIFACT_S3_BUCKET:?Set the versioned production artifact bucket}

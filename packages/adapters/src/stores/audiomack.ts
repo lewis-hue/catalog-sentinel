@@ -11,7 +11,7 @@ import {
 } from './types';
 
 /**
- * Audiomack store-presence provider — REAL Audiomack Data API (OAuth 1.0a signed,
+ * Audiomack store-presence provider, REAL Audiomack Data API (OAuth 1.0a signed,
  * 2-legged: consumer key + secret, no user token needed for public reads).
  *   - GET /v1/artist/{slug}/uploads?limit=0   → ALL the artist's uploads in one call
  *   - GET /v1/music/album/{slug}/{albumSlug}  → an album's tracklist (per-song compare)

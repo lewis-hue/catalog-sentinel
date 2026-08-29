@@ -1,5 +1,5 @@
 /**
- * @sentinel/core — the domain model. Pure types + small pure helpers, no I/O.
+ * @sentinel/core, the domain model. Pure types + small pure helpers, no I/O.
  * Everything else in the monorepo depends on this package.
  */
 export * from './enums';

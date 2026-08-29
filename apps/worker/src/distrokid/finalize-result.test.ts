@@ -75,6 +75,38 @@ describe('projectFinalizedSnapshot', () => {
     expect(out.result.warnings.join(' ')).toMatch(/unresolved metadata is not treated as missing/i);
   });
 
+  it('projects the catalogue but leaves presence idle (never queued) when auto-presence is disabled', () => {
+    const out = projectFinalizedSnapshot(record, job, outcomes, '2026-02-01T00:00:00.000Z', false);
+    // The scraped catalogue is still fully projected, decoupling only defers the store check.
+    expect(out.result.warnings).not.toContain('__reading_in_progress__');
+    expect(out.result.tracks).toHaveLength(1);
+    expect(out.result.tracks[0]).toMatchObject({ title: 'Song', perStore: [] });
+    // No presence job is enqueued, so the record must NOT sit at "queued" (would poll forever) nor
+    // "idle" (the active-scan guard would treat it as still-in-progress). It's terminal-unchecked.
+    expect(out.deepScan?.status).toBe('unchecked');
+    expect(out.deepScan?.platformsPending).toEqual([]);
+    expect(out.deepScan?.platformsDone).toEqual([]);
+    // Nothing has been checked, so nothing may read as missing.
+    expect(out.result.summary.notLive).toBe(0);
+    expect(out.result.note).toMatch(/store-presence check/i);
+    expect(out.result.note).not.toMatch(/queued/i);
+  });
+
+  it('queues presence by default (auto-presence flag omitted preserves the legacy chain)', () => {
+    const out = projectFinalizedSnapshot(record, job, outcomes, '2026-02-01T00:00:00.000Z');
+    expect(out.deepScan?.status).toBe('queued');
+  });
+
+  it('marks presence done with no tracks regardless of the auto-presence flag', () => {
+    const noReleases: ReleaseExtractionOutcome[] = [
+      { kind: 'FAILED', distributorReleaseId: 'R2', reason: 'TIMEOUT', detail: 'timed out', elapsedMs: 10 },
+    ];
+    const auto = projectFinalizedSnapshot(record, job, noReleases, '2026-02-01T00:00:00.000Z', true);
+    const manual = projectFinalizedSnapshot(record, job, noReleases, '2026-02-01T00:00:00.000Z', false);
+    expect(auto.deepScan?.status).toBe('done');
+    expect(manual.deepScan?.status).toBe('done');
+  });
+
   it('rejects a cross-tenant finalization', () => {
     expect(() => projectFinalizedSnapshot({ ...record, tenantId: 'tenant-b' }, job, outcomes)).toThrow(/tenant/i);
   });

@@ -86,7 +86,7 @@ export function parseTitle(raw: string): ParsedTitle {
       for (const t of tags) versionTags.add(t);
       return ' ';
     }
-    // Not feat/version — keep inner text as part of the title (e.g. a subtitle).
+    // Not feat/version, keep inner text as part of the title (e.g. a subtitle).
     return ` ${seg} `;
   });
 
@@ -143,7 +143,7 @@ export function normalizeArtist(raw: string): string {
 
 /**
  * Build the set of normalized artist keys for a primary name plus aliases and
- * featured artists — used for overlap-based artist matching.
+ * featured artists, used for overlap-based artist matching.
  */
 export function normalizeArtistSet(names: Array<string | null | undefined>): Set<string> {
   const set = new Set<string>();

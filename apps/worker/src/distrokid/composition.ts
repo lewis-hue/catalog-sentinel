@@ -10,6 +10,8 @@ import {
 import {
   NetworkFirstExtractor, ParserRegistry, EndpointRegistry, InMemoryEndpointRegistryStore,
   readDirectReaderFlags, readDistroKidCatalogIndexFromPage, DISTRIBUTOR_HOSTS,
+  prepareDistroKidAlbumPage, readDistroKidAlbumDomFromPage, captureDistroKidAlbumPage,
+  beginDistroKidPageCapture,
   type ReleaseExtractionOutcome, type CandidateSink,
 } from '@sentinel/browser-assist';
 import { DK_QUEUE_NAMES, DISTROKID_REQUEST_MIN_DELAY_MS, type EndpointRegistryStore } from '@sentinel/contracts';
@@ -46,15 +48,22 @@ import {
  * Process-local adapters are available only to isolated tests.
  */
 
+/** Testing keep-alive: leave the Steel session live after a scan so the operator can rescan warm
+ *  (no re-login, no new-login bot signal). Same flag the API reads (`DISTRIBUTOR_SESSION_REUSE`);
+ *  the session is released later by Steel's own timeout or an explicit disconnect. */
+function distributorSessionReuseEnabled(env: NodeJS.ProcessEnv): boolean {
+  return /^(1|true|yes|on)$/i.test((env.DISTRIBUTOR_SESSION_REUSE ?? '').trim());
+}
+
 export interface DistroKidCompositionOptions {
   connection: ConnectionOptions;
-  /** ioredis client — used for durable checkpoints AND the distributed lock. */
+  /** ioredis client, used for durable checkpoints AND the distributed lock. */
   redis: (SnapshotRedis & LockRedis) | null;
-  /** Postgres pool — the SYSTEM OF RECORD (endpoint profiles, finalized outcomes). Redis is
+  /** Postgres pool, the SYSTEM OF RECORD (endpoint profiles, finalized outcomes). Redis is
    *  checkpoint storage and may be flushed; this is what survives. */
   pgPool: Pool | null;
   env: NodeJS.ProcessEnv;
-  /** Persist the finished snapshot (normalized outcomes only — never raw payloads). */
+  /** Persist the finished snapshot (normalized outcomes only, never raw payloads). */
   persistSnapshot(job: FinalizeJob, outcomes: ReleaseExtractionOutcome[]): Promise<void>;
   /** Revalidate the durable consent before every browser-bound unit of work. */
   consentActive?(job: { tenantId: string; snapshotId: string; consentId: string; artistWorkspaceId: string; distributor: string }): Promise<boolean>;
@@ -77,12 +86,12 @@ export interface DistroKidComposition {
   /** A registry scoped to one tenant. Endpoint promotion is per-tenant so one account's odd
    *  payload can't promote or degrade an endpoint for everyone else. */
   registryFor(tenantId: string): EndpointRegistry;
-  /** The queues this composition CONSUMES — logged at boot so "workers started" is observable. */
+  /** The queues this composition CONSUMES, logged at boot so "workers started" is observable. */
   queueNames: string[];
   /** Run the PostgreSQL recovery-envelope sweep immediately. */
   recoverDurableSnapshots(): Promise<DurableSnapshotRecoveryStats>;
   /**
-   * Start a snapshot directly, bypassing the queue. For admin tools and tests only — the
+   * Start a snapshot directly, bypassing the queue. For admin tools and tests only, the
    * PRODUCT path is the API enqueuing onto `distrokid-catalog-index` via `@sentinel/queue-client`.
    * Calling this in-process would tie the read to the caller's lifetime, which is the thing the
    * durable pipeline exists to avoid.
@@ -272,7 +281,7 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
 
   // The endpoint registry STORE is shared and durable; a REGISTRY is built per job, scoped to that
   // job's tenant. Scope cannot be a property of the composition: one worker serves every tenant,
-  // so a single registry instance would have to carry an ambient "current tenant" — the same
+  // so a single registry instance would have to carry an ambient "current tenant", the same
   // shared-mutable-cursor bug the candidate sink already had.
   const registryStore: EndpointRegistryStore = opts.pgPool
     ? new PostgresEndpointRegistryStore(opts.pgPool)
@@ -318,6 +327,13 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
       await opts.persistSnapshot(job, outcomes);
     },
     async releaseSession(job) {
+      // Keep-alive testing mode: leave the Steel session LIVE for warm rescans (no re-login, no
+      // new-login bot signal). The scan is still terminal, so clear its recovery envelope; the
+      // session is released later by Steel's own timeout or an explicit disconnect/cancel.
+      if (distributorSessionReuseEnabled(opts.env)) {
+        await recovery?.clear(job);
+        return;
+      }
       if (!sessions.release) {
         if (!isTestEnvironment(opts.env)) throw new Error('terminal Steel release is unavailable');
       } else {
@@ -368,58 +384,107 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
       const abort = (): void => { void conn.close().catch(() => undefined); };
       control.signal.addEventListener('abort', abort, { once: true });
       await control.assertCanContinue();
-      const page = await conn.newPage();
-      const extractor = new NetworkFirstExtractor(
-        page,
-        {
-          origin,
-          distributor: 'DISTROKID',
-          gotoTimeoutMs: Number(opts.env.CATALOG_READ_GOTO_TIMEOUT_MS) || 30_000,
-          responseTimeoutMs: Number(opts.env.CATALOG_READ_CONTENT_TIMEOUT_MS) || 30_000,
-          enableCdpFallback: true,
-          directReaderFlags: directFlags,
-          // Passive capture stays the default even when the flags are on (see direct-reader.ts).
-          directReplayPolicy: 'never',
-          ...(opts.candidateSink ? { candidateSink: opts.candidateSink, candidateScope: { tenantId: job.tenantId, scanId: job.snapshotId } } : {}),
-          log: (msg, extra) => console.log(extractionLog({
-            tenantId: job.tenantId, connectionId: job.connectionId, scanId: job.snapshotId,
-            releaseId: String(extra?.['releaseId'] ?? ''), outcome: msg,
-            elapsedMs: Number(extra?.['elapsedMs'] ?? 0),
-          })),
-        },
-        // Registry scoped to THIS job's tenant, over the shared durable store.
-        { parsers, registry: registryFor(job.tenantId) },
-      );
+      // PARALLEL TAB POOL. DistroKid is DOM-only (no per-release JSON endpoint), so several release
+      // tabs can run on the ONE authenticated session concurrently. Safe here because the read-only
+      // guard blocks mutations IDENTICALLY on every tab (the guarantee holds regardless of which
+      // route handler wins) and the network discovery has nothing to mis-correlate. Bounded
+      // concurrency keeps the request rate on the user's own account modest.
+      const concurrency = Math.max(1, Math.min(Number(opts.env.DISTROKID_RELEASE_CONCURRENCY) || 4, 8));
+      const allowedIds = new Set(refs.map((r) => r.releaseId));
+      const albumCaptureDir = opts.env.DISTROKID_ALBUM_CAPTURE_DIR?.trim();
+      const tabs: Array<{ page: Awaited<ReturnType<typeof conn.newPage>>; extractor: NetworkFirstExtractor }> = [];
       try {
-        // Listeners are installed BEFORE any release navigation — the whole point.
-        await extractor.install(new Set(refs.map((r) => r.releaseId)));
-        const batch: ReleaseExtractionOutcome[] = [];
-        for (const ref of refs) {
-          // This is immediately before the one navigation/work item for the release.
-          await control.assertCanContinue();
-          await assertConsentActive(job);
-          await waitForBrowserPacing(control.signal);
-          await control.assertCanContinue();
-          const outcome = await extractor.extractRelease(ref);
-          // Fence stale work: lock loss/deadline during navigation cannot be checkpointed.
-          await control.assertCanContinue();
-          outcomes.push(outcome);
-          batch.push(outcome);
-          if (outcome.kind === 'COMPLETED') {
-            metrics.parserUsed(parsers.versions[0] ?? 'unknown');
-            metrics.tracks(outcome.release.tracks.length, outcome.release.tracks.filter((t) => t.isrc.status === 'PRESENT').length);
-            metrics.releaseCoverage(outcome.release.upc.status === 'PRESENT' ? 1 : 0, outcome.release.artworkUrl.status === 'PRESENT' ? 1 : 0);
-          } else if (outcome.kind === 'FAILED' && outcome.reason === 'TIMEOUT') {
-            metrics.responseTimeout();
-          }
-          // Checkpoint every 10 releases (also the write batch size).
-          if (batch.length >= 10) { await onCheckpoint([...batch]); batch.length = 0; }
+        for (let i = 0; i < concurrency; i += 1) {
+          const page = await conn.newPage();
+          // Apply the esbuild `__name` shim BEFORE any navigation, or the in-page scraper throws
+          // "__name is not defined" and every release drops to TIMEOUT.
+          await prepareDistroKidAlbumPage(page);
+          const extractor = new NetworkFirstExtractor(
+            page,
+            {
+              origin,
+              distributor: 'DISTROKID',
+              gotoTimeoutMs: Number(opts.env.CATALOG_READ_GOTO_TIMEOUT_MS) || 30_000,
+              responseTimeoutMs: Number(opts.env.CATALOG_READ_CONTENT_TIMEOUT_MS) || 30_000,
+              enableCdpFallback: true,
+              directReaderFlags: directFlags,
+              // Passive capture stays the default even when the flags are on (see direct-reader.ts).
+              directReplayPolicy: 'never',
+              // Tier-5 DOM fallback: DistroKid album pages have no JSON response to observe, so this
+              // is what actually extracts UPC/ISRC/tracks/artwork once passive capture yields nothing.
+              readDom: (p) => readDistroKidAlbumDomFromPage(p),
+              ...(opts.candidateSink ? { candidateSink: opts.candidateSink, candidateScope: { tenantId: job.tenantId, scanId: job.snapshotId } } : {}),
+              log: (msg, extra) => console.log(extractionLog({
+                tenantId: job.tenantId, connectionId: job.connectionId, scanId: job.snapshotId,
+                releaseId: String(extra?.['releaseId'] ?? ''), outcome: msg,
+                elapsedMs: Number(extra?.['elapsedMs'] ?? 0),
+              })),
+            },
+            // Registry scoped to THIS job's tenant, over the shared durable store.
+            { parsers, registry: registryFor(job.tenantId) },
+          );
+          // Listeners are installed BEFORE any release navigation, the whole point.
+          await extractor.install(allowedIds);
+          tabs.push({ page, extractor });
         }
-        if (batch.length) await onCheckpoint([...batch]);
+        // DIAGNOSTIC (off by default): capture one real album page's ground-truth HTML on the first
+        // tab BEFORE the pool navigates it, so the DOM reader can be verified against real markup.
+        // Targets the release whose album UUID matches DISTROKID_ALBUM_CAPTURE_UUID when set (to
+        // inspect a specific release, e.g. a multi-version EP), otherwise the first release.
+        const captureUuid = opts.env.DISTROKID_ALBUM_CAPTURE_UUID?.trim();
+        const captureRef = captureUuid
+          ? refs.find((r) => r.dashboardUrl.toLowerCase().includes(captureUuid.toLowerCase()))
+          : refs[0];
+        if (albumCaptureDir && captureRef && tabs[0]) {
+          await captureDistroKidAlbumPage(tabs[0].page, albumCaptureDir, '0', captureRef.dashboardUrl).catch((e) =>
+            console.warn(JSON.stringify({ level: 'warn', msg: 'distrokid.album_capture.failed', detail: e instanceof Error ? e.message : String(e) })),
+          );
+        }
+
+        // Shared work queue: `next` is read-then-incremented with no await between, so it stays
+        // atomic across the concurrent tabs (JS is single-threaded). outcomes/batch append likewise.
+        let next = 0;
+        const batch: ReleaseExtractionOutcome[] = [];
+        const runTab = async (extractor: NetworkFirstExtractor): Promise<void> => {
+          for (;;) {
+            const idx = next; next += 1;
+            if (idx >= refs.length) return;
+            const ref = refs[idx]!;
+            // This is immediately before the one navigation/work item for the release.
+            await control.assertCanContinue();
+            await assertConsentActive(job);
+            await waitForBrowserPacing(control.signal);
+            await control.assertCanContinue();
+            const outcome = await extractor.extractRelease(ref);
+            // Fence stale work: lock loss/deadline during navigation cannot be checkpointed.
+            await control.assertCanContinue();
+            outcomes.push(outcome);
+            batch.push(outcome);
+            if (outcome.kind === 'COMPLETED') {
+              metrics.parserUsed(parsers.versions[0] ?? 'unknown');
+              metrics.tracks(outcome.release.tracks.length, outcome.release.tracks.filter((t) => t.isrc.status === 'PRESENT').length);
+              metrics.releaseCoverage(outcome.release.upc.status === 'PRESENT' ? 1 : 0, outcome.release.artworkUrl.status === 'PRESENT' ? 1 : 0);
+            } else if (outcome.kind === 'FAILED' && outcome.reason === 'TIMEOUT') {
+              metrics.responseTimeout();
+            }
+            // Checkpoint every 10 outcomes. splice() snapshots + clears synchronously before the
+            // await, so two tabs never checkpoint the same items.
+            if (batch.length >= 10) await onCheckpoint(batch.splice(0, batch.length));
+          }
+        };
+        await Promise.all(tabs.map(({ extractor }) => runTab(extractor)));
+        // NOTE: lyric state is NOT read here. DistroKid's lazy/virtual-rendered lyric controls
+        // cannot be read inside this fast, parallel, deadline-bound metadata pool (proven). It is
+        // read by the dedicated, separate-session `distrokid-lyric-scan` worker enqueued after
+        // finalize (see apps/worker/src/distrokid-lyric-scan.ts).
+        if (batch.length) await onCheckpoint(batch.splice(0, batch.length));
         return outcomes;
       } finally {
         control.signal.removeEventListener('abort', abort);
-        await extractor.dispose().catch(() => undefined);
+        for (const t of tabs) {
+          await t.extractor.dispose().catch(() => undefined);
+          await t.page.close().catch(() => undefined);
+        }
         await conn.close().catch(() => undefined);
       }
     },
@@ -516,7 +581,7 @@ export function steelSessionSource(
   return {
     async attach(job) {
       // The remote id travels with the job (handed off by the API after the attended login), so
-      // any worker can re-attach to the SAME logged-in browser — no re-login, no side channel.
+      // any worker can re-attach to the SAME logged-in browser, no re-login, no side channel.
       if (!provider || !job.steelSessionId) return null;
       return provider.attachRemoteSession(await remoteId(job.steelSessionId), { releaseOnClose: false });
     },
@@ -525,10 +590,19 @@ export function steelSessionSource(
       // returns are the authoritative expectation for completeness reconciliation.
       const page = await conn.newPage();
       const musicUrl = env.DISTROKID_MUSIC_URL ?? 'https://distrokid.com/mymusic';
-      return readDistroKidCatalogIndexFromPage(page, {
-        musicUrl,
-        maxReleases: Number(env.CATALOG_READ_MAX_RELEASES) || 5000,
-      });
+      // DIAGNOSTIC (gated): capture the /mymusic page + its pagination XHRs so an under-count
+      // (e.g. only 5 of N releases) can be fixed against DistroKid's real index markup.
+      const captureDir = env.DISTROKID_ALBUM_CAPTURE_DIR?.trim();
+      const finalizeCapture = captureDir ? beginDistroKidPageCapture(page, captureDir, 'mymusic') : null;
+      try {
+        return await readDistroKidCatalogIndexFromPage(page, {
+          musicUrl,
+          maxReleases: Number(env.CATALOG_READ_MAX_RELEASES) || 5000,
+          maxScrollRounds: Number(env.CATALOG_INDEX_MAX_SCROLL_ROUNDS) || 500,
+        });
+      } finally {
+        if (finalizeCapture) await finalizeCapture().catch(() => undefined);
+      }
     },
     async release(job) {
       if (!provider || !job.steelSessionId) return;

@@ -1,9 +1,9 @@
 /**
- * @sentinel/search-store — scan/search persistence, shared by the API and the workers.
+ * @sentinel/search-store, scan/search persistence, shared by the API and the workers.
  *
  * It lives in a package because BOTH applications legitimately need it: the API serves scan
  * records to users, the workers write results into them. Previously it lived in `apps/worker`, so
- * the API imported the worker application to reach it — dragging Playwright, BullMQ and the whole
+ * the API imported the worker application to reach it, dragging Playwright, BullMQ and the whole
  * browser runtime into an HTTP server that needs none of them, and making "which app owns this?"
  * unanswerable.
  *

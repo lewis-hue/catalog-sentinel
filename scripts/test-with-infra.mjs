@@ -4,7 +4,7 @@
  *
  * Why this exists: the integration suites are gated on `REDIS_URL` / `DATABASE_URL`, and the main
  * Compose stack deliberately doesn't publish those ports. So `npm test` on a dev box skipped
- * exactly the tests that catch cross-process defects — the ones that later found a pipeline whose
+ * exactly the tests that catch cross-process defects, the ones that later found a pipeline whose
  * job ids BullMQ rejected outright, and a retry path that silently dropped every deferred chunk.
  * Both were invisible to 390 passing tests.
  *
