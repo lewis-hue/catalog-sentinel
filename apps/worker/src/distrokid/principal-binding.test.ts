@@ -5,7 +5,7 @@ import {
   CONSENT_RETENTION_DAYS,
   InMemoryDistributorLinkRepository,
 } from '@sentinel/db';
-import { InMemorySearchStore } from '@sentinel/search-store';
+import { InMemorySearchStore, type SearchRecord } from '@sentinel/search-store';
 import { assertSnapshotPrincipalBinding, snapshotPrincipalBindingValid } from './principal-binding';
 
 const NOW = Date.parse('2026-07-22T12:00:00.000Z');
@@ -15,7 +15,6 @@ async function fixture() {
   const repository = new InMemoryDistributorLinkRepository();
   const record = await store.save(
     {
-      tenantId: 'tenant-a', ownerUserId: 'alice', artistWorkspaceId: 'workspace-a',
       artist: 'Alice Artist', distributor: 'distrokid', platforms: [],
     },
     {
@@ -24,10 +23,11 @@ async function fixture() {
       generatedAt: '2026-07-22T11:00:00.000Z', warnings: ['__reading_in_progress__'], note: 'reading',
     },
     [],
+    { userId: 'tenant-a' },
   );
   await repository.consents.put({ tenantId: 'tenant-a' }, {
     id: 'consent-a', tenantId: 'tenant-a', artistWorkspaceId: 'workspace-a',
-    grantedByUserId: 'alice', grantedAt: '2026-07-22T11:00:00.000Z',
+    grantedByUserId: 'tenant-a', grantedAt: '2026-07-22T11:00:00.000Z',
     purpose: CONSENT_PURPOSE, disclosureVersion: CONSENT_DISCLOSURE_VERSION,
     retentionDays: CONSENT_RETENTION_DAYS, distributor: 'distrokid',
     scope: 'distributor:read-catalog', provider: 'steel',
@@ -70,8 +70,8 @@ describe('DistroKid snapshot principal binding', () => {
   it('fails closed for legacy ownerless records and revoked grants', async () => {
     const { store, repository, job } = await fixture();
     const current = await store.get(job.snapshotId);
-    const { ownerUserId: _legacyOwner, ...legacy } = current!;
-    await store.put({ ...legacy, id: 'legacy-ownerless', revision: 1 });
+    const { userId: _legacyOwner, ...legacy } = current!;
+    await store.put({ ...legacy, id: 'legacy-ownerless', revision: 1 } as SearchRecord);
     await expect(snapshotPrincipalBindingValid(
       store, repository, { ...job, snapshotId: 'legacy-ownerless' }, NOW,
     )).resolves.toBe(false);

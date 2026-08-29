@@ -30,13 +30,12 @@ export async function snapshotPrincipalBindingValid(
     store.get(job.snapshotId),
     repository.consents.get({ tenantId: job.tenantId }, job.consentId),
   ]);
-  if (!record || !consent || !record.ownerUserId || !record.artistWorkspaceId) return false;
+  if (!record || !consent || !record.userId) return false;
   return Boolean(
     ownerOf(record) === job.tenantId
-    && record.artistWorkspaceId === job.artistWorkspaceId
     && consent.tenantId === job.tenantId
-    && consent.artistWorkspaceId === record.artistWorkspaceId
-    && consent.grantedByUserId === record.ownerUserId
+    && consent.artistWorkspaceId === job.artistWorkspaceId
+    && consent.grantedByUserId === record.userId
     && consent.distributor?.toLowerCase() === job.distributor.toLowerCase()
     && consent.provider === 'steel'
     && consent.scope === 'distributor:read-catalog'

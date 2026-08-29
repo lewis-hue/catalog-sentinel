@@ -156,7 +156,7 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
       `SELECT "id", "status", "finalizedAt", "storeLyricsStatus", "storeLyricsChecked",
               "storeLyricsTotal", "storeLyricsError", "storeLyricsCheckedAt"
        FROM "DistributorExtractionSnapshot"
-       WHERE "tenantId" = $1 AND "snapshotId" = $2 LIMIT 1`,
+       WHERE "userId" = $1 AND "snapshotId" = $2 LIMIT 1`,
       [tenantId, snapshotId],
     );
     const snapshotRow = snap.rows[0];
@@ -264,7 +264,7 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
    */
   async readLyricScanTargets(tenantId: string, snapshotId: string, opts: { unreadDistroKidLyricsOnly?: boolean } = {}): Promise<LyricScanTarget[]> {
     const snap = await this.pool.query<{ id: string }>(
-      `SELECT "id" FROM "DistributorExtractionSnapshot" WHERE "tenantId" = $1 AND "snapshotId" = $2 LIMIT 1`,
+      `SELECT "id" FROM "DistributorExtractionSnapshot" WHERE "userId" = $1 AND "snapshotId" = $2 LIMIT 1`,
       [tenantId, snapshotId],
     );
     const snapshotUuid = snap.rows[0]?.id;
@@ -331,14 +331,14 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
          FROM "DistributorTrackOutcome" t2
          JOIN "DistributorReleaseOutcome" r2 ON t2."releaseOutcomeId" = r2."id"
          JOIN "DistributorExtractionSnapshot" s2 ON r2."extractionSnapshotId" = s2."id"
-         WHERE s2."tenantId" = $1 AND s2."snapshotId" <> $2
+         WHERE s2."userId" = $1 AND s2."snapshotId" <> $2
            AND r2."distributorReleaseId" = r."distributorReleaseId"
            AND t2."trackIndex" = t."trackIndex"
            AND t2."plainLyricsStatus" <> 'unknown'
          ORDER BY s2."startedAt" DESC
          LIMIT 1
        ) prior ON TRUE
-       WHERE t."releaseOutcomeId" = r."id" AND s."tenantId" = $1 AND s."snapshotId" = $2
+       WHERE t."releaseOutcomeId" = r."id" AND s."userId" = $1 AND s."snapshotId" = $2
          AND t."plainLyricsStatus" = 'unknown'`,
       [tenantId, snapshotId],
     );
@@ -379,7 +379,7 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
            "storeLyricsTotal" = COALESCE($5, "storeLyricsTotal"),
            "storeLyricsError" = $6,
            "storeLyricsCheckedAt" = CASE WHEN $3 = 'done' THEN NOW() ELSE "storeLyricsCheckedAt" END
-       WHERE "tenantId" = $1 AND "snapshotId" = $2`,
+       WHERE "userId" = $1 AND "snapshotId" = $2`,
       [tenantId, snapshotId, p.status, p.checked ?? null, p.total ?? null, p.error ?? null],
     );
   }
@@ -391,7 +391,7 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
       storeLyricsError: string | null; storeLyricsCheckedAt: Date | null;
     }>(
       `SELECT "storeLyricsStatus", "storeLyricsChecked", "storeLyricsTotal", "storeLyricsError", "storeLyricsCheckedAt"
-       FROM "DistributorExtractionSnapshot" WHERE "tenantId" = $1 AND "snapshotId" = $2 LIMIT 1`,
+       FROM "DistributorExtractionSnapshot" WHERE "userId" = $1 AND "snapshotId" = $2 LIMIT 1`,
       [tenantId, snapshotId],
     );
     const row = res.rows[0];
@@ -414,7 +414,7 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
     marks: Array<{ releaseId: string; trackIndex: number; mark: string | null; note?: string | null }>,
   ): Promise<number> {
     const snap = await this.pool.query<{ id: string }>(
-      `SELECT "id" FROM "DistributorExtractionSnapshot" WHERE "tenantId" = $1 AND "snapshotId" = $2 LIMIT 1`,
+      `SELECT "id" FROM "DistributorExtractionSnapshot" WHERE "userId" = $1 AND "snapshotId" = $2 LIMIT 1`,
       [tenantId, snapshotId],
     );
     const snapshotUuid = snap.rows[0]?.id;
@@ -476,7 +476,7 @@ async function upsertSnapshot(client: PoolClient, job: FinalizeJob): Promise<str
   const c = job.completeness;
   const res = await client.query<{ id: string }>(
     `INSERT INTO "DistributorExtractionSnapshot" (
-       "id", "tenantId", "connectionId", "snapshotId", "distributor", "status", "engine",
+       "id", "userId", "connectionId", "snapshotId", "distributor", "status", "engine",
        "expectedReleases", "completedReleases", "failedReleases", "expectedTracksKnown", "expectedTracks", "extractedTracks",
        "releasesWithUpc", "releasesWithArtwork", "tracksWithIsrc",
        "releasesUpcAbsentAtSource", "tracksIsrcAbsentAtSource",
@@ -486,7 +486,7 @@ async function upsertSnapshot(client: PoolClient, job: FinalizeJob): Promise<str
        gen_random_uuid()::text, $1, $2, $3, $4, $5, 'NETWORK_FIRST',
        $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20::jsonb, NOW()
      )
-     ON CONFLICT ("tenantId", "snapshotId") DO UPDATE SET
+     ON CONFLICT ("userId", "snapshotId") DO UPDATE SET
        "status" = EXCLUDED."status",
        "expectedReleases" = EXCLUDED."expectedReleases",
        "completedReleases" = EXCLUDED."completedReleases",
@@ -531,7 +531,7 @@ async function upsertOutcome(
 
   const res = await client.query<{ id: string }>(
     `INSERT INTO "DistributorReleaseOutcome" (
-       "id", "tenantId", "extractionSnapshotId", "distributorReleaseId", "kind", "reason",
+       "id", "userId", "extractionSnapshotId", "distributorReleaseId", "kind", "reason",
        "title", "primaryArtist", "label", "releaseDate", "uploadDate", "artworkUrl", "upc",
        "upcStatus", "artworkStatus", "source", "parserVersion", "endpointFingerprint",
        "capturedAt", "submittedStores", "updatedAt"
@@ -592,7 +592,7 @@ async function upsertOutcome(
   for (const [i, t] of r.tracks.entries()) {
     await client.query(
       `INSERT INTO "DistributorTrackOutcome" (
-         "id", "tenantId", "releaseOutcomeId", "distributorTrackId", "trackIndex",
+         "id", "userId", "releaseOutcomeId", "distributorTrackId", "trackIndex",
          "title", "primaryArtist", "featuredArtists", "trackNumber", "durationMs",
          "isrc", "isrcStatus", "source", "parserVersion", "capturedAt",
          "plainLyricsStatus", "syncedLyricsStatus"

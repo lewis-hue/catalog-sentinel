@@ -66,9 +66,9 @@ describe.skipIf(!DATABASE_URL)('durable persistence, real Postgres', () => {
 
   beforeEach(async () => {
     // Cascades clear release/track outcomes.
-    await pool.query(`DELETE FROM "DistributorExtractionSnapshot" WHERE "tenantId" LIKE 't-pg%'`);
-    await pool.query(`DELETE FROM "DistributorEndpointProfile" WHERE "tenantId" LIKE 't-pg%'`);
-    await pool.query(`DELETE FROM "DistributorEndpointCandidate" WHERE "tenantId" LIKE 't-pg%'`);
+    await pool.query(`DELETE FROM "DistributorExtractionSnapshot" WHERE "userId" LIKE 't-pg%'`);
+    await pool.query(`DELETE FROM "DistributorEndpointProfile" WHERE "userId" LIKE 't-pg%'`);
+    await pool.query(`DELETE FROM "DistributorEndpointCandidate" WHERE "userId" LIKE 't-pg%'`);
   });
 
   describe('outcome repository', () => {
@@ -77,7 +77,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence, real Postgres', () => {
       expect(repo.durable).toBe(true);
       await repo.persist(finalizeJob(), [completed('R1'), completed('R2')]);
 
-      const snap = await pool.query(`SELECT * FROM "DistributorExtractionSnapshot" WHERE "tenantId" = 't-pg'`);
+      const snap = await pool.query(`SELECT * FROM "DistributorExtractionSnapshot" WHERE "userId" = 't-pg'`);
       expect(snap.rowCount).toBe(1);
       expect(snap.rows[0].status).toBe('COMPLETE');
       expect(snap.rows[0].engine).toBe('NETWORK_FIRST');
@@ -159,7 +159,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence, real Postgres', () => {
       const snapshot = await pool.query(
         `SELECT "expectedReleases", "expectedTracksKnown", "expectedTracks", "extractedTracks"
            FROM "DistributorExtractionSnapshot"
-          WHERE "tenantId" = 't-pg' AND "snapshotId" = 'snap-large-1200'`,
+          WHERE "userId" = 't-pg' AND "snapshotId" = 'snap-large-1200'`,
       );
       expect(snapshot.rows[0]).toMatchObject({
         expectedReleases: releaseCount,
@@ -177,7 +177,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence, real Postgres', () => {
          FROM "DistributorExtractionSnapshot" snapshot
          JOIN "DistributorReleaseOutcome" release_outcome ON release_outcome."extractionSnapshotId" = snapshot.id
          JOIN "DistributorTrackOutcome" track_outcome ON track_outcome."releaseOutcomeId" = release_outcome.id
-        WHERE snapshot."tenantId" = 't-pg' AND snapshot."snapshotId" = 'snap-large-1200'`,
+        WHERE snapshot."userId" = 't-pg' AND snapshot."snapshotId" = 'snap-large-1200'`,
       );
       expect(Number(persisted.rows[0]?.releases)).toBe(releaseCount);
       expect(Number(persisted.rows[0]?.tracks)).toBe(trackCount);
@@ -193,7 +193,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence, real Postgres', () => {
 
       // BullMQ redelivers. Three finalizes must leave one snapshot and two releases, not three
       // copies of someone's catalogue.
-      expect((await pool.query(`SELECT * FROM "DistributorExtractionSnapshot" WHERE "tenantId" = 't-pg'`)).rowCount).toBe(1);
+      expect((await pool.query(`SELECT * FROM "DistributorExtractionSnapshot" WHERE "userId" = 't-pg'`)).rowCount).toBe(1);
       expect((await pool.query(`SELECT * FROM "DistributorReleaseOutcome"`)).rowCount).toBe(2);
       expect((await pool.query(`SELECT * FROM "DistributorTrackOutcome"`)).rowCount).toBe(2);
     });
@@ -239,7 +239,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence, real Postgres', () => {
       const poison = { kind: 'COMPLETED', release: null, source: 'NETWORK_JSON', elapsedMs: 1 } as unknown as ReleaseExtractionOutcome;
       await expect(repo.persist(finalizeJob(), [completed('R1'), poison])).rejects.toThrow();
       // A snapshot claiming COMPLETE over half a catalogue is worse than no snapshot.
-      expect((await pool.query(`SELECT * FROM "DistributorExtractionSnapshot" WHERE "tenantId" = 't-pg'`)).rowCount).toBe(0);
+      expect((await pool.query(`SELECT * FROM "DistributorExtractionSnapshot" WHERE "userId" = 't-pg'`)).rowCount).toBe(0);
       expect((await pool.query(`SELECT * FROM "DistributorReleaseOutcome"`)).rowCount).toBe(0);
     });
 
@@ -351,7 +351,7 @@ describe.skipIf(!DATABASE_URL)('durable persistence, real Postgres', () => {
       expect(got!.failedCaptures).toBe(2);
       // The score has its own column now, it is not just a re-read of validationCount.
       const raw = await pool.query<{ candidateScore: number; validationCount: number }>(
-        `SELECT "candidateScore", "validationCount" FROM "DistributorEndpointProfile" WHERE "tenantId" = 't-pg'`,
+        `SELECT "candidateScore", "validationCount" FROM "DistributorEndpointProfile" WHERE "userId" = 't-pg'`,
       );
       expect(raw.rows[0]!.candidateScore).toBe(37);
     });

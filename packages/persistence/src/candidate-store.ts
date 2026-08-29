@@ -33,13 +33,13 @@ export class PostgresCandidateStore implements CandidateStore {
     // Enforce the cap for NEW fingerprints only, an existing row must still be updatable, or a
     // busy scan would stop counting observations for endpoints it already knows about.
     const countRes = await this.pool.query<{ n: string }>(
-      `SELECT COUNT(*)::text AS n FROM "DistributorEndpointCandidate" WHERE "tenantId" = $1 AND "scanId" = $2`,
+      `SELECT COUNT(*)::text AS n FROM "DistributorEndpointCandidate" WHERE "userId" = $1 AND "scanId" = $2`,
       [scope.tenantId, scope.scanId],
     );
     const existingCount = Number(countRes.rows[0]?.n ?? '0');
     if (existingCount >= this.maxPerScan) {
       const known = await this.pool.query(
-        `SELECT 1 FROM "DistributorEndpointCandidate" WHERE "tenantId" = $1 AND "scanId" = $2 AND "fingerprint" = $3`,
+        `SELECT 1 FROM "DistributorEndpointCandidate" WHERE "userId" = $1 AND "scanId" = $2 AND "fingerprint" = $3`,
         [scope.tenantId, scope.scanId, c.fingerprint],
       );
       if (known.rowCount === 0) return;
@@ -47,14 +47,14 @@ export class PostgresCandidateStore implements CandidateStore {
 
     await this.pool.query(
       `INSERT INTO "DistributorEndpointCandidate" (
-         "id", "tenantId", "scanId", "distributor", "fingerprint",
+         "id", "userId", "scanId", "distributor", "fingerprint",
          "method", "host", "maskedPath", "queryKeys", "operationName",
          "schemaKeys", "schemaHash", "score", "observations", "distinctPayloads",
          "variesPerRelease", "sizeBytes", "firstSeenAt", "lastSeenAt"
        ) VALUES (
          gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1, 1, false, $13, $14, $14
        )
-       ON CONFLICT ("tenantId", "scanId", "fingerprint") DO UPDATE SET
+       ON CONFLICT ("userId", "scanId", "fingerprint") DO UPDATE SET
          "score" = GREATEST("DistributorEndpointCandidate"."score", EXCLUDED."score"),
          "observations" = "DistributorEndpointCandidate"."observations" + 1,
          "schemaKeys" = EXCLUDED."schemaKeys",
@@ -75,7 +75,7 @@ export class PostgresCandidateStore implements CandidateStore {
   async list(tenantId: string, scanId: string): Promise<StoredCandidate[]> {
     const res = await this.pool.query<CandidateRow>(
       `SELECT * FROM "DistributorEndpointCandidate"
-       WHERE "tenantId" = $1 AND "scanId" = $2
+       WHERE "userId" = $1 AND "scanId" = $2
        ORDER BY "score" DESC, "observations" DESC`,
       [tenantId, scanId],
     );
@@ -84,7 +84,7 @@ export class PostgresCandidateStore implements CandidateStore {
 
   async clear(tenantId: string, scanId: string): Promise<void> {
     await this.pool.query(
-      `DELETE FROM "DistributorEndpointCandidate" WHERE "tenantId" = $1 AND "scanId" = $2`,
+      `DELETE FROM "DistributorEndpointCandidate" WHERE "userId" = $1 AND "scanId" = $2`,
       [tenantId, scanId],
     );
   }

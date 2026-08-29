@@ -113,7 +113,7 @@ export function projectFinalizedSnapshot(
       : `Verified ${job.completeness.completedReleases}/${job.completeness.expectedReleases} distributor release(s). Run a store-presence check to verify each track's availability across stores; no missing-store claim is made until then.`;
   return {
     ...record,
-    tenantId: job.tenantId,
+    userId: job.tenantId,
     platforms: [],
     released,
     result: {

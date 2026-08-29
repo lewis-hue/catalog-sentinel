@@ -31,7 +31,7 @@ export class PostgresEndpointRegistryStore implements EndpointRegistryStore {
   async get(scope: RegistryScope, fingerprint: string): Promise<DistributorEndpointProfile | null> {
     const res = await this.pool.query<ProfileRow>(
       `SELECT * FROM "DistributorEndpointProfile"
-       WHERE "tenantId" = $1 AND "distributor" = $2 AND "fingerprint" = $3`,
+       WHERE "userId" = $1 AND "distributor" = $2 AND "fingerprint" = $3`,
       [scope.tenantId, scope.distributor, fingerprint],
     );
     const row = res.rows[0];
@@ -41,7 +41,7 @@ export class PostgresEndpointRegistryStore implements EndpointRegistryStore {
   async list(scope: RegistryScope): Promise<DistributorEndpointProfile[]> {
     const res = await this.pool.query<ProfileRow>(
       `SELECT * FROM "DistributorEndpointProfile"
-       WHERE "tenantId" = $1 AND "distributor" = $2
+       WHERE "userId" = $1 AND "distributor" = $2
        ORDER BY "lastSeenAt" DESC`,
       [scope.tenantId, scope.distributor],
     );
@@ -53,7 +53,7 @@ export class PostgresEndpointRegistryStore implements EndpointRegistryStore {
     // one row; an insert-or-fail here would turn a normal race into a job failure.
     await this.pool.query(
       `INSERT INTO "DistributorEndpointProfile" (
-         "id", "tenantId", "distributor", "fingerprint", "role", "status",
+         "id", "userId", "distributor", "fingerprint", "role", "status",
          "method", "host", "maskedPath", "queryKeys", "operationName",
          "schemaHash", "schemaKeys", "parserVersion",
          "successCount", "failureCount", "candidateScore", "validationCount", "schemaDriftCount",
@@ -62,7 +62,7 @@ export class PostgresEndpointRegistryStore implements EndpointRegistryStore {
          gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
          $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
        )
-       ON CONFLICT ("tenantId", "distributor", "fingerprint") DO UPDATE SET
+       ON CONFLICT ("userId", "distributor", "fingerprint") DO UPDATE SET
          "role" = EXCLUDED."role",
          "status" = EXCLUDED."status",
          "method" = EXCLUDED."method",
@@ -104,7 +104,7 @@ export class PostgresEndpointRegistryStore implements EndpointRegistryStore {
 
 interface ProfileRow {
   id: string;
-  tenantId: string;
+  userId: string;
   distributor: string;
   fingerprint: string;
   role: string;
@@ -131,7 +131,7 @@ interface ProfileRow {
 function toProfile(row: ProfileRow): DistributorEndpointProfile {
   return {
     id: row.id,
-    tenantId: row.tenantId,
+    tenantId: row.userId,
     distributor: row.distributor,
     role: row.role as EndpointRole,
     fingerprint: row.fingerprint,
