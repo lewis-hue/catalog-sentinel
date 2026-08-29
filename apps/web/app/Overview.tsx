@@ -221,7 +221,7 @@ export function Overview() {
           <div>
             <div className="eyebrow">Overview</div>
             <h1 className="page-title" style={{ margin: '6px 0 4px' }}>Catalog operations</h1>
-            <p className="page-sub" style={{ margin: 0 }}>The tenant workspace could not be loaded.</p>
+            <p className="page-sub" style={{ margin: 0 }}>Your catalog could not be loaded.</p>
           </div>
         </div>
         <div className="notice-banner" role="alert" style={{ borderColor: 'var(--wrong-edge)', background: 'var(--wrong-tint)', color: 'var(--wrong)' }}>

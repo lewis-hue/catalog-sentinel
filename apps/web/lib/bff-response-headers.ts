@@ -8,9 +8,6 @@ const RESPONSE_HEADERS = new Set([
   'vary',
   // Opaque principal-bound cursor used by the audit-history Load more control.
   'x-sentinel-next-cursor',
-  // Lets the browser discard a stale, non-authoritative organization selector. The value contains
-  // no tenant identifier or authorization detail.
-  'x-sentinel-organization-selection',
 ]);
 
 /** Copy only explicitly safe upstream response metadata through the browser-facing gateway. */
