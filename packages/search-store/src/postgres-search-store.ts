@@ -9,7 +9,7 @@ import type {
   SearchStore,
   SearchSummary,
 } from './search-store';
-import { applySearchMutation, DEFAULT_TENANT, ownerOf, revisionOf, searchRecordsEqual, toSummary, validateSearchPageOptions } from './search-store';
+import { applySearchMutation, revisionOf, searchRecordsEqual, toSummary, validateSearchPageOptions } from './search-store';
 
 /**
  * Durable Postgres store for scan records, the SOURCE OF TRUTH for final results.
@@ -28,9 +28,7 @@ export interface PgPoolLike {
 
 const REQUIRED_COLUMNS = new Map<string, { type: string; notNull: boolean }>([
   ['id', { type: 'text', notNull: true }],
-  ['tenant_id', { type: 'text', notNull: true }],
-  ['owner_user_id', { type: 'text', notNull: false }],
-  ['artist_workspace_id', { type: 'text', notNull: false }],
+  ['user_id', { type: 'text', notNull: true }],
   ['artist', { type: 'text', notNull: true }],
   ['distributor', { type: 'text', notNull: true }],
   ['deep_scan_status', { type: 'text', notNull: false }],
@@ -42,9 +40,7 @@ const REQUIRED_COLUMNS = new Map<string, { type: string; notNull: boolean }>([
 const REQUIRED_INDEXES = new Map<string, { primary: boolean; columns: string[]; descending: boolean[] }>([
   ['scan_records_pkey', { primary: true, columns: ['id'], descending: [false] }],
   ['scan_records_created_idx', { primary: false, columns: ['created_at'], descending: [true] }],
-  ['scan_records_tenant_created_idx', { primary: false, columns: ['tenant_id', 'created_at'], descending: [false, true] }],
-  ['scan_records_tenant_owner_created_idx', { primary: false, columns: ['tenant_id', 'owner_user_id', 'created_at'], descending: [false, false, true] }],
-  ['scan_records_tenant_workspace_created_idx', { primary: false, columns: ['tenant_id', 'artist_workspace_id', 'created_at'], descending: [false, false, true] }],
+  ['scan_records_user_created_idx', { primary: false, columns: ['user_id', 'created_at'], descending: [false, true] }],
 ]);
 
 /**
@@ -54,7 +50,7 @@ const REQUIRED_INDEXES = new Map<string, { primary: boolean; columns: string[]; 
  */
 export async function assertScanRecordsSchema(pool: PgPoolLike): Promise<void> {
   await pool.query(
-    `SELECT id, tenant_id, owner_user_id, artist_workspace_id, artist, distributor,
+    `SELECT id, user_id, artist, distributor,
             deep_scan_status, created_at, updated_at, record
      FROM scan_records LIMIT 0`,
   );
@@ -101,12 +97,7 @@ export async function assertScanRecordsSchema(pool: PgPoolLike): Promise<void> {
 
 export class PostgresSearchStore implements SearchStore {
   private schemaReady: Promise<void> | null = null;
-  constructor(
-    private readonly pool: PgPoolLike,
-    /** Optional compatibility scope. Application-wide stores leave this undefined and persist
-     * each record's owner; deliberately scoped stores remain available for isolated callers. */
-    private readonly tenantId?: string,
-  ) {}
+  constructor(private readonly pool: PgPoolLike) {}
 
   /** Assert that the migration-owned table contract is present (cached per store instance). */
   async init(): Promise<void> {
@@ -114,14 +105,11 @@ export class PostgresSearchStore implements SearchStore {
     await this.schemaReady;
   }
 
-  async save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[]): Promise<SearchRecord> {
-    const tenantId = this.tenantId ?? input.tenantId ?? DEFAULT_TENANT;
+  async save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[], owner?: { userId: string }): Promise<SearchRecord> {
     const rec: SearchRecord = {
       id: id('search'),
       revision: 1,
-      tenantId,
-      ...(input.ownerUserId ? { ownerUserId: input.ownerUserId } : {}),
-      ...(input.artistWorkspaceId ? { artistWorkspaceId: input.artistWorkspaceId } : {}),
+      userId: owner?.userId ?? '',
       ...(input.name ? { name: input.name } : {}),
       ...(input.sourceSearchId ? { sourceSearchId: input.sourceSearchId } : {}),
       createdAt: new Date().toISOString(),
@@ -139,54 +127,39 @@ export class PostgresSearchStore implements SearchStore {
   /** Persist a full record (used by the tiered store to mirror hot state durably). */
   async upsert(rec: SearchRecord): Promise<void> {
     await this.init();
-    if (this.tenantId && ownerOf(rec) !== this.tenantId) {
-      throw new Error('scan record cannot be written outside the scoped tenant');
-    }
-    const tenantId = this.tenantId ?? ownerOf(rec);
-    const owned = { ...rec, tenantId, revision: Math.max(1, revisionOf(rec)) };
+    const owned = { ...rec, revision: Math.max(1, revisionOf(rec)) };
     const { rows, rowCount } = await this.pool.query(
       `INSERT INTO scan_records (
-         id, tenant_id, artist, distributor, deep_scan_status, created_at, updated_at, record,
-         owner_user_id, artist_workspace_id
+         id, user_id, artist, distributor, deep_scan_status, created_at, updated_at, record
        )
-       VALUES ($1,$2,$3,$4,$5,$6, now(), $7,$8,$9)
+       VALUES ($1,$2,$3,$4,$5,$6, now(), $7)
        ON CONFLICT (id) DO UPDATE SET
          artist = EXCLUDED.artist, distributor = EXCLUDED.distributor,
          deep_scan_status = EXCLUDED.deep_scan_status, updated_at = now(), record = EXCLUDED.record
-       WHERE scan_records.tenant_id = EXCLUDED.tenant_id
-         AND scan_records.owner_user_id IS NOT DISTINCT FROM EXCLUDED.owner_user_id
-         AND scan_records.artist_workspace_id IS NOT DISTINCT FROM EXCLUDED.artist_workspace_id
-         AND COALESCE((scan_records.record->>'revision')::bigint, 0) < $10
+       WHERE scan_records.user_id = EXCLUDED.user_id
+         AND COALESCE((scan_records.record->>'revision')::bigint, 0) < $8
        RETURNING id`,
       [
         owned.id,
-        tenantId,
+        owned.userId,
         owned.artist,
         owned.distributor,
         owned.deepScan?.status ?? null,
         owned.createdAt,
         JSON.stringify(owned),
-        owned.ownerUserId ?? null,
-        owned.artistWorkspaceId ?? null,
         owned.revision,
       ],
     );
     if (rowCount !== 0 && !(rowCount == null && rows.length === 0)) return;
 
-    // A zero-row conflict is either stale/idempotent replication or a cross-tenant overwrite.
+    // A zero-row conflict is either stale/idempotent replication or a cross-user overwrite.
     const existingResult = await this.pool.query(
-      `SELECT tenant_id, owner_user_id, artist_workspace_id, record FROM scan_records WHERE id = $1`,
+      `SELECT user_id, record FROM scan_records WHERE id = $1`,
       [owned.id],
     );
     const existing = existingResult.rows[0];
     if (!existing) throw new Error('scan record durable upsert did not converge');
-    if (existing.tenant_id !== tenantId) throw new Error('scan record id is already owned by another tenant');
-    if ((existing.owner_user_id ?? null) !== (owned.ownerUserId ?? null)) {
-      throw new Error('scan record id is already owned by another user');
-    }
-    if ((existing.artist_workspace_id ?? null) !== (owned.artistWorkspaceId ?? null)) {
-      throw new Error('scan record id is already scoped to another artist workspace');
-    }
+    if (existing.user_id !== owned.userId) throw new Error('scan record is owned by another user');
     const persisted = existing.record as SearchRecord;
     if (revisionOf(persisted) > owned.revision) return;
     if (revisionOf(persisted) === owned.revision && searchRecordsEqual(persisted, owned)) return;
@@ -195,48 +168,29 @@ export class PostgresSearchStore implements SearchStore {
 
   async get(recordId: string): Promise<SearchRecord | null> {
     await this.init();
-    const { rows } = this.tenantId
-      ? await this.pool.query(`SELECT record FROM scan_records WHERE id = $1 AND tenant_id = $2`, [recordId, this.tenantId])
-      : await this.pool.query(`SELECT record FROM scan_records WHERE id = $1`, [recordId]);
+    const { rows } = await this.pool.query(`SELECT record FROM scan_records WHERE id = $1`, [recordId]);
     return rows[0] ? (rows[0].record as SearchRecord) : null;
   }
 
   async list(): Promise<SearchSummary[]> {
     await this.init();
-    const { rows } = this.tenantId
-      ? await this.pool.query(`SELECT record FROM scan_records WHERE tenant_id = $1 ORDER BY created_at DESC, id DESC LIMIT 200`, [this.tenantId])
-      : await this.pool.query(`SELECT record FROM scan_records ORDER BY created_at DESC, id DESC LIMIT 200`);
+    const { rows } = await this.pool.query(`SELECT record FROM scan_records ORDER BY created_at DESC, id DESC LIMIT 200`);
     return rows.map((r) => toSummary(r.record as SearchRecord));
   }
 
-  async listForTenant(tenantId: string): Promise<SearchSummary[]> {
+  async listForUser(userId: string): Promise<SearchSummary[]> {
     await this.init();
-    // A deliberately scoped instance cannot be used to enumerate a different tenant.
-    if (this.tenantId && this.tenantId !== tenantId) return [];
     const { rows } = await this.pool.query(
-      `SELECT record FROM scan_records WHERE tenant_id = $1 ORDER BY created_at DESC, id DESC LIMIT 200`,
-      [tenantId],
+      `SELECT record FROM scan_records WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT 200`,
+      [userId],
     );
     return rows.map((r) => toSummary(r.record as SearchRecord));
   }
 
-  async listForOwner(tenantId: string, ownerUserId: string): Promise<SearchSummary[]> {
-    await this.init();
-    if (this.tenantId && this.tenantId !== tenantId) return [];
-    const { rows } = await this.pool.query(
-      `SELECT record FROM scan_records
-        WHERE tenant_id = $1 AND owner_user_id = $2
-        ORDER BY created_at DESC, id DESC LIMIT 200`,
-      [tenantId, ownerUserId],
-    );
-    return rows.map((r) => toSummary(r.record as SearchRecord));
-  }
-
-  async pageForTenant(tenantId: string, options: SearchPageOptions): Promise<SearchPage> {
+  async pageForUser(userId: string, options: SearchPageOptions): Promise<SearchPage> {
     validateSearchPageOptions(options);
     await this.init();
-    if (this.tenantId && this.tenantId !== tenantId) return { items: [] };
-    const params: unknown[] = [tenantId];
+    const params: unknown[] = [userId];
     const after = options.after
       ? ` AND (created_at, id) < ($2::timestamptz, $3::text)`
       : '';
@@ -245,27 +199,7 @@ export class PostgresSearchStore implements SearchStore {
     const limitParameter = `$${params.length}`;
     const { rows } = await this.pool.query(
       `SELECT record FROM scan_records
-        WHERE tenant_id = $1${after}
-        ORDER BY created_at DESC, id DESC LIMIT ${limitParameter}`,
-      params,
-    );
-    return searchPageFromRows(rows, options.limit);
-  }
-
-  async pageForOwner(tenantId: string, ownerUserId: string, options: SearchPageOptions): Promise<SearchPage> {
-    validateSearchPageOptions(options);
-    await this.init();
-    if (this.tenantId && this.tenantId !== tenantId) return { items: [] };
-    const params: unknown[] = [tenantId, ownerUserId];
-    const after = options.after
-      ? ` AND (created_at, id) < ($3::timestamptz, $4::text)`
-      : '';
-    if (options.after) params.push(options.after.createdAt, options.after.id);
-    params.push(options.limit + 1);
-    const limitParameter = `$${params.length}`;
-    const { rows } = await this.pool.query(
-      `SELECT record FROM scan_records
-        WHERE tenant_id = $1 AND owner_user_id = $2${after}
+        WHERE user_id = $1${after}
         ORDER BY created_at DESC, id DESC LIMIT ${limitParameter}`,
       params,
     );
@@ -278,15 +212,14 @@ export class PostgresSearchStore implements SearchStore {
       const cur = await this.get(recordId);
       if (!cur) return null;
       const next = applySearchMutation(cur, mutate);
-      const tenantId = this.tenantId ?? ownerOf(cur);
       const { rows, rowCount } = await this.pool.query(
         `UPDATE scan_records SET
            artist = $3, distributor = $4, deep_scan_status = $5,
            updated_at = now(), record = $6
-         WHERE id = $1 AND tenant_id = $2
+         WHERE id = $1 AND user_id = $2
            AND COALESCE((record->>'revision')::bigint, 0) = $7
          RETURNING id`,
-        [recordId, tenantId, next.artist, next.distributor, next.deepScan?.status ?? null, JSON.stringify(next), revisionOf(cur)],
+        [recordId, cur.userId, next.artist, next.distributor, next.deepScan?.status ?? null, JSON.stringify(next), revisionOf(cur)],
       );
       if (rowCount !== 0 && !(rowCount == null && rows.length === 0)) return next;
     }
@@ -299,20 +232,10 @@ export class PostgresSearchStore implements SearchStore {
     await this.upsert(rec);
   }
 
-  async delete(recordId: string, tenantId?: string, ownerUserId?: string): Promise<boolean> {
+  async delete(recordId: string, userId?: string): Promise<boolean> {
     await this.init();
-    if (this.tenantId && tenantId && this.tenantId !== tenantId) return false;
-    const ownerScope = this.tenantId ?? tenantId;
-    const result = ownerScope && ownerUserId
-      ? await this.pool.query(
-          `DELETE FROM scan_records WHERE id = $1 AND tenant_id = $2 AND owner_user_id = $3 RETURNING id`,
-          [recordId, ownerScope, ownerUserId],
-        )
-      : ownerScope
-      ? await this.pool.query(
-          `DELETE FROM scan_records WHERE id = $1 AND tenant_id = $2 RETURNING id`,
-          [recordId, ownerScope],
-        )
+    const result = userId
+      ? await this.pool.query(`DELETE FROM scan_records WHERE id = $1 AND user_id = $2 RETURNING id`, [recordId, userId])
       : await this.pool.query(`DELETE FROM scan_records WHERE id = $1 RETURNING id`, [recordId]);
     return (result.rowCount ?? result.rows.length) > 0;
   }
