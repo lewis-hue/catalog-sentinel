@@ -165,12 +165,6 @@ export interface ReleasedTrackLike {
 }
 
 export interface SearchInput {
-  /** Owning tenant. Stamped onto the record so every later read can be scoped to it. */
-  tenantId?: string;
-  /** Immutable OIDC subject that owns this scan. Absent only on pre-principal legacy rows. */
-  ownerUserId?: string;
-  /** Immutable artist workspace scope. Absent only on pre-workspace legacy rows. */
-  artistWorkspaceId?: string;
   /** Optional user-facing history label. API boundaries validate user supplied values. */
   name?: string;
   /** Immediate predecessor when this record was created by a rescan. */
@@ -216,17 +210,10 @@ export interface SearchRecord {
   /** Monotonic concurrency token shared by hot and durable tiers. Missing means legacy revision 0. */
   revision?: number;
   /**
-   * Owning tenant. Every read on behalf of a user MUST be filtered by this, see
-   * `apps/api/src/tenant-scoped-search-store.ts`.
-   *
-   * Records written before this field existed have no tenant; they are quarantined in the
-   * `default` legacy namespace, which prevents them from being attributed to a real tenant.
+   * Keycloak `sub` that owns this record. Every read on behalf of a user MUST be filtered by
+   * this, see `apps/api/src/tenant-scoped-search-store.ts`.
    */
-  tenantId?: string;
-  /** OIDC subject that created/owns the scan. Legacy rows may be ownerless. */
-  ownerUserId?: string;
-  /** Server-validated workspace scope attached at creation. Legacy rows may omit it. */
-  artistWorkspaceId?: string;
+  userId: string;
   /** User-facing history label. Optional for records created before scan naming existed. */
   name?: string;
   /** Immutable link to the scan that was explicitly rescanned. */
@@ -243,16 +230,12 @@ export interface SearchRecord {
   lyricsScan?: LyricsScanState;
 }
 
-/** Quarantine namespace for records written before tenant ownership was mandatory. */
-export const DEFAULT_TENANT = 'default';
-
-/** A record's owner, defaulting legacy rows to the quarantine namespace rather than to "anyone". */
-export const ownerOf = (r: Pick<SearchRecord, 'tenantId'>): string => r.tenantId ?? DEFAULT_TENANT;
+/** A record's owner: the keycloak `sub` that created it, and the sole scoping key. */
+export const ownerOf = (r: Pick<SearchRecord, 'userId'>): string => r.userId;
 
 export interface SearchSummary {
   id: string;
-  ownerUserId?: string;
-  artistWorkspaceId?: string;
+  userId: string;
   name?: string;
   sourceSearchId?: string;
   createdAt: string;
@@ -319,8 +302,7 @@ export function paginateSearchSummaries(items: SearchSummary[], options: SearchP
 export function toSummary(r: SearchRecord): SearchSummary {
   return {
     id: r.id,
-    ...(r.ownerUserId ? { ownerUserId: r.ownerUserId } : {}),
-    ...(r.artistWorkspaceId ? { artistWorkspaceId: r.artistWorkspaceId } : {}),
+    userId: r.userId,
     ...(r.name ? { name: r.name } : {}),
     ...(r.sourceSearchId ? { sourceSearchId: r.sourceSearchId } : {}),
     createdAt: r.createdAt,
@@ -334,13 +316,16 @@ export function toSummary(r: SearchRecord): SearchSummary {
   };
 }
 
-function newRecord(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[]): SearchRecord {
+function newRecord(
+  input: SearchInput,
+  result: CatalogResultLike,
+  released?: ReleasedTrackLike[],
+  owner?: { userId: string },
+): SearchRecord {
   return {
     id: id('search'),
     revision: 1,
-    tenantId: input.tenantId ?? DEFAULT_TENANT,
-    ...(input.ownerUserId ? { ownerUserId: input.ownerUserId } : {}),
-    ...(input.artistWorkspaceId ? { artistWorkspaceId: input.artistWorkspaceId } : {}),
+    userId: owner?.userId ?? '',
     ...(input.name ? { name: input.name } : {}),
     ...(input.sourceSearchId ? { sourceSearchId: input.sourceSearchId } : {}),
     createdAt: new Date().toISOString(),
@@ -366,7 +351,7 @@ export function applySearchMutation(
   // Capture before the callback so even an accidentally in-place mutation cannot change them.
   const identity = {
     id: current.id,
-    tenantId: ownerOf(current),
+    userId: current.userId,
     createdAt: current.createdAt,
     revision: revisionOf(current) + 1,
   };
@@ -374,9 +359,7 @@ export function applySearchMutation(
   // but neither is allowed to rewrite lineage after the record has been created.
   const {
     id: _ignoredId,
-    tenantId: _ignoredTenant,
-    ownerUserId: _ignoredOwner,
-    artistWorkspaceId: _ignoredWorkspace,
+    userId: _ignoredUserId,
     createdAt: _ignoredCreatedAt,
     revision: _ignoredRevision,
     sourceSearchId: _ignoredLineage,
@@ -385,8 +368,6 @@ export function applySearchMutation(
   return {
     ...mutated,
     ...identity,
-    ...(current.ownerUserId ? { ownerUserId: current.ownerUserId } : {}),
-    ...(current.artistWorkspaceId ? { artistWorkspaceId: current.artistWorkspaceId } : {}),
     ...(current.sourceSearchId ? { sourceSearchId: current.sourceSearchId } : {}),
   };
 }
@@ -410,23 +391,20 @@ function canonicalJson(value: unknown): unknown {
 }
 
 export interface SearchStore {
-  save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[]): Promise<SearchRecord>;
+  /** `owner` stamps `record.userId`; concrete stores must not accept ownership any other way. */
+  save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[], owner?: { userId: string }): Promise<SearchRecord>;
   get(id: string): Promise<SearchRecord | null>;
   list(): Promise<SearchSummary[]>;
-  /** List within a tenant at the storage/index layer so another tenant cannot starve results. */
-  listForTenant(tenantId: string): Promise<SearchSummary[]>;
-  /** List at the tenant + OIDC-subject index so a busy peer cannot starve this owner's page. */
-  listForOwner(tenantId: string, ownerUserId: string): Promise<SearchSummary[]>;
-  /** Seek-paginated tenant history, ordered by createdAt DESC then id DESC. */
-  pageForTenant(tenantId: string, options: SearchPageOptions): Promise<SearchPage>;
-  /** Seek-paginated tenant + owner history; ordinary principals must use this boundary. */
-  pageForOwner(tenantId: string, ownerUserId: string, options: SearchPageOptions): Promise<SearchPage>;
+  /** List at the user index so a busy peer cannot starve this owner's page. */
+  listForUser(userId: string): Promise<SearchSummary[]>;
+  /** Seek-paginated user history, ordered by createdAt DESC then id DESC. */
+  pageForUser(userId: string, options: SearchPageOptions): Promise<SearchPage>;
   /** Apply a partial update (used by the deep-scan worker to record progress/results). */
   update(id: string, mutate: (r: SearchRecord) => SearchRecord): Promise<SearchRecord | null>;
   /** Project a full record by id; older revisions are ignored (used to re-warm hot from durable). */
   put(rec: SearchRecord): Promise<void>;
   /** Permanently remove a record and every list/index entry that references it. */
-  delete(id: string, tenantId?: string, ownerUserId?: string): Promise<boolean>;
+  delete(id: string, userId?: string): Promise<boolean>;
 }
 
 /**
@@ -443,8 +421,8 @@ export class InMemorySearchStore implements SearchStore {
 
   private readonly records: SearchRecord[] = [];
 
-  async save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[]): Promise<SearchRecord> {
-    const rec = newRecord(input, result, released);
+  async save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[], owner?: { userId: string }): Promise<SearchRecord> {
+    const rec = newRecord(input, result, released, owner);
     this.records.unshift(rec);
     return rec;
   }
@@ -454,26 +432,12 @@ export class InMemorySearchStore implements SearchStore {
   async list(): Promise<SearchSummary[]> {
     return this.records.map(toSummary);
   }
-  async listForTenant(tenantId: string): Promise<SearchSummary[]> {
-    return this.records.filter((record) => ownerOf(record) === tenantId).slice(0, 200).map(toSummary);
+  async listForUser(userId: string): Promise<SearchSummary[]> {
+    return this.records.filter((record) => record.userId === userId).slice(0, 200).map(toSummary);
   }
-  async listForOwner(tenantId: string, ownerUserId: string): Promise<SearchSummary[]> {
-    return this.records
-      .filter((record) => ownerOf(record) === tenantId && record.ownerUserId === ownerUserId)
-      .slice(0, 200)
-      .map(toSummary);
-  }
-  async pageForTenant(tenantId: string, options: SearchPageOptions): Promise<SearchPage> {
+  async pageForUser(userId: string, options: SearchPageOptions): Promise<SearchPage> {
     return paginateSearchSummaries(
-      this.records.filter((record) => ownerOf(record) === tenantId).map(toSummary),
-      options,
-    );
-  }
-  async pageForOwner(tenantId: string, ownerUserId: string, options: SearchPageOptions): Promise<SearchPage> {
-    return paginateSearchSummaries(
-      this.records
-        .filter((record) => ownerOf(record) === tenantId && record.ownerUserId === ownerUserId)
-        .map(toSummary),
+      this.records.filter((record) => record.userId === userId).map(toSummary),
       options,
     );
   }
@@ -494,11 +458,9 @@ export class InMemorySearchStore implements SearchStore {
       if (order > 0) this.records[i] = rec;
     } else { this.records.unshift(rec); }
   }
-  async delete(recordId: string, tenantId?: string, ownerUserId?: string): Promise<boolean> {
+  async delete(recordId: string, userId?: string): Promise<boolean> {
     const index = this.records.findIndex((record) =>
-      record.id === recordId
-      && (!tenantId || ownerOf(record) === tenantId)
-      && (!ownerUserId || record.ownerUserId === ownerUserId));
+      record.id === recordId && (!userId || record.userId === userId));
     if (index < 0) return false;
     this.records.splice(index, 1);
     return true;
@@ -514,22 +476,16 @@ export class RedisSearchStore implements SearchStore {
   constructor(private readonly redis: RedisLike, private readonly prefix = 'search') {}
   private key(recordId: string): string { return `${this.prefix}:${recordId}`; }
   private get indexKey(): string { return `${this.prefix}:index`; }
-  private tenantIndexKey(tenantId: string): string { return `${this.prefix}:tenant:${encodeURIComponent(tenantId)}:index`; }
-  private ownerIndexKey(tenantId: string, ownerUserId: string): string {
-    return `${this.prefix}:tenant:${encodeURIComponent(tenantId)}:owner:${encodeURIComponent(ownerUserId)}:index`;
-  }
+  private userIndexKey(userId: string): string { return `${this.prefix}:user:${encodeURIComponent(userId)}:index`; }
 
   private async indexRecord(rec: SearchRecord): Promise<void> {
     await this.redis.lpush(this.indexKey, rec.id);
     await this.redis.ltrim(this.indexKey, 0, 199);
-    await this.redis.lpush(this.tenantIndexKey(ownerOf(rec)), rec.id);
-    if (rec.ownerUserId) {
-      await this.redis.lpush(this.ownerIndexKey(ownerOf(rec), rec.ownerUserId), rec.id);
-    }
+    await this.redis.lpush(this.userIndexKey(rec.userId), rec.id);
   }
 
-  async save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[]): Promise<SearchRecord> {
-    const rec = newRecord(input, result, released);
+  async save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[], owner?: { userId: string }): Promise<SearchRecord> {
+    const rec = newRecord(input, result, released, owner);
     await this.redis.set(this.key(rec.id), JSON.stringify(rec));
     await this.indexRecord(rec);
     return rec;
@@ -541,42 +497,31 @@ export class RedisSearchStore implements SearchStore {
   async list(): Promise<SearchSummary[]> {
     return this.listFromIndex(this.indexKey);
   }
-  async listForTenant(tenantId: string): Promise<SearchSummary[]> {
-    return this.listFromIndex(this.tenantIndexKey(tenantId), tenantId);
+  async listForUser(userId: string): Promise<SearchSummary[]> {
+    return this.listFromIndex(this.userIndexKey(userId), userId);
   }
-  async listForOwner(tenantId: string, ownerUserId: string): Promise<SearchSummary[]> {
-    return this.listFromIndex(this.ownerIndexKey(tenantId, ownerUserId), tenantId, ownerUserId);
-  }
-  async pageForTenant(tenantId: string, options: SearchPageOptions): Promise<SearchPage> {
+  async pageForUser(userId: string, options: SearchPageOptions): Promise<SearchPage> {
     return paginateSearchSummaries(
-      await this.summariesFromIndex(this.tenantIndexKey(tenantId), tenantId),
+      await this.summariesFromIndex(this.userIndexKey(userId), userId),
       options,
     );
   }
-  async pageForOwner(tenantId: string, ownerUserId: string, options: SearchPageOptions): Promise<SearchPage> {
-    return paginateSearchSummaries(
-      await this.summariesFromIndex(this.ownerIndexKey(tenantId, ownerUserId), tenantId, ownerUserId),
-      options,
-    );
-  }
-  private async listFromIndex(indexKey: string, tenantId?: string, ownerUserId?: string): Promise<SearchSummary[]> {
+  private async listFromIndex(indexKey: string, userId?: string): Promise<SearchSummary[]> {
     const ids = await this.redis.lrange(indexKey, 0, 199);
-    return this.summariesForIds(ids, tenantId, ownerUserId);
+    return this.summariesForIds(ids, userId);
   }
-  private async summariesFromIndex(indexKey: string, tenantId?: string, ownerUserId?: string): Promise<SearchSummary[]> {
+  private async summariesFromIndex(indexKey: string, userId?: string): Promise<SearchSummary[]> {
     const ids = await this.redis.lrange(indexKey, 0, -1);
-    return this.summariesForIds(ids, tenantId, ownerUserId);
+    return this.summariesForIds(ids, userId);
   }
-  private async summariesForIds(ids: string[], tenantId?: string, ownerUserId?: string): Promise<SearchSummary[]> {
+  private async summariesForIds(ids: string[], userId?: string): Promise<SearchSummary[]> {
     const out: SearchSummary[] = [];
     for (const rid of ids) {
       const raw = await this.redis.get(this.key(rid));
       if (raw) {
         const record = JSON.parse(raw) as SearchRecord;
         // Defense in depth against a stale/corrupt index entry.
-        if ((!tenantId || ownerOf(record) === tenantId) && (!ownerUserId || record.ownerUserId === ownerUserId)) {
-          out.push(toSummary(record));
-        }
+        if (!userId || record.userId === userId) out.push(toSummary(record));
       }
     }
     return out;
@@ -642,31 +587,25 @@ export class RedisSearchStore implements SearchStore {
     await this.redis.set(key, JSON.stringify(rec));
     if (!current) await this.indexRecord(rec);
   }
-  async delete(recordId: string, tenantId?: string, ownerUserId?: string): Promise<boolean> {
+  async delete(recordId: string, userId?: string): Promise<boolean> {
     const raw = await this.redis.get(this.key(recordId));
     if (!raw) {
-      // A prior partial cleanup may have removed the value first. A tenant-scoped caller still
-      // gives us enough ownership information to repair both indexes idempotently.
+      // A prior partial cleanup may have removed the value first. A user-scoped caller still
+      // gives us enough ownership information to repair the index idempotently.
       await this.redis.lrem(this.indexKey, 0, recordId);
-      if (tenantId) await this.redis.lrem(this.tenantIndexKey(tenantId), 0, recordId);
-      if (tenantId && ownerUserId) await this.redis.lrem(this.ownerIndexKey(tenantId, ownerUserId), 0, recordId);
+      if (userId) await this.redis.lrem(this.userIndexKey(userId), 0, recordId);
       return false;
     }
     const record = JSON.parse(raw) as SearchRecord;
-    if (tenantId && ownerOf(record) !== tenantId) return false;
-    if (ownerUserId && record.ownerUserId !== ownerUserId) return false;
-    const tenantIndex = this.tenantIndexKey(tenantId ?? ownerOf(record));
-    const ownerIndex = record.ownerUserId
-      ? this.ownerIndexKey(tenantId ?? ownerOf(record), record.ownerUserId)
-      : null;
+    if (userId && record.userId !== userId) return false;
+    const userIndex = this.userIndexKey(userId ?? record.userId);
     if (this.redis.eval) {
       const removed = await this.redis.eval(
         REDIS_DELETE_WITH_INDEXES,
-        ownerIndex ? 4 : 3,
+        3,
         this.key(recordId),
         this.indexKey,
-        tenantIndex,
-        ...(ownerIndex ? [ownerIndex] : []),
+        userIndex,
         recordId,
       );
       return Number(removed) === 1;
@@ -674,20 +613,13 @@ export class RedisSearchStore implements SearchStore {
     // Minimal development adapters may not support Lua. Production ioredis always does.
     const removed = await this.redis.del(this.key(recordId));
     await this.redis.lrem(this.indexKey, 0, recordId);
-    await this.redis.lrem(tenantIndex, 0, recordId);
-    if (ownerIndex) await this.redis.lrem(ownerIndex, 0, recordId);
+    await this.redis.lrem(userIndex, 0, recordId);
     return Number(removed) > 0;
   }
 }
 
 function assertSameSecurityScope(current: SearchRecord, incoming: SearchRecord): void {
-  if (ownerOf(current) !== ownerOf(incoming)) throw new Error('search record id is already owned by another tenant');
-  if ((current.ownerUserId ?? null) !== (incoming.ownerUserId ?? null)) {
-    throw new Error('search record id is already owned by another user');
-  }
-  if ((current.artistWorkspaceId ?? null) !== (incoming.artistWorkspaceId ?? null)) {
-    throw new Error('search record id is already scoped to another artist workspace');
-  }
+  if (current.userId !== incoming.userId) throw new Error('search record id is already owned by another user');
 }
 
 /** Minimal Redis surface we use (satisfied by ioredis). */
