@@ -40,7 +40,7 @@ interface RecoveryRow extends Record<string, unknown> {
 }
 
 const rowProjection = `
-  "tenantId", "connectionId", "snapshotId", "distributor",
+  "userId" AS "tenantId", "connectionId", "snapshotId", "distributor",
   "recoveryArtists" AS "artists",
   "recoveryConsentId" AS "consentId",
   "recoveryArtistWorkspaceId" AS "artistWorkspaceId",
@@ -137,7 +137,7 @@ export class PostgresDistroKidRecoveryRepository implements DistroKidRecoveryRep
     const job = validatedRecoveryJob(input, this.now());
     const result = await this.pool.query<RecoveryRow>(
       `INSERT INTO "DistroKidSnapshotCheckpoint" AS checkpoint (
-         "tenantId", "connectionId", "snapshotId", "distributor",
+         "userId", "connectionId", "snapshotId", "distributor",
          "recoveryArtists", "recoveryConsentId", "recoveryArtistWorkspaceId",
          "recoverySteelSessionIdEncrypted", "recoverySessionExpiresAt",
          "recoveryDeadlineAt", "recoverySchemaVersion"
@@ -150,14 +150,14 @@ export class PostgresDistroKidRecoveryRepository implements DistroKidRecoveryRep
          "recoverySessionExpiresAt" = COALESCE(checkpoint."recoverySessionExpiresAt", EXCLUDED."recoverySessionExpiresAt"),
          "recoveryDeadlineAt" = COALESCE(checkpoint."recoveryDeadlineAt", EXCLUDED."recoveryDeadlineAt"),
          "recoverySchemaVersion" = COALESCE(checkpoint."recoverySchemaVersion", EXCLUDED."recoverySchemaVersion")
-       WHERE checkpoint."tenantId" = EXCLUDED."tenantId"
+       WHERE checkpoint."userId" = EXCLUDED."userId"
          AND checkpoint."connectionId" = EXCLUDED."connectionId"
          AND checkpoint."distributor" = EXCLUDED."distributor"
          AND (
            checkpoint."recoverySteelSessionIdEncrypted" IS NOT NULL
            OR NOT EXISTS (
              SELECT 1 FROM "DistroKidCheckpointTerminal" terminal
-              WHERE terminal."tenantId" = checkpoint."tenantId"
+              WHERE terminal."userId" = checkpoint."userId"
                 AND terminal."connectionId" = checkpoint."connectionId"
                 AND terminal."snapshotId" = checkpoint."snapshotId"
            )
@@ -174,10 +174,10 @@ export class PostgresDistroKidRecoveryRepository implements DistroKidRecoveryRep
       const state = await this.pool.query<{
         tenantId: string; connectionId: string; distributor: string; terminal: boolean;
       }>(
-        `SELECT root."tenantId", root."connectionId", root."distributor",
+        `SELECT root."userId" AS "tenantId", root."connectionId", root."distributor",
                 EXISTS (
                   SELECT 1 FROM "DistroKidCheckpointTerminal" terminal
-                   WHERE terminal."tenantId" = root."tenantId"
+                   WHERE terminal."userId" = root."userId"
                      AND terminal."connectionId" = root."connectionId"
                      AND terminal."snapshotId" = root."snapshotId"
                 ) AS "terminal"
@@ -224,7 +224,7 @@ export class PostgresDistroKidRecoveryRepository implements DistroKidRecoveryRep
          "recoverySessionExpiresAt" = NULL,
          "recoveryDeadlineAt" = NULL,
          "recoverySchemaVersion" = NULL
-       WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3
+       WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3
          AND "recoverySteelSessionIdEncrypted" IS NOT NULL`,
       [job.tenantId, job.connectionId, job.snapshotId],
     );

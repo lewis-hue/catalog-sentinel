@@ -93,7 +93,7 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL DistroKid recovery envelope', () => {
     expect(await repository.clear({ ...first, tenantId: `other-tenant-${nonce}` })).toBe(false);
     await pool.query(
       `INSERT INTO "DistroKidCheckpointTerminal" (
-         "tenantId", "connectionId", "snapshotId", "tombstone"
+         "userId", "connectionId", "snapshotId", "tombstone"
        ) VALUES ($1,$2,$3,$4::jsonb)`,
       [
         first.tenantId,
@@ -122,7 +122,7 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL DistroKid recovery envelope', () => {
 
     await expect(pool.query(
       `INSERT INTO "DistroKidSnapshotCheckpoint" (
-         "tenantId", "connectionId", "snapshotId", "distributor", "recoveryConsentId"
+         "userId", "connectionId", "snapshotId", "distributor", "recoveryConsentId"
        ) VALUES ($1,$2,$3,'distrokid',$4)`,
       [`partial-tenant-${nonce}`, `partial-connection-${nonce}`, snapshotId, 'partial-consent'],
     )).rejects.toMatchObject({ code: '23514' });
