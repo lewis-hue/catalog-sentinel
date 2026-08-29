@@ -26,7 +26,7 @@ async function fixture() {
     { userId: 'tenant-a' },
   );
   await repository.consents.put({ tenantId: 'tenant-a' }, {
-    id: 'consent-a', tenantId: 'tenant-a', artistWorkspaceId: 'workspace-a',
+    id: 'consent-a', tenantId: 'tenant-a',
     grantedByUserId: 'tenant-a', grantedAt: '2026-07-22T11:00:00.000Z',
     purpose: CONSENT_PURPOSE, disclosureVersion: CONSENT_DISCLOSURE_VERSION,
     retentionDays: CONSENT_RETENTION_DAYS, distributor: 'distrokid',
@@ -38,30 +38,27 @@ async function fixture() {
     repository,
     job: {
       tenantId: 'tenant-a', snapshotId: record.id, consentId: 'consent-a',
-      artistWorkspaceId: 'workspace-a', distributor: 'distrokid',
+      distributor: 'distrokid',
     },
   };
 }
 
 describe('DistroKid snapshot principal binding', () => {
-  it('accepts only a matching tenant, record owner, workspace, and active consent subject', async () => {
+  it('accepts only a matching user (record owner) and active consent subject', async () => {
     const { store, repository, job } = await fixture();
     await expect(snapshotPrincipalBindingValid(store, repository, job, NOW)).resolves.toBe(true);
     await expect(assertSnapshotPrincipalBinding(store, repository, job, NOW)).resolves.toBeUndefined();
   });
 
-  it('rejects a consent granted by another same-tenant subject', async () => {
+  it('rejects a consent granted by another subject', async () => {
     const { store, repository, job } = await fixture();
     const consent = await repository.consents.get({ tenantId: 'tenant-a' }, 'consent-a');
     await repository.consents.put({ tenantId: 'tenant-a' }, { ...consent!, grantedByUserId: 'bob' });
     await expect(snapshotPrincipalBindingValid(store, repository, job, NOW)).resolves.toBe(false);
   });
 
-  it('rejects workspace or tenant substitution before projection', async () => {
+  it('rejects user (owner) substitution before projection', async () => {
     const { store, repository, job } = await fixture();
-    await expect(snapshotPrincipalBindingValid(
-      store, repository, { ...job, artistWorkspaceId: 'workspace-b' }, NOW,
-    )).resolves.toBe(false);
     await expect(assertSnapshotPrincipalBinding(
       store, repository, { ...job, tenantId: 'tenant-b' }, NOW,
     )).rejects.toMatchObject({ name: 'SnapshotPrincipalBindingError' });

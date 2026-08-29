@@ -54,10 +54,12 @@ describe('Sentinel API (in-process inject)', () => {
     expect(doc.paths['/api/searches/{id}/rescan']?.post?.summary).toMatch(/saved distributor snapshot/i);
     expect(doc.paths['/api/searches/{id}/rescan']?.post?.description).toMatch(/does not re-extract/i);
     expect(doc.paths['/api/distributor-imports/csv']?.post?.responses?.['200']).toBeTruthy();
-    expect(doc.paths['/api/organization/members']?.get?.responses?.['200']).toBeTruthy();
-    expect(doc.paths['/api/organization/invitations']?.post?.responses?.['201']).toBeTruthy();
-    expect(doc.paths['/api/organization/invitations/accept']?.post?.responses?.['403']).toBeTruthy();
-    expect(doc.paths['/api/organization/workspaces/{workspaceId}/members/{subjectId}']?.delete?.responses?.['409']).toBeTruthy();
+    // Per-user isolation: the organization/workspace/invitation/erasure surface is gone.
+    expect(doc.paths['/api/organization/members']).toBeUndefined();
+    expect(doc.paths['/api/organization/invitations']).toBeUndefined();
+    expect(doc.paths['/api/organization/invitations/accept']).toBeUndefined();
+    expect(doc.paths['/api/organization/workspaces/{workspaceId}/members/{subjectId}']).toBeUndefined();
+    expect(doc.paths['/api/organization/erasure-requests']).toBeUndefined();
   });
 
   it('applies security headers', async () => {

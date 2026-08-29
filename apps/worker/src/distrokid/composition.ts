@@ -66,7 +66,7 @@ export interface DistroKidCompositionOptions {
   /** Persist the finished snapshot (normalized outcomes only, never raw payloads). */
   persistSnapshot(job: FinalizeJob, outcomes: ReleaseExtractionOutcome[]): Promise<void>;
   /** Revalidate the durable consent before every browser-bound unit of work. */
-  consentActive?(job: { tenantId: string; snapshotId: string; consentId: string; artistWorkspaceId: string; distributor: string }): Promise<boolean>;
+  consentActive?(job: { tenantId: string; snapshotId: string; consentId: string; distributor: string }): Promise<boolean>;
   candidateSink?: CandidateSink;
   /** API and worker normally construct the same PostgreSQL repository. Injectable for tests. */
   recoveryRepository?: DistroKidRecoveryRepository;
@@ -298,8 +298,8 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
   const enq = enqueuers(queues);
   const directFlags = readDirectReaderFlags(opts.env);
   const shutdownController = new AbortController();
-  const assertConsentActive = async (job: { tenantId: string; snapshotId: string; consentId?: string; artistWorkspaceId?: string; distributor: string }): Promise<void> => {
-    if (!job.consentId || !job.artistWorkspaceId || !opts.consentActive) {
+  const assertConsentActive = async (job: { tenantId: string; snapshotId: string; consentId?: string; distributor: string }): Promise<void> => {
+    if (!job.consentId || !opts.consentActive) {
       if (isProductionEnvironment(opts.env)) throw new Error('production pipeline job is missing its durable consent binding');
       return;
     }
@@ -307,7 +307,6 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
       tenantId: job.tenantId,
       snapshotId: job.snapshotId,
       consentId: job.consentId,
-      artistWorkspaceId: job.artistWorkspaceId,
       distributor: job.distributor,
     }))) {
       const err = new Error('catalogue-read consent was revoked or expired');

@@ -4,7 +4,7 @@ import { UserScopedSearchStore, type SearchPrincipal } from './tenant-scoped-sea
 
 const principal = (sub: string): SearchPrincipal => ({ sub, roles: ['user'], authenticated: true });
 const input = (artist: string) => ({ artist, distributor: 'distrokid' as const });
-const result = () => ({ tracks: [], warnings: [], summary: { tracks: 0, live: 0, notLive: 0, wrongProfile: 0, needsReview: 0 }, generatedAt: new Date().toISOString() });
+const result = () => ({ artist: 'Alice KE', stores: [], profiles: [], tracks: [], warnings: [], note: '', summary: { tracks: 0, live: 0, notLive: 0, wrongProfile: 0, needsReview: 0 }, generatedAt: new Date().toISOString() });
 
 describe('UserScopedSearchStore isolates by keycloak sub', () => {
   it('a user sees only their own records; another user gets null and an empty list', async () => {

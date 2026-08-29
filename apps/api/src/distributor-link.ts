@@ -73,7 +73,7 @@ export class DistributorLinkService {
     await this.repo.close();
   }
 
-  async grantConsent(ctx: TenantContext, input: { artistWorkspaceId: string; distributor: string; scope?: string; ttlMinutes?: number; provider?: 'steel'; actorUserId?: string }): Promise<LinkConsent> {
+  async grantConsent(ctx: TenantContext, input: { distributor: string; scope?: string; ttlMinutes?: number; provider?: 'steel'; actorUserId?: string }): Promise<LinkConsent> {
     const requestedTtl = Number.isFinite(input.ttlMinutes) && (input.ttlMinutes ?? 0) > 0
       ? Math.ceil(input.ttlMinutes!)
       : undefined;
@@ -91,7 +91,6 @@ export class DistributorLinkService {
     const rec: LinkConsent = {
       id: id('consent'),
       tenantId: ctx.tenantId,
-      artistWorkspaceId: input.artistWorkspaceId,
       grantedByUserId: actorUserId,
       grantedAt: new Date().toISOString(),
       purpose: CONSENT_PURPOSE,
@@ -104,7 +103,7 @@ export class DistributorLinkService {
       revokedAt: null,
     };
     await this.repo.consents.put(ctx, rec);
-    await this.audit.log({ tenantId: ctx.tenantId, workspaceId: input.artistWorkspaceId, actorUserId, action: 'consent.granted', targetType: 'ConsentGrant', targetId: rec.id, metadata: { scope: rec.scope, distributor: input.distributor, disclosureVersion: rec.disclosureVersion, retentionDays: rec.retentionDays } });
+    await this.audit.log({ tenantId: ctx.tenantId, actorUserId, action: 'consent.granted', targetType: 'ConsentGrant', targetId: rec.id, metadata: { scope: rec.scope, distributor: input.distributor, disclosureVersion: rec.disclosureVersion, retentionDays: rec.retentionDays } });
     return rec;
   }
 
@@ -120,7 +119,7 @@ export class DistributorLinkService {
     const write = await this.repo.revokeConsentAndCreateIntent(ctx, consentId, new Date().toISOString(), actor);
     if (!write) return null;
     try {
-      await this.audit.log({ tenantId: ctx.tenantId, workspaceId: write.consent.artistWorkspaceId, actorUserId: actor.actorUserId, action: 'consent.revoked', targetType: 'ConsentGrant', targetId: consentId, metadata: { cleanupIntentId: write.intent.id, tenantAdminOverride: actor.allowTenantAdmin && write.consent.grantedByUserId !== actor.actorUserId } });
+      await this.audit.log({ tenantId: ctx.tenantId, actorUserId: actor.actorUserId, action: 'consent.revoked', targetType: 'ConsentGrant', targetId: consentId, metadata: { cleanupIntentId: write.intent.id, tenantAdminOverride: actor.allowTenantAdmin && write.consent.grantedByUserId !== actor.actorUserId } });
     } catch (err) {
       // Revocation is a safety control. Once durable consent is revoked, an audit sink outage
       // must not prevent the caller from continuing to terminate the live Steel session.
@@ -223,7 +222,7 @@ export class DistributorLinkService {
   async assertReadConsent(
     ctx: TenantContext,
     consentId: string,
-    expected: { artistWorkspaceId?: string; distributor: string; provider: string; actorUserId: string; minimumRemainingMs?: number },
+    expected: { distributor: string; provider: string; actorUserId: string; minimumRemainingMs?: number },
   ): Promise<LinkConsent> {
     const c = await this.repo.consents.get(ctx, consentId);
     const minimumExpiry = Date.now() + Math.max(0, expected.minimumRemainingMs ?? 0);
@@ -232,10 +231,10 @@ export class DistributorLinkService {
       && c.disclosureVersion === CONSENT_DISCLOSURE_VERSION
       && c.retentionDays === CONSENT_RETENTION_DAYS,
     );
+    // Per-user isolation: the grant is bound to the exact granting subject. There is no workspace.
     const valid = Boolean(
       c && !c.revokedAt && new Date(c.expiresAt).getTime() >= minimumExpiry &&
       c.scope === 'distributor:read-catalog' &&
-      (!expected.artistWorkspaceId || c.artistWorkspaceId === expected.artistWorkspaceId) &&
       c.distributor === expected.distributor && c.provider === expected.provider &&
       c.grantedByUserId === expected.actorUserId && proofValid,
     );
