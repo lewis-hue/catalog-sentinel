@@ -787,7 +787,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       action: 'catalog.search.lyrics-check.triggered',
       targetType: 'CatalogSearch',
       targetId: id,
-      metadata: { mode: 'on_demand_lyrics_verification', source: 'lrclib' },
+      metadata: { mode: 'on_demand_lyrics_verification', source: 'serper' },
     });
     reply.status(202);
     return { id, operation: 'LYRICS_CHECK', lyricsScan: queued };

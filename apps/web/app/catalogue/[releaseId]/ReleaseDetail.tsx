@@ -180,14 +180,14 @@ export function ReleaseDetail() {
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="k" style={{ color: 'var(--mist)', fontFamily: 'var(--font-mono)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 4 }}>Missing lyrics</div>
-        <p className="page-sub" style={{ marginTop: 0, marginBottom: 12 }}>Plain and time-synced (LRC) lyrics on DistroKid, reconciled against the stores via LRCLIB. <strong>Missing on stores</strong> means DistroKid has the lyrics but they haven&apos;t propagated; <strong>Not on DistroKid</strong> means the stores show lyrics your release doesn&apos;t.</p>
+        <p className="page-sub" style={{ marginTop: 0, marginBottom: 12 }}>Plain and time-synced (LRC) lyrics on DistroKid, reconciled against what the stores actually show. <strong>Missing on stores</strong> means DistroKid has the lyrics but they haven&apos;t propagated; <strong>Not on DistroKid</strong> means the stores show lyrics your release doesn&apos;t.</p>
         <LyricsCheckBar check={lyrics} coverage={computeLyricsCoverage(release.tracks)} compact />
         {lyrics.error && (
           <div className="notice-banner" style={{ background: 'var(--wrong-tint)', borderColor: 'var(--wrong-edge)', color: 'var(--wrong)', marginBottom: 12 }}>{lyrics.error}</div>
         )}
         <div style={{ overflowX: 'auto' }}>
           <table>
-            <thead><tr><th style={{ width: 44 }}>#</th><th>Title</th><th style={{ width: 100 }}>DK plain</th><th style={{ width: 100 }}>DK synced</th><th style={{ width: 190 }}>Stores (LRCLIB)</th><th style={{ width: 150 }}>Reconciliation</th></tr></thead>
+            <thead><tr><th style={{ width: 44 }}>#</th><th>Title</th><th style={{ width: 100 }}>DK plain</th><th style={{ width: 100 }}>DK synced</th><th style={{ width: 190 }}>Stores</th><th style={{ width: 150 }}>Reconciliation</th></tr></thead>
             <tbody>
               {release.tracks.map((t, i) => (
                 <tr key={i}>

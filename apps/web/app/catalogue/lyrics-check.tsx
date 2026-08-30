@@ -197,7 +197,7 @@ export function LyricsCheckBar({ check, coverage, compact = false }: { check: Ly
       if (cov.unverifiable) parts.push(`${cov.unverifiable} not verified`);
       return `${cov.total} track${cov.total === 1 ? '' : 's'} reconciled, ${parts.join(' · ')}.`;
     }
-    return 'Store-side lyric availability has not been checked yet. Run a check (LRCLIB) to compare against your DistroKid lyrics.';
+    return 'Store-side lyric availability has not been checked yet. Run a check to compare against your DistroKid lyrics.';
   })();
 
   const tone = status === 'error'
