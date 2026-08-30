@@ -12,10 +12,18 @@ interface Account {
   roles: string[];
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 20, padding: '11px 0', borderBottom: '1px solid var(--line-soft)' }}>
+      <span style={{ color: 'var(--mist)', fontSize: 13 }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 500, textAlign: 'right', wordBreak: 'break-word' }}>{children}</span>
+    </div>
+  );
+}
+
 /**
- * Profile / account settings. Reads the caller's own identity, links out to the Keycloak account
- * console for edits (name, email, password, 2FA), and offers a confirmed, irreversible full delete
- * (all data + login) via DELETE /api/account.
+ * Profile / account settings: identity overview, a link to the Keycloak account console for edits,
+ * and a confirmed, irreversible full-delete danger zone (all data + login) via DELETE /api/account.
  */
 export function ProfileClient({ accountConsoleUrl }: { accountConsoleUrl: string }) {
   const [account, setAccount] = useState<Account | null>(null);
@@ -48,7 +56,6 @@ export function ProfileClient({ accountConsoleUrl }: { accountConsoleUrl: string
     try {
       const res = await apiFetch('/api/account', { method: 'DELETE' });
       if (!res.ok) throw new Error(await apiErrorMessage(res, 'Could not delete your account.'));
-      // Data + login are gone; end the browser session.
       window.location.assign('/auth/logout');
     } catch (e) {
       setDeleteError(e instanceof Error ? e.message : 'Could not delete your account.');
@@ -56,70 +63,89 @@ export function ProfileClient({ accountConsoleUrl }: { accountConsoleUrl: string
     }
   }, []);
 
-  if (loading) return <div className="card"><span className="status unk">Loading your account…</span></div>;
-  if (error) return <div className="card"><span className="status wrong">{error}</span></div>;
-  if (!account) return null;
-
-  const name = account.username ?? account.email ?? 'Your account';
-  const initial = name.trim().charAt(0).toUpperCase() || '?';
-
   return (
-    <div style={{ display: 'grid', gap: 16, maxWidth: 640 }}>
-      <div>
-        <h1 className="page-title" style={{ marginBottom: 4 }}>Profile</h1>
-        <p className="page-sub" style={{ marginTop: 0 }}>Your identity and account settings.</p>
-      </div>
+    <div style={{ maxWidth: 600 }}>
+      <h1 className="page-title">Profile</h1>
+      <p className="page-sub">Manage your identity and account.</p>
 
-      <div className="card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-          <span className="avatar" style={{ width: 44, height: 44, fontSize: 18 }}>{initial}</span>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 18 }}>{name}</div>
-            {account.identityProvider ? <span className="status unk">Signed in with {account.identityProvider}</span> : null}
+      {loading ? (
+        <div className="card"><span className="status unk">Loading your account…</span></div>
+      ) : error ? (
+        <div className="card"><span className="status wrong">{error}</span></div>
+      ) : account ? (
+        <>
+          <div className="card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <span
+                aria-hidden
+                style={{ width: 54, height: 54, borderRadius: 14, background: 'var(--brand-tint)', color: 'var(--brand-dim)', display: 'grid', placeItems: 'center', fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-display)', flexShrink: 0 }}
+              >
+                {(account.username ?? account.email ?? '?').trim().charAt(0).toUpperCase() || '?'}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1.15 }}>
+                  {account.username ?? account.email ?? 'Your account'}
+                </div>
+                {account.identityProvider ? (
+                  <div style={{ color: 'var(--mist)', fontSize: 13, marginTop: 4 }}>Signed in with {account.identityProvider}</div>
+                ) : null}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20, borderTop: '1px solid var(--line)', paddingTop: 4 }}>
+              <Field label="Email">
+                {account.email ?? 'not provided'}
+                {account.email ? (
+                  <span
+                    className={`status ${account.emailVerified ? 'live' : 'gap'}`}
+                    style={{ marginLeft: 8, fontSize: 11, padding: '1px 8px' }}
+                  >
+                    {account.emailVerified ? 'verified' : 'unverified'}
+                  </span>
+                ) : null}
+              </Field>
+              <Field label="Username">{account.username ?? 'not set'}</Field>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <a className="btn" href={accountConsoleUrl} target="_blank" rel="noreferrer">Manage account &amp; security</a>
+              <p style={{ color: 'var(--mist-2)', fontSize: 12.5, margin: '9px 0 0' }}>
+                Update your name, email, password, and two-factor authentication.
+              </p>
+            </div>
           </div>
-        </div>
-        <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '8px 16px', margin: 0 }}>
-          <dt style={{ color: 'var(--mist)' }}>Email</dt>
-          <dd style={{ margin: 0 }}>{account.email ?? 'not provided'}{account.email ? (account.emailVerified ? ' (verified)' : ' (unverified)') : ''}</dd>
-          <dt style={{ color: 'var(--mist)' }}>Username</dt>
-          <dd style={{ margin: 0 }}>{account.username ?? 'not set'}</dd>
-          <dt style={{ color: 'var(--mist)' }}>Account ID</dt>
-          <dd className="mono" style={{ margin: 0, fontSize: 12, wordBreak: 'break-all' }}>{account.subject}</dd>
-          <dt style={{ color: 'var(--mist)' }}>Access</dt>
-          <dd style={{ margin: 0 }}>{account.roles.join(', ') || 'user'}</dd>
-        </dl>
-        <div style={{ marginTop: 16 }}>
-          <a className="btn" href={accountConsoleUrl} target="_blank" rel="noreferrer">Edit details, password &amp; 2FA</a>
-        </div>
-      </div>
 
-      <div className="card" style={{ borderColor: 'var(--wrong-edge)' }}>
-        <div className="k" style={{ color: 'var(--wrong)', fontFamily: 'var(--font-mono)', fontSize: 11.5, textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 4 }}>Danger zone</div>
-        <p className="page-sub" style={{ marginTop: 0 }}>
-          Deleting your account permanently erases your catalogue, scans, store checks, and distributor connections, and removes your login. This cannot be undone.
-        </p>
-        <p style={{ marginBottom: 8 }}>Type <strong>DELETE</strong> to confirm.</p>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input
-            value={confirmText}
-            onChange={(e) => setConfirmText(e.target.value)}
-            placeholder="DELETE"
-            aria-label="Type DELETE to confirm"
-            style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--mist)', background: 'transparent', color: 'inherit', maxWidth: 160 }}
-          />
-          <button
-            className="btn"
-            style={{ background: 'var(--wrong)', borderColor: 'var(--wrong)', color: '#fff' }}
-            disabled={confirmText !== 'DELETE' || deleting}
-            onClick={deleteAccount}
-          >
-            {deleting ? 'Deleting…' : 'Delete my account'}
-          </button>
-        </div>
-        {deleteError ? (
-          <div className="notice-banner" style={{ background: 'var(--wrong-tint)', borderColor: 'var(--wrong-edge)', color: 'var(--wrong)', marginTop: 10 }}>{deleteError}</div>
-        ) : null}
-      </div>
+          <div className="card" style={{ borderColor: 'var(--wrong-edge)', background: 'var(--wrong-tint)' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--wrong)', marginBottom: 6 }}>Delete account</div>
+            <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--paper)', maxWidth: '58ch' }}>
+              This permanently erases your catalogue, scans, store checks, and distributor connections, and removes your login. It cannot be undone.
+            </p>
+            <label style={{ display: 'block', fontSize: 12.5, color: 'var(--mist)', marginBottom: 6 }}>
+              Type <strong style={{ color: 'var(--paper)' }}>DELETE</strong> to confirm
+            </label>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder="DELETE"
+                aria-label="Type DELETE to confirm"
+                style={{ padding: '9px 12px', borderRadius: 9, border: '1px solid var(--wrong-edge)', background: 'var(--panel)', color: 'var(--paper)', maxWidth: 150, fontSize: 14 }}
+              />
+              <button
+                className="btn"
+                style={{ background: confirmText === 'DELETE' && !deleting ? 'var(--wrong)' : 'var(--wrong-edge)', borderColor: 'var(--wrong)', color: '#fff', opacity: confirmText === 'DELETE' && !deleting ? 1 : 0.7 }}
+                disabled={confirmText !== 'DELETE' || deleting}
+                onClick={deleteAccount}
+              >
+                {deleting ? 'Deleting…' : 'Delete my account'}
+              </button>
+            </div>
+            {deleteError ? (
+              <div className="notice-banner" style={{ background: 'var(--panel)', borderColor: 'var(--wrong-edge)', color: 'var(--wrong)', marginTop: 12 }}>{deleteError}</div>
+            ) : null}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
