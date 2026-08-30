@@ -22,10 +22,87 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /**
- * Profile / account settings: identity overview, a link to the Keycloak account console for edits,
- * and a confirmed, irreversible full-delete danger zone (all data + login) via DELETE /api/account.
+ * Username is the only self-editable identity field. Email is read-only: it is the federated identity
+ * anchor and changing it would break sign-in. Save calls PATCH /api/account; the server validates and
+ * writes to Keycloak, and surfaces a taken (409) or invalid (400) username inline.
  */
-export function ProfileClient({ accountConsoleUrl }: { accountConsoleUrl: string }) {
+function UsernameRow({ value, onSaved }: { value: string | null; onSaved: (username: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const begin = () => { setDraft(value ?? ''); setError(''); setEditing(true); };
+  const cancel = () => { setEditing(false); setError(''); };
+
+  const trimmed = draft.trim();
+  const canSave = !saving && trimmed.length >= 3 && trimmed.length <= 255 && trimmed !== (value ?? '');
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const res = await apiFetch('/api/account', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: trimmed }),
+      });
+      if (!res.ok) throw new Error(await apiErrorMessage(res, 'Could not update your username.'));
+      const data = (await res.json()) as { username: string };
+      onSaved(data.username);
+      setEditing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update your username.');
+    } finally {
+      setSaving(false);
+    }
+  }, [trimmed, value, onSaved]);
+
+  if (!editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 20, padding: '11px 0', borderBottom: '1px solid var(--line-soft)' }}>
+        <span style={{ color: 'var(--mist)', fontSize: 13 }}>Username</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 14, fontWeight: 500, wordBreak: 'break-word' }}>{value ?? 'not set'}</span>
+          <button className="btn ghost" style={{ padding: '4px 12px', fontSize: 12.5 }} onClick={begin}>Edit</button>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '12px 0', borderBottom: '1px solid var(--line-soft)' }}>
+      <label htmlFor="username-input" style={{ display: 'block', color: 'var(--mist)', fontSize: 13, marginBottom: 7 }}>Username</label>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          id="username-input"
+          value={draft}
+          autoFocus
+          maxLength={255}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && canSave) save(); if (e.key === 'Escape') cancel(); }}
+          style={{ flex: 1, minWidth: 180, padding: '9px 12px', borderRadius: 9, border: '1px solid var(--line)', background: 'var(--panel)', color: 'var(--paper)', fontSize: 14 }}
+        />
+        <button className="btn" disabled={!canSave} style={{ opacity: canSave ? 1 : 0.6 }} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button className="btn ghost" disabled={saving} onClick={cancel}>Cancel</button>
+      </div>
+      <p style={{ color: 'var(--mist-2)', fontSize: 12, margin: '8px 0 0' }}>
+        3 to 255 characters. Letters, numbers, and . _ - Takes effect across the app the next time you sign in.
+      </p>
+      {error ? (
+        <div className="notice-banner" style={{ background: 'var(--panel)', borderColor: 'var(--wrong-edge)', color: 'var(--wrong)', marginTop: 10 }}>{error}</div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Profile / account settings: identity overview, in-app username editing (email read-only), and a
+ * confirmed, irreversible full-delete danger zone (all data + login) via DELETE /api/account.
+ */
+export function ProfileClient() {
   const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -104,15 +181,14 @@ export function ProfileClient({ accountConsoleUrl }: { accountConsoleUrl: string
                   </span>
                 ) : null}
               </Field>
-              <Field label="Username">{account.username ?? 'not set'}</Field>
+              <UsernameRow value={account.username} onSaved={(username) => setAccount((a) => (a ? { ...a, username } : a))} />
             </div>
 
-            <div style={{ marginTop: 20 }}>
-              <a className="btn" href={accountConsoleUrl} target="_blank" rel="noreferrer">Manage account &amp; security</a>
-              <p style={{ color: 'var(--mist-2)', fontSize: 12.5, margin: '9px 0 0' }}>
-                Update your name, email, password, and two-factor authentication.
+            {account.identityProvider ? (
+              <p style={{ color: 'var(--mist-2)', fontSize: 12.5, margin: '16px 0 0' }}>
+                Your email, password, and two-factor authentication are managed in your {account.identityProvider} account.
               </p>
-            </div>
+            ) : null}
           </div>
 
           <div className="card" style={{ borderColor: 'var(--wrong-edge)', background: 'var(--wrong-tint)' }}>

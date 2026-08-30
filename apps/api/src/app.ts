@@ -42,7 +42,15 @@ import {
 } from './distributor-connect';
 import { ScanCandidateStore } from './endpoint-candidates';
 import { registerAuth, requireAuth, requireRole } from './auth';
-import { deleteKeycloakUser, purgeUserData, type SqlPool } from './account-deletion';
+import {
+  deleteKeycloakUser,
+  fetchKeycloakUsername,
+  purgeUserData,
+  updateKeycloakUsername,
+  UsernameConflictError,
+  UsernameInvalidError,
+  type SqlPool,
+} from './account-deletion';
 import {
   hasCustomerScanAccess,
   InvalidSearchHistoryPageError,
@@ -698,17 +706,45 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   // The caller's own account: identity claims from the verified token (never trusted from the client).
-  // Powers the Profile page; editing name/email/password/2FA is delegated to the Keycloak account console.
+  // Powers the Profile page. The username is read fresh from Keycloak so an in-app edit shows
+  // immediately (the caller's JWT keeps the old username until they sign in again); everything else
+  // comes from the verified token. Falls back to the token claim if the admin API is unavailable.
   app.get('/api/account', { preHandler: [requireAuth()] }, async (req, reply) => {
     if (!req.auth?.authenticated) return reply.status(401).send({ error: 'authentication required' });
+    const fresh = req.auth.sub ? await fetchKeycloakUsername(process.env, req.auth.sub) : null;
     return {
       subject: req.auth.sub,
-      username: req.auth.username ?? null,
+      username: fresh ?? req.auth.username ?? null,
       email: req.auth.email ?? null,
       emailVerified: req.auth.emailVerified,
       identityProvider: req.auth.identityProvider ?? null,
       roles: req.auth.roles,
     };
+  });
+
+  // Edit the caller's own username (the only self-editable identity field; email is read-only because
+  // it is the federated identity anchor). Validated here, then written to Keycloak; a taken username
+  // is a 409, a rejected one a 400. Requires the realm's editUsernameAllowed (kept true by keycloak-init).
+  app.patch('/api/account', { preHandler: [requireRole('user')] }, async (req, reply) => {
+    const userId = req.auth?.sub;
+    if (!userId) return reply.status(401).send({ error: 'authentication required' });
+    const body = (req.body ?? {}) as { username?: unknown };
+    const username = typeof body.username === 'string' ? body.username.trim() : '';
+    if (username.length < 3 || username.length > 255) {
+      return reply.status(400).send({ error: 'Username must be between 3 and 255 characters.' });
+    }
+    try {
+      await updateKeycloakUsername(process.env, userId, username);
+      void audit.log({ tenantId: userId, actorUserId: userId, action: 'account.username_updated', targetType: 'Account', targetId: userId, metadata: {} });
+      return { username };
+    } catch (error) {
+      if (error instanceof UsernameConflictError) return reply.status(409).send({ error: 'That username is already taken.' });
+      if (error instanceof UsernameInvalidError) {
+        return reply.status(400).send({ error: 'That username is not allowed. Use letters, numbers, and . _ - only.' });
+      }
+      app.log.error({ errorType: error instanceof Error ? error.name : 'Error' }, 'account username update failed');
+      return reply.status(502).send({ error: 'Could not update your username. Please try again.' });
+    }
   });
 
   // Full account deletion: erase all of the caller's data, then remove their Keycloak login.
