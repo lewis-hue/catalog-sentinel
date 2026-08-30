@@ -19,9 +19,9 @@ export type SearchBackend = (query: string) => Promise<SearchResult[]>;
 /** How many `site:` domains to pack into one grouped `OR` query. Kept conservative: well under
  *  Google's ~32-word cap, and small enough that a long `OR` chain doesn't crowd out per-domain
  *  results. ~18 site-searchable platforms → 3 grouped queries + 1 broad = 4 requests/song (was 19). */
-const SITE_GROUP_SIZE = 6;
+export const SITE_GROUP_SIZE = 6;
 
-function chunk<T>(items: T[], size: number): T[][] {
+export function chunk<T>(items: T[], size: number): T[][] {
   const groups: T[][] = [];
   for (let i = 0; i < items.length; i += size) groups.push(items.slice(i, i + size));
   return groups;
@@ -148,7 +148,7 @@ export class WebSearchStore implements StoreCatalogProvider, TitleSearchProvider
 interface PageMeta { ogTitle: string; ogDescription: string; pageTitle: string; ld: string }
 
 /** Strict match: the haystack must contain the exact title AND every artist token. */
-function verifyText(hay: string, title: string, artist: string): boolean {
+export function verifyText(hay: string, title: string, artist: string): boolean {
   const h = normalizeTitle(hay);
   const wantTitle = normalizeTitle(title);
   if (!wantTitle || !h.includes(wantTitle)) return false;
