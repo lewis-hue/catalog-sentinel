@@ -1,0 +1,41 @@
+# Production overlay for the AWS single-instance demo deploy.
+#
+# Adds a Caddy reverse proxy that terminates HTTPS (automatic Let's Encrypt) for two hostnames and
+# routes them into the existing compose network:
+#   ${APP_HOST}  -> web:3000       (the Next.js app + BFF)
+#   ${AUTH_HOST} -> keycloak:8080  (Keycloak)
+#
+# Everything else (Postgres, Redis, Keycloak, the API/scanner, the worker, keycloak-init) comes from
+# docker-compose.yml unchanged; only the public URLs differ, and those are supplied by the instance
+# .env (APP_HOST, AUTH_HOST, KC_HOSTNAME, KEYCLOAK_ISSUER, KEYCLOAK_PUBLIC_BASE_URL, APP_BASE_URL,
+# WEB_REDIRECT_URIS, WEB_POST_LOGOUT_REDIRECT_URIS).
+#
+# Usage on the instance:
+#   docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      APP_HOST: ${APP_HOST:?Set APP_HOST}
+      AUTH_HOST: ${AUTH_HOST:?Set AUTH_HOST}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - keycloak
+
+  keycloak:
+    # Keycloak sits behind Caddy, which terminates TLS. Trust the forwarded proto/host headers so the
+    # issuer and redirect URLs Keycloak mints are https://${AUTH_HOST}, not the internal http origin.
+    environment:
+      KC_PROXY_HEADERS: xforwarded
+
+volumes:
+  caddy_data:
+  caddy_config:

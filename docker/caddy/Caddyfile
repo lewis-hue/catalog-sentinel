@@ -1,0 +1,11 @@
+# Automatic HTTPS (Let's Encrypt) for the two demo hostnames. Caddy obtains and renews certs on its
+# own as long as ports 80/443 are reachable and the hostnames resolve to this instance (sslip.io maps
+# <ip>.sslip.io to the Elastic IP). Hostnames are injected from the environment.
+
+{$APP_HOST} {
+	reverse_proxy web:3000
+}
+
+{$AUTH_HOST} {
+	reverse_proxy keycloak:8080
+}
