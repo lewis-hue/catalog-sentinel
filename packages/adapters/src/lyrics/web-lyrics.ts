@@ -87,9 +87,12 @@ export class WebLyricsResolver {
     const followUp = this.opts.followUpMisses === false ? [] : this.platforms.filter((p) => p.followUp !== false);
     // ONE broad lyrics query (also surfaces the LyricFind page + most stores' lyric snippets) plus a
     // few grouped `site:` follow-ups for lyric-capable stores. 1 + ceil(N / SITE_GROUP_SIZE) requests.
-    const queries = [`"${artist}" "${title}" lyrics`];
+    // Deliberately UNQUOTED: double-quoting artist AND title returns zero Google/Serper results for
+    // many songs, whereas the plain `<artist> <title> lyrics` form recalls them. Precision is not lost:
+    // every result is still domain-matched AND verifyText-checked (exact title + all artist tokens).
+    const queries = [`${artist} ${title} lyrics`];
     for (const group of chunk(followUp, SITE_GROUP_SIZE)) {
-      queries.push(`"${title}" ${artist} lyrics (${group.map((p) => `site:${p.domains[0]}`).join(' OR ')})`);
+      queries.push(`${artist} ${title} lyrics (${group.map((p) => `site:${p.domains[0]}`).join(' OR ')})`);
     }
     const resultSets = await Promise.all(queries.map((q) => this.search(q)));
 

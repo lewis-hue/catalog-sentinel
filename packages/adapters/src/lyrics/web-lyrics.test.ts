@@ -42,7 +42,7 @@ describe('snippetShowsLyrics', () => {
 
 describe('WebLyricsResolver', () => {
   it('proves per-store lyric display from the broad query', async () => {
-    const { search } = backend({ '"Lewis KE" "Icy Love" lyrics': [appleLyricResult] });
+    const { search } = backend({ 'Lewis KE Icy Love lyrics': [appleLyricResult] });
     const ev = await new WebLyricsResolver(search).resolve(ARTIST, TITLE);
     expect(ev.shownStores.has('Apple Music')).toBe(true);
     expect(ev.shownStores.has('Deezer')).toBe(false);
@@ -54,7 +54,7 @@ describe('WebLyricsResolver', () => {
       title: 'Lewis KE - Icy Love Lyrics | LyricFind',
       description: 'Icy Love lyrics by Lewis KE. Yeah yeah You cured me with your love.',
     };
-    const { search } = backend({ '"Lewis KE" "Icy Love" lyrics': [appleLyricResult, lyricfind] });
+    const { search } = backend({ 'Lewis KE Icy Love lyrics': [appleLyricResult, lyricfind] });
     const ev = await new WebLyricsResolver(search).resolve(ARTIST, TITLE);
     expect(ev.lyricfindDistributed).toBe(true);
     expect(ev.lyricfindUrl).toBe(lyricfind.url);
@@ -81,7 +81,7 @@ describe('WebLyricsResolver', () => {
   });
 
   it('caches per song (no repeat queries)', async () => {
-    const { search, calls } = backend({ '"Lewis KE" "Icy Love" lyrics': [appleLyricResult] });
+    const { search, calls } = backend({ 'Lewis KE Icy Love lyrics': [appleLyricResult] });
     const resolver = new WebLyricsResolver(search);
     await resolver.resolve(ARTIST, TITLE);
     const first = calls.length;
@@ -91,7 +91,7 @@ describe('WebLyricsResolver', () => {
 
   it('respects a custom lyric-capable platform list', async () => {
     const only: LyricCapablePlatform[] = [{ store: 'Apple Music', domains: ['music.apple.com'] }];
-    const { search } = backend({ '"Lewis KE" "Icy Love" lyrics': [appleLyricResult] });
+    const { search } = backend({ 'Lewis KE Icy Love lyrics': [appleLyricResult] });
     const ev = await new WebLyricsResolver(search, only).resolve(ARTIST, TITLE);
     expect([...ev.shownStores]).toEqual(['Apple Music']);
   });
