@@ -196,6 +196,7 @@ services:
       ENABLE_DISTROKID_DIRECT_JSON_READER: ${ENABLE_DISTROKID_DIRECT_JSON_READER:-false}
       LEGAL_REVIEW_DISTROKID_DIRECT_JSON_APPROVED: ${LEGAL_REVIEW_DISTROKID_DIRECT_JSON_APPROVED:-false}
       DISTROKID_REQUEST_MIN_DELAY_MS: ${DISTROKID_REQUEST_MIN_DELAY_MS:-750}
+      DISTROKID_RELEASE_CHUNK_SIZE: ${DISTROKID_RELEASE_CHUNK_SIZE:-}
       # Raw network debug artifacts: OFF by default; TTL'd + sample-capped + redacted when on.
       ENABLE_DISTRIBUTOR_NETWORK_DEBUG: ${ENABLE_DISTRIBUTOR_NETWORK_DEBUG:-false}
       DISTRIBUTOR_NETWORK_DEBUG_TTL_MINUTES: ${DISTRIBUTOR_NETWORK_DEBUG_TTL_MINUTES:-30}
@@ -316,6 +317,11 @@ services:
       CATALOG_READ_CONTENT_TIMEOUT_MS: ${CATALOG_READ_CONTENT_TIMEOUT_MS:-30000}
       CATALOG_READ_GOTO_TIMEOUT_MS: ${CATALOG_READ_GOTO_TIMEOUT_MS:-30000}
       DISTROKID_RELEASE_CONCURRENCY: ${DISTROKID_RELEASE_CONCURRENCY:-4}
+      # Release-chunk size (page pool recycles at each chunk boundary) + per-release pacing delay.
+      # Env-tunable so a deploy behind higher CDP latency can use smaller chunks + slower pacing to
+      # stay under DistroKid's long-session throttle. Blank -> code defaults (20 / 750ms).
+      DISTROKID_RELEASE_CHUNK_SIZE: ${DISTROKID_RELEASE_CHUNK_SIZE:-}
+      DISTROKID_REQUEST_MIN_DELAY_MS: ${DISTROKID_REQUEST_MIN_DELAY_MS:-}
       # Dedicated sequential lyric pass (reads DistroKid's lazy-rendered plain/synced lyric state per
       # album, after the fast metadata scrape). Best-effort + deadline-aware. Unset to disable.
       DISTROKID_LYRIC_PASS: ${DISTROKID_LYRIC_PASS:-}
