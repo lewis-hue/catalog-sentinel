@@ -888,6 +888,15 @@ model DistributorTrackOutcome {
   storeLyricSource    String?
   storeLyricCheckedAt DateTime?
 
+  /// Per-store lyric DISPLAY verdict from Serper web verification, keyed by store name, e.g.
+  /// { "Apple Music": "shown", "Deezer": "not-shown" }. Only lyric-capable stores appear; a store
+  /// that is absent (or "unverifiable") renders blank. Supersedes the crowd-sourced global lookup.
+  storeLyricsPerStore  Json     @default("{}")
+  /// LyricFind (DistroKid's lyric aggregator) distribution signal for this track's song: true when a
+  /// LyricFind page confirms the lyrics were distributed to stores. Null = not yet checked.
+  lyricfindDistributed Boolean?
+  lyricfindUrl         String?
+
   /// Manual per-track status override from the store-health grid (curates the missing-songs list).
   /// NULL = no manual mark; the automated verdict stands. mark: 'missing' | 'resolved'.
   mark     String?

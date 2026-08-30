@@ -43,10 +43,17 @@ export interface CatalogueTrackRow {
   /** Distributor-side lyric availability: present | processing | none | unknown. */
   plainLyrics: string;
   syncedLyrics: string;
-  /** Store-side lyric availability (LRCLIB): found | not-found | unverifiable | unknown. */
+  /** Store-side lyric availability, derived from the per-store Serper verdict: found | not-found |
+   *  unverifiable | unknown (found = at least one store shows lyrics). */
   storeLyricStatus: string;
   storeHasPlain: boolean;
   storeHasSynced: boolean;
+  /** Per-store lyric DISPLAY verdict from Serper: { store -> 'shown' | 'not-shown' | 'unverifiable' }.
+   *  Only lyric-capable stores appear; the store-presence grid renders these per cell. */
+  storeLyricsPerStore: Record<string, string>;
+  /** LyricFind distribution signal for this track's song (true = lyrics delivered to stores). */
+  lyricfindDistributed: boolean | null;
+  lyricfindUrl: string | null;
   /** Manual per-track status override: 'missing' | 'resolved' | null (no mark). */
   mark: string | null;
   markNote: string | null;
@@ -183,11 +190,14 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
           trackNumber: number | null; trackIndex: number; featuredArtists: string[] | null;
           plainLyricsStatus: string | null; syncedLyricsStatus: string | null;
           storeLyricStatus: string | null; storeHasPlain: boolean | null; storeHasSynced: boolean | null;
+          storeLyricsPerStore: Record<string, string> | null;
+          lyricfindDistributed: boolean | null; lyricfindUrl: string | null;
           mark: string | null; markNote: string | null;
         }>(
           `SELECT "releaseOutcomeId", "title", "isrc", "isrcStatus", "trackNumber", "trackIndex", "featuredArtists",
                   "plainLyricsStatus", "syncedLyricsStatus",
-                  "storeLyricStatus", "storeHasPlain", "storeHasSynced", "mark", "markNote"
+                  "storeLyricStatus", "storeHasPlain", "storeHasSynced",
+                  "storeLyricsPerStore", "lyricfindDistributed", "lyricfindUrl", "mark", "markNote"
            FROM "DistributorTrackOutcome"
            WHERE "releaseOutcomeId" = ANY($1::text[])
            ORDER BY "trackNumber" NULLS LAST, "trackIndex"`,
@@ -204,6 +214,8 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
         plainLyrics: t.plainLyricsStatus ?? 'unknown', syncedLyrics: t.syncedLyricsStatus ?? 'unknown',
         storeLyricStatus: t.storeLyricStatus ?? 'unknown',
         storeHasPlain: t.storeHasPlain ?? false, storeHasSynced: t.storeHasSynced ?? false,
+        storeLyricsPerStore: t.storeLyricsPerStore ?? {},
+        lyricfindDistributed: t.lyricfindDistributed ?? null, lyricfindUrl: t.lyricfindUrl ?? null,
         mark: t.mark ?? null, markNote: t.markNote ?? null,
       });
       byRelease.set(t.releaseOutcomeId, list);
@@ -350,16 +362,25 @@ export class DistroKidOutcomeRepository implements OutcomeRepository {
    *  overwrite each other's column. Returns the number of rows updated. */
   async updateStoreLyrics(
     releaseOutcomeId: string,
-    updates: Array<{ trackIndex: number; status: string; hasPlain: boolean; hasSynced: boolean; source: string | null }>,
+    updates: Array<{
+      trackIndex: number;
+      /** Per-store display verdict: { store -> 'shown' | 'not-shown' | 'unverifiable' }. */
+      perStore: Record<string, string>;
+      /** Derived global status kept for the existing missing-lyrics comparison. */
+      status: string; hasPlain: boolean; hasSynced: boolean; source: string | null;
+      lyricfindDistributed: boolean; lyricfindUrl: string | null;
+    }>,
   ): Promise<number> {
     let updated = 0;
     for (const u of updates) {
       const res = await this.pool.query(
         `UPDATE "DistributorTrackOutcome"
-         SET "storeLyricStatus" = $3, "storeHasPlain" = $4, "storeHasSynced" = $5,
-             "storeLyricSource" = $6, "storeLyricCheckedAt" = NOW()
+         SET "storeLyricsPerStore" = $3::jsonb, "lyricfindDistributed" = $4, "lyricfindUrl" = $5,
+             "storeLyricStatus" = $6, "storeHasPlain" = $7, "storeHasSynced" = $8,
+             "storeLyricSource" = $9, "storeLyricCheckedAt" = NOW()
          WHERE "releaseOutcomeId" = $1 AND "trackIndex" = $2`,
-        [releaseOutcomeId, u.trackIndex, u.status, u.hasPlain, u.hasSynced, u.source],
+        [releaseOutcomeId, u.trackIndex, JSON.stringify(u.perStore), u.lyricfindDistributed, u.lyricfindUrl,
+          u.status, u.hasPlain, u.hasSynced, u.source],
       );
       updated += res.rowCount ?? 0;
     }

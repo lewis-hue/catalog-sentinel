@@ -3,8 +3,8 @@ import { LYRICS_QUEUE, lyricsJobSchema, parseJob, type LyricsJobPayload } from '
 import { runLyricsVerification, type LyricsVerificationDeps } from './lyrics-verification';
 
 /**
- * CONSUMER for the fault-isolated lyric-availability verification (LRCLIB). Runs on its own queue
- * so a lyrics-source outage cannot affect catalogue scraping or store-presence scanning. The queue
+ * CONSUMER for the fault-isolated per-store lyric verification (Serper web search). Runs on its own
+ * queue so a search-source outage cannot affect catalogue scraping or store-presence scanning. The queue
  * name + payload live in `@sentinel/contracts`; the producer in `@sentinel/queue-client`.
  */
 export { LYRICS_QUEUE, type LyricsJobPayload } from '@sentinel/contracts';
