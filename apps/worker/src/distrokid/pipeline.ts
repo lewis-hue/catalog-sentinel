@@ -449,7 +449,7 @@ export async function planDistroKidReleaseChunks(
   if (await resumeTerminalFinalizer(job, deps)) return { chunks: 0, skipped: 0, stopped: true };
   assertPipelineDeadline(job, deps);
   const index = await deps.store.getIndex(job.snapshotId);
-  const size = job.chunkSize ?? DISTROKID_RELEASE_CHUNK_SIZE;
+  const size = job.chunkSize ?? (Number(process.env.DISTROKID_RELEASE_CHUNK_SIZE) || DISTROKID_RELEASE_CHUNK_SIZE);
   const done = new Set(await deps.store.completedChunks(job.snapshotId, INITIAL_PASS));
   let chunks = await deps.store.getPassPlan(job.snapshotId, INITIAL_PASS);
   if (!chunks) {
@@ -628,7 +628,7 @@ export async function retryFailedDistroKidReleases(
     await deps.enqueue.reconcile({ ...refOf(job), pass });
     return { retried: 0 };
   }
-  const size = DISTROKID_RELEASE_CHUNK_SIZE;
+  const size = Number(process.env.DISTROKID_RELEASE_CHUNK_SIZE) || DISTROKID_RELEASE_CHUNK_SIZE;
   let plan = await deps.store.getPassPlan(job.snapshotId, pass);
   if (!plan) {
     plan = chunkReleases(ids, size);

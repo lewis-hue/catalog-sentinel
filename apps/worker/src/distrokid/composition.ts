@@ -389,6 +389,9 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
       // route handler wins) and the network discovery has nothing to mis-correlate. Bounded
       // concurrency keeps the request rate on the user's own account modest.
       const concurrency = Math.max(1, Math.min(Number(opts.env.DISTROKID_RELEASE_CONCURRENCY) || 4, 8));
+      // Per-release pacing delay. Env-overridable so a deployment behind higher CDP latency can slow
+      // the request rate on the account (helps avoid the distributor throttling a long session).
+      const paceMs = Math.max(0, Number(opts.env.DISTROKID_REQUEST_MIN_DELAY_MS) || DISTROKID_REQUEST_MIN_DELAY_MS);
       const allowedIds = new Set(refs.map((r) => r.releaseId));
       const albumCaptureDir = opts.env.DISTROKID_ALBUM_CAPTURE_DIR?.trim();
       const tabs: Array<{ page: Awaited<ReturnType<typeof conn.newPage>>; extractor: NetworkFirstExtractor }> = [];
@@ -452,7 +455,7 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
             // This is immediately before the one navigation/work item for the release.
             await control.assertCanContinue();
             await assertConsentActive(job);
-            await waitForBrowserPacing(control.signal);
+            await waitForBrowserPacing(control.signal, paceMs);
             await control.assertCanContinue();
             const outcome = await extractor.extractRelease(ref);
             // Fence stale work: lock loss/deadline during navigation cannot be checkpointed.
