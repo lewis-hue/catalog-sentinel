@@ -519,7 +519,7 @@ export function buildDistroKidComposition(opts: DistroKidCompositionOptions, ses
         return stats;
       })
       .catch((error) => {
-        log(`[distrokid] durable recovery sweep unavailable: ${error instanceof Error ? error.name : 'Error'}`);
+        log(`[distrokid] durable recovery sweep unavailable: ${error instanceof Error ? `${error.name}: ${error.message}` : 'Error'}`);
         return {
           examined: 0, indexRequeued: 0, checkpointResumed: 0, finalizersRequeued: 0,
           expiredTerminalized: 0, cancelledReleased: 0, failed: 1,

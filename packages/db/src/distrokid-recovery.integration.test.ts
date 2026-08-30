@@ -22,7 +22,9 @@ function recoveryJob(snapshotId: string, steelSessionId: string): CatalogIndexJo
     distributor: 'distrokid',
     artists: ['Recovery Artist'],
     consentId: `recovery-consent-${nonce}`,
-    artistWorkspaceId: `recovery-workspace-${nonce}`,
+    // Per-user isolation collapsed the workspace slot into the owning subject, so the durable
+    // envelope round-trips it as the userId (projected as tenantId), not a distinct workspace id.
+    artistWorkspaceId: `recovery-tenant-${nonce}`,
     steelSessionId,
     sessionExpiresAt: new Date(NOW + 60 * 60_000).toISOString(),
     deadlineAt: new Date(NOW + 45 * 60_000).toISOString(),
@@ -105,7 +107,7 @@ describe.skipIf(!DATABASE_URL)('PostgreSQL DistroKid recovery envelope', () => {
     expect(await repository.clear(first)).toBe(true);
     expect((await repository.list(500)).some((job) => job.snapshotId === snapshotId)).toBe(false);
     const cleared = await pool.query(
-      `SELECT "recoveryArtists", "recoveryConsentId", "recoveryArtistWorkspaceId",
+      `SELECT "recoveryArtists", "recoveryConsentId",
               "recoverySteelSessionIdEncrypted", "recoverySessionExpiresAt",
               "recoveryDeadlineAt", "recoverySchemaVersion"
          FROM "DistroKidSnapshotCheckpoint" WHERE "snapshotId"=$1`,
