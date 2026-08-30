@@ -1272,7 +1272,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         consentId: b.consentId,
       });
     } catch (err) {
-      app.log.warn({ errorType: err instanceof Error ? err.name : 'Error' }, 'could not start distributor login');
+      app.log.warn(
+        { errorType: err instanceof Error ? err.name : 'Error', reason: err instanceof Error ? redactErrorDetail(err.message) : 'unknown' },
+        'could not start distributor login',
+      );
       if (err instanceof InsecureConfigurationError) {
         return reply.status(503).send({
           error: 'DistroKid connection is disabled by deployment policy. Ask an administrator to verify the approved live-scan configuration.',

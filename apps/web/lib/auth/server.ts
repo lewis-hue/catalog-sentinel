@@ -325,13 +325,20 @@ export function sessionDisplayFromAccessToken(token: string): SessionDisplay | n
 
 export function mutationHasSameOrigin(request: NextRequest, appBaseUrl: string): boolean {
   const expected = new URL(appBaseUrl).origin;
+  // Sec-Fetch-Site is the most reliable same-origin signal: unlike Referer it is unaffected by this
+  // app's Referrer-Policy, and unlike Origin it is sent on same-origin form-POST navigations too. It
+  // cannot be forged by an attacker page — a cross-site-initiated request is always "cross-site" or
+  // "same-site", never "same-origin"/"none" — so trust it authoritatively when the browser sends it.
+  const fetchSite = request.headers.get('sec-fetch-site');
+  if (fetchSite) return fetchSite === 'same-origin' || fetchSite === 'none';
+  // Older clients that omit Sec-Fetch-Site: fall back to Origin, then Referer.
   const origin = request.headers.get('origin');
-  if (origin) {
+  if (origin && origin !== 'null') {
     try { return new URL(origin).origin === expected; } catch { return false; }
   }
   const referer = request.headers.get('referer');
   if (referer) {
     try { return new URL(referer).origin === expected; } catch { return false; }
   }
-  return request.headers.get('sec-fetch-site') === 'same-origin';
+  return false;
 }

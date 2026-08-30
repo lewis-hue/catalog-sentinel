@@ -2,7 +2,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const BASE_SECURITY_HEADERS = [
-  { key: 'Referrer-Policy', value: 'no-referrer' },
+  // same-origin (not no-referrer): keep the Referer on our own same-origin requests so the auth
+  // same-origin/CSRF checks have a signal to fall back on, while still never leaking it cross-origin.
+  { key: 'Referrer-Policy', value: 'same-origin' },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'X-DNS-Prefetch-Control', value: 'off' },
