@@ -70,11 +70,11 @@ describe('readKeycloakConfig', () => {
 });
 
 describe('KeycloakVerifier', () => {
-  it('retains a signed tenant candidate and extracts roles', async () => {
+  it('ignores any signed tenant claim and scopes the identity to the subject', async () => {
     const v = new KeycloakVerifier({ enabled: true, issuer: ISSUER, audience: AUDIENCE, keyInput: pub });
-    const id = await v.verify(await token({ tenant_id: 'tenant-A', realm_access: { roles: ['artist_manager', 'user'] }, preferred_username: 'lewis' }));
-    expect(id).toMatchObject({ sub: 'user-1', tenantId: 'tenant-A', username: 'lewis', authenticated: true });
-    expect(id.roles).toEqual(['artist_manager', 'user']);
+    const id = await v.verify(await token({ tenant_id: 'tenant-A', realm_access: { roles: ['user'] }, preferred_username: 'lewis' }));
+    expect(id).toMatchObject({ sub: 'user-1', tenantId: 'user-1', username: 'lewis', authenticated: true });
+    expect(id.roles).toEqual(['user']);
     expect(id.emailVerified).toBe(false);
   });
 
@@ -154,7 +154,7 @@ describe('identityFromPayload', () => {
     expect(identityFromPayload({
       sub: 'x',
       tenant_id: 'tenant-A',
-      realm_access: { roles: ['offline_access', 'artist_manager'] },
-    }).roles).toEqual(['artist_manager']);
+      realm_access: { roles: ['offline_access', 'user'] },
+    }).roles).toEqual(['user']);
   });
 });

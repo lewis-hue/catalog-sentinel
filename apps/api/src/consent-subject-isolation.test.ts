@@ -9,7 +9,9 @@ import { DistributorLinkService } from './distributor-link';
 
 const ISSUER = 'https://identity.example/realms/sentinel';
 const AUDIENCE = 'sentinel-api';
-const TENANT = 'tenant-a';
+// Per-user isolation: consent is partitioned by the granting subject, so the owner's sub IS the
+// storage partition ("tenant") key. There is no separate organization tenant.
+const OWNER = 'alice';
 type KeyPair = Awaited<ReturnType<typeof generateKeyPair>>;
 
 let privateKey: KeyPair['privateKey'];
@@ -20,8 +22,8 @@ let service: DistributorLinkService;
 let audit: InMemoryAuditLogger;
 let cancelByConsent: ReturnType<typeof vi.spyOn>;
 
-async function bearer(sub: string, roles: string[]): Promise<{ authorization: string }> {
-  const jwt = await new SignJWT({ tenant_id: TENANT, realm_access: { roles } })
+async function bearer(sub: string): Promise<{ authorization: string }> {
+  const jwt = await new SignJWT({ realm_access: { roles: ['user'] } })
     .setProtectedHeader({ alg: 'RS256' })
     .setIssuer(ISSUER)
     .setAudience(AUDIENCE)
@@ -35,9 +37,8 @@ async function bearer(sub: string, roles: string[]): Promise<{ authorization: st
 function aliceConsent(id = 'alice-consent'): LinkConsent {
   return {
     id,
-    tenantId: TENANT,
-    artistWorkspaceId: 'workspace-alice',
-    grantedByUserId: 'alice',
+    tenantId: OWNER,
+    grantedByUserId: OWNER,
     grantedAt: new Date().toISOString(),
     distributor: 'distrokid',
     scope: 'distributor:read-catalog',
@@ -57,7 +58,7 @@ beforeAll(async () => {
     repo,
     env: { NODE_ENV: 'test', BROWSER_LINK_PROVIDER: 'steel' },
   });
-  await repo.consents.put({ tenantId: TENANT }, aliceConsent());
+  await repo.consents.put({ tenantId: OWNER }, aliceConsent());
   cancelByConsent = vi.spyOn(DistributorConnect.prototype, 'cancelByConsent').mockResolvedValue(1);
   app = buildApp({
     distributorLink: service,
@@ -73,21 +74,21 @@ afterAll(async () => {
   cancelByConsent.mockRestore();
 }, 30_000);
 
-describe('same-tenant consent subject isolation', () => {
+describe('per-user consent subject isolation', () => {
   it('binds every consent assertion to the exact granting subject', async () => {
     await expect(service.assertReadConsent(
-      { tenantId: TENANT },
+      { tenantId: OWNER },
       'alice-consent',
       { distributor: 'distrokid', provider: 'steel', actorUserId: 'bob' },
     )).rejects.toThrow(/not bound/i);
     await expect(service.assertReadConsent(
-      { tenantId: TENANT },
+      { tenantId: OWNER },
       'alice-consent',
-      { distributor: 'distrokid', provider: 'steel', actorUserId: 'alice' },
-    )).resolves.toMatchObject({ grantedByUserId: 'alice', artistWorkspaceId: 'workspace-alice' });
+      { distributor: 'distrokid', provider: 'steel', actorUserId: OWNER },
+    )).resolves.toMatchObject({ grantedByUserId: OWNER });
   });
 
-  it('starts Steel with the validated consent workspace and server principal, never an artist-derived id', async () => {
+  it('starts Steel with the validated consent and server principal, never an artist-derived id', async () => {
     const assertConsent = vi.spyOn(service, 'assertReadConsent').mockResolvedValue({
       ...aliceConsent(), provider: 'steel',
     });
@@ -102,20 +103,19 @@ describe('same-tenant consent subject isolation', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/connect',
-        headers: await bearer('alice', ['artist_manager']),
+        headers: await bearer(OWNER),
         payload: { distributor: 'distrokid', artists: ['Artist Name Is Not Authority'], consentId: 'alice-consent' },
       });
       expect(response.statusCode).toBe(200);
       expect(assertConsent).toHaveBeenCalledWith(
-        { tenantId: TENANT },
+        { tenantId: OWNER },
         'alice-consent',
-        expect.objectContaining({ actorUserId: 'alice', provider: 'steel' }),
+        expect.objectContaining({ actorUserId: OWNER, provider: 'steel' }),
       );
       expect(start).toHaveBeenCalledWith('distrokid', ['Artist Name Is Not Authority'], {
-        tenantId: TENANT,
-        ownerUserId: 'alice',
+        tenantId: OWNER,
+        ownerUserId: OWNER,
         consentId: 'alice-consent',
-        artistWorkspaceId: 'workspace-alice',
       });
     } finally {
       start.mockRestore();
@@ -123,8 +123,8 @@ describe('same-tenant consent subject isolation', () => {
     }
   });
 
-  it('returns the same 404 for Bob and a missing grant without terminating Alice\'s session', async () => {
-    const bob = await bearer('bob', ['artist_manager']);
+  it('returns the same 404 for another user and a missing grant without terminating the owner\'s session', async () => {
+    const bob = await bearer('bob');
     const denied = await app.inject({ method: 'POST', url: '/api/consent/alice-consent/revoke', headers: bob });
     const missing = await app.inject({ method: 'POST', url: '/api/consent/missing-consent/revoke', headers: bob });
 
@@ -132,22 +132,22 @@ describe('same-tenant consent subject isolation', () => {
     expect(missing.statusCode).toBe(404);
     expect(denied.json()).toEqual(missing.json());
     expect(cancelByConsent).not.toHaveBeenCalled();
-    expect((await repo.consents.get({ tenantId: TENANT }, 'alice-consent'))?.revokedAt).toBeNull();
+    expect((await repo.consents.get({ tenantId: OWNER }, 'alice-consent'))?.revokedAt).toBeNull();
   });
 
-  it('allows an exact tenant admin safety revocation and audits the real actor', async () => {
+  it('lets the owner revoke their own grant and audits the real actor', async () => {
     const response = await app.inject({
       method: 'POST',
       url: '/api/consent/alice-consent/revoke',
-      headers: await bearer('tenant-admin', ['tenant_admin']),
+      headers: await bearer(OWNER),
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ revoked: true, cleanupPending: false, sessionsTerminated: 1 });
-    expect(cancelByConsent).toHaveBeenCalledWith('alice-consent', TENANT);
-    expect((await repo.consents.get({ tenantId: TENANT }, 'alice-consent'))?.revokedAt).toBeTruthy();
+    expect(cancelByConsent).toHaveBeenCalledWith('alice-consent', OWNER);
+    expect((await repo.consents.get({ tenantId: OWNER }, 'alice-consent'))?.revokedAt).toBeTruthy();
     expect(await audit.list()).toContainEqual(expect.objectContaining({
-      actorUserId: 'tenant-admin', action: 'consent.revoked', targetId: 'alice-consent',
+      actorUserId: OWNER, action: 'consent.revoked', targetId: 'alice-consent',
     }));
   });
 });

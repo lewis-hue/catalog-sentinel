@@ -2,19 +2,12 @@ import { startNodeTelemetry } from '@sentinel/core';
 import { unlink, writeFile } from 'node:fs/promises';
 import {
   validateServerConfig,
-  isProductionEnvironment,
   readDistributorLinkFlags,
   envelopeEncryptorFromEnv,
   verifyEnvelopeEncryptor,
   type EnvelopeCrypto,
 } from '@sentinel/security';
-import {
-  createDistributorLinkRepository,
-  createProductionGovernanceAdapters,
-  createProductionGovernanceRuntime,
-  ProductionGovernanceMaintenanceService,
-  type GovernanceSqlPool,
-} from '@sentinel/db';
+import { createDistributorLinkRepository } from '@sentinel/db';
 import { connectionFromUrl } from './bullmq';
 import { assertStandaloneRedisTopology, buildSearchStore } from '@sentinel/search-store';
 import { startPresenceDeepScanWorker, createPresenceProducer } from './presence-deep-scan-queue';
@@ -46,8 +39,6 @@ async function startDeepScanConsumer(
   const consumers: Array<() => Promise<void>> = [];
   const producers: Array<() => Promise<void>> = [];
   const stores: Array<() => Promise<void>> = [];
-  const productionDeployment = isProductionEnvironment(process.env);
-  let governanceHealthy = !productionDeployment;
 
   // 1) PRIMARY: multi-platform store-presence deep scan. Reads/writes the shared Redis
   //    SearchStore so the API serves results as they fill in. Concurrency 1 by default
@@ -66,74 +57,6 @@ async function startDeepScanConsumer(
     }
   }
   const store = built.store;
-
-  if (productionDeployment) {
-    // Governance is a required production worker capability, not an optional cron sidecar.
-    // Startup verifies PostgreSQL, KMS/HSM-backed signing and pseudonymization, Object Lock,
-    // every queue, Steel, Keycloak, observability erasure, Secrets Manager, and backup vaults.
-    const governanceRuntime = createProductionGovernanceRuntime(process.env);
-    let governanceAdapters: ReturnType<typeof createProductionGovernanceAdapters> | null = null;
-    try {
-      await governanceRuntime.verifyReady();
-      governanceAdapters = createProductionGovernanceAdapters(
-        governanceRuntime.pool as unknown as GovernanceSqlPool,
-        governanceRuntime.pseudonymizer,
-        process.env,
-        { envelope: envelopeEncryptor, auditReceiptSigner: governanceRuntime.auditSigner },
-      );
-      await governanceAdapters.verifyReady();
-    } catch (error) {
-      await governanceAdapters?.close().catch(() => undefined);
-      await governanceRuntime.close().catch(() => undefined);
-      await built.close().catch(() => undefined);
-      throw error;
-    }
-    const governance = new ProductionGovernanceMaintenanceService(
-      governanceRuntime.retention,
-      governanceRuntime.erasure,
-      governanceRuntime.auditAnchorPublisher,
-      governanceAdapters.retentionAdapters,
-      governanceAdapters.erasureAdapters,
-      governanceAdapters.auditLegalHold,
-    );
-    let governanceCycle: Promise<void> | null = null;
-    const runGovernanceCycle = async (): Promise<void> => {
-      const result = await governance.runCycle();
-      governanceHealthy = true;
-      console.log(JSON.stringify({ level: 'info', msg: 'governance.maintenance.completed', ...result }));
-    };
-    await runGovernanceCycle();
-    const configuredGovernanceInterval = Number(process.env.GOVERNANCE_MAINTENANCE_INTERVAL_MS ?? 300_000);
-    if (!Number.isSafeInteger(configuredGovernanceInterval) || configuredGovernanceInterval < 60_000 || configuredGovernanceInterval > 86_400_000) {
-      await governanceAdapters.close().catch(() => undefined);
-      await governanceRuntime.close().catch(() => undefined);
-      await built.close().catch(() => undefined);
-      throw new Error('GOVERNANCE_MAINTENANCE_INTERVAL_MS must be an integer between 60000 and 86400000.');
-    }
-    const governanceTimer = setInterval(() => {
-      if (governanceCycle) return;
-      governanceCycle = runGovernanceCycle()
-        .catch(async (error) => {
-          governanceHealthy = false;
-          await unlink('/tmp/sentinel-worker-ready').catch(() => undefined);
-          console.error('Governance maintenance failed:', error instanceof Error ? error.message : error);
-        })
-        .finally(() => { governanceCycle = null; });
-    }, configuredGovernanceInterval);
-    governanceTimer.unref?.();
-    consumers.push(async () => {
-      clearInterval(governanceTimer);
-      await governanceCycle;
-    });
-    stores.push(() => governanceAdapters!.close());
-    stores.push(() => governanceRuntime.close());
-  } else {
-    console.log(JSON.stringify({
-      level: 'info',
-      msg: 'governance.maintenance.not_started',
-      reason: 'production AWS governance services are not part of the local integration stack',
-    }));
-  }
 
   const distributorRepo = await createDistributorLinkRepository(process.env);
   stores.push(() => distributorRepo.close());
@@ -257,7 +180,6 @@ async function startDeepScanConsumer(
   const readinessFile = '/tmp/sentinel-worker-ready';
   const markReady = async (): Promise<void> => {
     if (!built.redis) throw new Error('Worker readiness requires Redis.');
-    if (!governanceHealthy) throw new Error('Worker readiness requires a successful governance maintenance cycle.');
     await built.redis.ping();
     await writeFile(readinessFile, String(Date.now()), { encoding: 'utf8', mode: 0o600 });
   };

@@ -1151,12 +1151,18 @@ export class DistributorConnect {
       tenantId: string;
       ownerUserId: string;
       consentId?: string;
-      artistWorkspaceId: string;
+      /**
+       * Per-user isolation: workspaces are gone. This internal per-owner binding slot is threaded
+       * through the live-connect snapshot pipeline; when the caller omits it, it defaults to the
+       * owning subject. It is never a separate authorization boundary.
+       */
+      artistWorkspaceId?: string;
     },
   ): Promise<{ connectId: string; loginUrl: string; expiresAt: string; embedded: boolean; provider: string }> {
-    const { tenantId, ownerUserId, consentId, artistWorkspaceId } = binding;
-    if (!tenantId.trim() || !ownerUserId.trim() || !artistWorkspaceId.trim()) {
-      throw new Error('A tenant, initiating subject, and consent-bound artist workspace are required.');
+    const { tenantId, ownerUserId, consentId } = binding;
+    const artistWorkspaceId = binding.artistWorkspaceId?.trim() || ownerUserId;
+    if (!tenantId.trim() || !ownerUserId.trim()) {
+      throw new Error('A tenant and initiating subject are required.');
     }
     if (distributor.trim().toLowerCase() !== 'distrokid') {
       throw new Error('Only DistroKid attended connections are supported.');
@@ -1320,7 +1326,6 @@ export class DistributorConnect {
     const distributor = live.distributor;
     const tenantId = live.tenantId;
     const ownerUserId = live.ownerUserId;
-    const artistWorkspaceId = live.artistWorkspaceId;
     const artistLabel = artists.join(', ');
     let rec: SearchRecord;
     try {
@@ -1328,9 +1333,7 @@ export class DistributorConnect {
       rec = {
         id: liveClaim.confirmation.searchId,
         revision: 1,
-        tenantId,
-        ownerUserId,
-        artistWorkspaceId,
+        userId: ownerUserId,
         createdAt: liveClaim.confirmation.createdAt,
         artist: artistLabel,
         distributor,
@@ -1515,9 +1518,7 @@ export class DistributorConnect {
     const rec: SearchRecord = {
       id: confirmation.searchId,
       revision: 1,
-      tenantId: live.tenantId,
-      ownerUserId: live.ownerUserId,
-      artistWorkspaceId: live.artistWorkspaceId,
+      userId: live.ownerUserId,
       createdAt: confirmation.createdAt,
       artist: artistLabel,
       distributor: live.distributor,

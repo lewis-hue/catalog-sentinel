@@ -1,19 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  activeOrganizationId,
-  apiFetch,
-  selectActiveOrganization,
-} from './api-client';
+import { AuthenticationRequiredError, apiFetch, apiHref } from './api-client';
 
 function installWindow() {
-  const values = new Map<string, string>();
   const assign = vi.fn();
   vi.stubGlobal('window', {
-    localStorage: {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => values.set(key, value),
-      removeItem: (key: string) => values.delete(key),
-    },
     location: {
       pathname: '/overview',
       search: '',
@@ -24,95 +14,44 @@ function installWindow() {
   return { assign };
 }
 
-function organizationHeader(call: unknown[]): string | null {
-  const init = call[1] as RequestInit;
-  return new Headers(init.headers).get('x-sentinel-organization-id');
-}
-
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-describe('apiFetch organization selection recovery', () => {
-  it('clears an invalid stored selector and retries a GET exactly once without it', async () => {
-    installWindow();
-    selectActiveOrganization('revoked-org');
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(null, {
-        status: 403,
-        headers: { 'x-sentinel-organization-selection': 'invalid' },
-      }))
-      .mockResolvedValueOnce(new Response('ok', { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await apiFetch('/api/searches');
-
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(organizationHeader(fetchMock.mock.calls[0])).toBe('revoked-org');
-    expect(organizationHeader(fetchMock.mock.calls[1])).toBeNull();
-    expect(activeOrganizationId()).toBe('');
+describe('apiHref', () => {
+  it('routes API and health paths through the same-origin proxy', () => {
+    expect(apiHref('/api/searches')).toBe('/bff/api/searches');
+    expect(apiHref('/health/ready')).toBe('/bff/health/ready');
   });
 
-  it('clears an invalid stored selector but never replays a mutation', async () => {
-    installWindow();
-    selectActiveOrganization('revoked-org');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
-      status: 403,
-      headers: { 'x-sentinel-organization-selection': 'invalid' },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await apiFetch('/api/searches', { method: 'POST' });
-
-    expect(response.status).toBe(403);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(activeOrganizationId()).toBe('');
+  it('refuses a path outside the authenticated proxy surface', () => {
+    expect(() => apiHref('/other')).toThrow();
   });
+});
 
-  it('does not clear or retry an unrelated 403', async () => {
-    installWindow();
-    selectActiveOrganization('active-org');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 403 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await apiFetch('/api/searches');
-
-    expect(response.status).toBe(403);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(activeOrganizationId()).toBe('active-org');
-  });
-
-  it('uses a candidate override without persisting, clearing, or recovery retry', async () => {
-    installWindow();
-    selectActiveOrganization('active-org');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
-      status: 403,
-      headers: { 'x-sentinel-organization-selection': 'invalid' },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    const response = await apiFetch('/api/organization/workspace-memberships', {
-      organizationId: 'candidate-org',
-    });
-
-    expect(response.status).toBe(403);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(organizationHeader(fetchMock.mock.calls[0])).toBe('candidate-org');
-    expect(activeOrganizationId()).toBe('active-org');
-  });
-
-  it('explicitly omits the selector from identity-scoped requests', async () => {
-    installWindow();
-    selectActiveOrganization('active-org');
+describe('apiFetch', () => {
+  it('forwards the request as-is and returns a successful response', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('ok', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await apiFetch('/api/integrations/steel/status', { organizationId: null });
+    const response = await apiFetch('/api/searches', { method: 'POST', headers: { 'x-test': '1' } });
 
+    expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(organizationHeader(fetchMock.mock.calls[0])).toBeNull();
-    expect(activeOrganizationId()).toBe('active-org');
+    const [href, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(href).toBe('/bff/api/searches');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('x-test')).toBe('1');
+    expect(init.credentials).toBe('same-origin');
+  });
+
+  it('redirects to sign in and throws on an expired session', async () => {
+    const { assign } = installWindow();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiFetch('/api/searches')).rejects.toBeInstanceOf(AuthenticationRequiredError);
+    expect(assign).toHaveBeenCalledWith('/auth/login?returnTo=%2Foverview');
   });
 });

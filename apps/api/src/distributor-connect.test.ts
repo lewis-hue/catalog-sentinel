@@ -367,8 +367,8 @@ describe('DistributorConnect Steel-only flow', () => {
     await expect(connect.confirmAndScan(started.connectId, TENANT_ADMIN)).rejects.toMatchObject({ name: 'ConnectSessionOwnershipError' });
     await expect(connect.confirmAndScan(started.connectId, ALICE)).resolves.toEqual(expect.objectContaining({ reading: true }));
 
-    const [record] = await store.listForOwner('tenant-1', 'alice');
-    expect(record).toMatchObject({ ownerUserId: 'alice', artistWorkspaceId: 'workspace-1' });
+    const [record] = await store.listForUser('alice');
+    expect(record).toMatchObject({ userId: 'alice' });
   });
 
   it('re-checks workspace edit authority before creating a scan and terminates a revoked handoff', async () => {
@@ -398,7 +398,7 @@ describe('DistributorConnect Steel-only flow', () => {
     expect(authorizeWorkspace).toHaveBeenCalledWith({
       tenantId: 'tenant-1', subjectId: 'alice', workspaceId: 'workspace-1',
     });
-    expect(await store.listForOwner('tenant-1', 'alice')).toEqual([]);
+    expect(await store.listForUser('alice')).toEqual([]);
     expect(startSnapshot).not.toHaveBeenCalled();
     expect(steel.releaseRemoteSession).toHaveBeenCalledWith('steel-remote-1');
   });

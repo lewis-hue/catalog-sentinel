@@ -5,12 +5,12 @@ import type { Pool } from 'pg';
 
 const okRedis = { ping: async () => 'PONG', get: async () => String(Date.now()) } as unknown as Redis;
 const downRedis = { ping: async () => { throw new Error('conn refused'); }, get: async () => null } as unknown as Redis;
+// Per-user isolation: the migrated scan_records contract is keyed by `user_id` (the Keycloak sub),
+// with a single owner-indexed listing index. The old tenant/owner/workspace columns are gone.
 const healthySchemaRows: Array<Record<string, unknown>> = [
   ...[
     ['id', 'text', true],
-    ['tenant_id', 'text', true],
-    ['owner_user_id', 'text', false],
-    ['artist_workspace_id', 'text', false],
+    ['user_id', 'text', true],
     ['artist', 'text', true],
     ['distributor', 'text', true],
     ['deep_scan_status', 'text', false],
@@ -20,9 +20,7 @@ const healthySchemaRows: Array<Record<string, unknown>> = [
   ].map(([name, data_type, not_null]) => ({ kind: 'column', name, data_type, not_null, is_primary: false })),
   { kind: 'index', name: 'scan_records_pkey', is_primary: true, index_columns: ['id'], descending: [false] },
   { kind: 'index', name: 'scan_records_created_idx', is_primary: false, index_columns: ['created_at'], descending: [true] },
-  { kind: 'index', name: 'scan_records_tenant_created_idx', is_primary: false, index_columns: ['tenant_id', 'created_at'], descending: [false, true] },
-  { kind: 'index', name: 'scan_records_tenant_owner_created_idx', is_primary: false, index_columns: ['tenant_id', 'owner_user_id', 'created_at'], descending: [false, false, true] },
-  { kind: 'index', name: 'scan_records_tenant_workspace_created_idx', is_primary: false, index_columns: ['tenant_id', 'artist_workspace_id', 'created_at'], descending: [false, false, true] },
+  { kind: 'index', name: 'scan_records_user_created_idx', is_primary: false, index_columns: ['user_id', 'created_at'], descending: [false, true] },
 ];
 const pgWithSchema = (schemaRows = healthySchemaRows): Pool => ({
   query: async (text: string) => ({
@@ -60,13 +58,13 @@ describe('HealthChecker', () => {
     expect((await new HealthChecker({ redis: okRedis, pgPool: missingIndex }).ready()).ready).toBe(false);
   });
 
-  it('scan-postgres fails readiness until principal columns and owner indexes are migrated', async () => {
+  it('scan-postgres fails readiness until the per-user column and owner index are migrated', async () => {
     const missingPrincipalScope = pgWithSchema(healthySchemaRows.filter((row) =>
-      row.name !== 'owner_user_id' && row.name !== 'scan_records_tenant_owner_created_idx'));
+      row.name !== 'user_id' && row.name !== 'scan_records_user_created_idx'));
     const check = await new HealthChecker({ pgPool: missingPrincipalScope }).scanPostgres();
     expect(check.status).toBe('down');
-    expect(check.detail).toMatch(/owner_user_id/);
-    expect(check.detail).toMatch(/scan_records_tenant_owner_created_idx/);
+    expect(check.detail).toMatch(/user_id/);
+    expect(check.detail).toMatch(/scan_records_user_created_idx/);
   });
 
   it('scan-postgres fails readiness when the append-only audit migration is missing', async () => {

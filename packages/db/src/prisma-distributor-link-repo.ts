@@ -23,29 +23,30 @@ import type {
  */
 export interface LinkRecordRow {
   id: string;
-  tenantId: string;
+  userId: string;
   kind: string;
   dataJson: unknown;
 }
 
 export interface LinkRecordDelegate {
-  findFirst(args: { where: { id: string; tenantId: string; kind: string } }): Promise<LinkRecordRow | null>;
+  findFirst(args: { where: { id: string; userId: string; kind: string } }): Promise<LinkRecordRow | null>;
   upsert(args: {
     where: { id: string };
-    create: { id: string; tenantId: string; kind: string; dataJson: unknown };
+    create: { id: string; userId: string; kind: string; dataJson: unknown };
     update: { dataJson: unknown };
   }): Promise<LinkRecordRow>;
   delete(args: { where: { id: string } }): Promise<unknown>;
-  deleteMany(args: { where: { tenantId: string; kind?: string } }): Promise<{ count: number }>;
+  deleteMany(args: { where: { userId: string; kind?: string } }): Promise<{ count: number }>;
 }
 
 /**
- * Postgres-backed, tenant-scoped store. Every query filters by `tenantId`, so a
- * caller can never read/write another tenant's rows, the same guarantee the
- * isolated-test adapter gives, now durable. Records are stored per-kind in the
- * `DistributorLinkRecord` operational table (JSON payload). The rich normalized
- * catalog models (DistributorRelease/Track/…) are written by the normalization
- * job and read separately.
+ * Postgres-backed, per-user store. Every query filters by the owning subject
+ * (the `userId` column; the TS context still calls the value `tenantId`, which now
+ * carries that subject), so a caller can never read/write another user's rows, the
+ * same guarantee the isolated-test adapter gives, now durable. Records are stored
+ * per-kind in the `DistributorLinkRecord` operational table (JSON payload). The rich
+ * normalized catalog models (DistributorRelease/Track/…) are written by the
+ * normalization job and read separately.
  */
 export class PrismaTenantStore<T extends TenantEntity> implements TenantStore<T> {
   constructor(
@@ -59,14 +60,14 @@ export class PrismaTenantStore<T extends TenantEntity> implements TenantStore<T>
     }
     await this.delegate.upsert({
       where: { id: item.id },
-      create: { id: item.id, tenantId: ctx.tenantId, kind: this.kind, dataJson: item },
+      create: { id: item.id, userId: ctx.tenantId, kind: this.kind, dataJson: item },
       update: { dataJson: item },
     });
     return item;
   }
 
   async get(ctx: TenantContext, id: string): Promise<T | null> {
-    const row = await this.delegate.findFirst({ where: { id, tenantId: ctx.tenantId, kind: this.kind } });
+    const row = await this.delegate.findFirst({ where: { id, userId: ctx.tenantId, kind: this.kind } });
     return row ? (row.dataJson as T) : null;
   }
 
@@ -76,7 +77,7 @@ export class PrismaTenantStore<T extends TenantEntity> implements TenantStore<T>
     const next = { ...cur, ...patch, id: cur.id, tenantId: cur.tenantId };
     await this.delegate.upsert({
       where: { id },
-      create: { id, tenantId: ctx.tenantId, kind: this.kind, dataJson: next },
+      create: { id, userId: ctx.tenantId, kind: this.kind, dataJson: next },
       update: { dataJson: next },
     });
     return next;
@@ -90,7 +91,7 @@ export class PrismaTenantStore<T extends TenantEntity> implements TenantStore<T>
   }
 
   async deleteAllForTenant(tenantId: string): Promise<number> {
-    const res = await this.delegate.deleteMany({ where: { tenantId, kind: this.kind } });
+    const res = await this.delegate.deleteMany({ where: { userId: tenantId, kind: this.kind } });
     return res.count;
   }
 }
@@ -105,9 +106,8 @@ export interface PrismaLinkClient {
 
 interface RevocationIntentRow {
   id: string;
-  tenantId: string;
+  userId: string;
   consentId: string;
-  artistWorkspaceId: string;
   attempts: number;
   availableAt: Date | string;
   leaseToken: string | null;
@@ -130,9 +130,8 @@ function nullableIso(value: Date | string | null): string | null {
 function mapRevocationIntent(row: RevocationIntentRow): ConsentRevocationIntent {
   return {
     id: row.id,
-    tenantId: row.tenantId,
+    tenantId: row.userId,
     consentId: row.consentId,
-    artistWorkspaceId: row.artistWorkspaceId,
     attempts: row.attempts,
     availableAt: iso(row.availableAt),
     leaseToken: row.leaseToken,
@@ -180,20 +179,20 @@ export class PrismaDistributorLinkRepository implements DistributorLinkRepositor
             END,
             "updatedAt" = clock_timestamp()
         WHERE "id" = $1
-          AND "tenantId" = $2
+          AND "userId" = $2
           AND "kind" = 'consent'
           AND ($5::boolean = true OR "dataJson"->>'grantedByUserId' = $6::text)
         RETURNING "dataJson"
       ), upserted AS (
         INSERT INTO "ConsentRevocationIntent" (
-          "id", "tenantId", "consentId", "artistWorkspaceId", "attempts",
+          "id", "userId", "consentId", "attempts",
           "availableAt", "leaseToken", "leaseExpiresAt", "lastError", "completedAt",
           "createdAt", "updatedAt"
         )
-        SELECT $4, $2, $1, COALESCE(revoked."dataJson"->>'artistWorkspaceId', ''), 0,
+        SELECT $4, $2, $1, 0,
                clock_timestamp(), NULL, NULL, NULL, NULL, clock_timestamp(), clock_timestamp()
         FROM revoked
-        ON CONFLICT ("tenantId", "consentId") DO UPDATE
+        ON CONFLICT ("userId", "consentId") DO UPDATE
           SET "updatedAt" = EXCLUDED."updatedAt"
         RETURNING *
       )
@@ -212,7 +211,7 @@ export class PrismaDistributorLinkRepository implements DistributorLinkRepositor
     const rows = await this.client.$queryRawUnsafe<RevocationIntentRow[]>(`
       SELECT *
       FROM "ConsentRevocationIntent"
-      WHERE "tenantId" = $1 AND "consentId" = $2
+      WHERE "userId" = $1 AND "consentId" = $2
       LIMIT 1
     `, ctx.tenantId, consentId);
     return rows[0] ? mapRevocationIntent(rows[0]) : null;
@@ -281,10 +280,10 @@ export class PrismaDistributorLinkRepository implements DistributorLinkRepositor
 
   async deleteTenant(tenantId: string): Promise<void> {
     await this.client.$executeRawUnsafe(
-      'DELETE FROM "ConsentRevocationIntent" WHERE "tenantId" = $1',
+      'DELETE FROM "ConsentRevocationIntent" WHERE "userId" = $1',
       tenantId,
     );
-    await this.client.distributorLinkRecord.deleteMany({ where: { tenantId } });
+    await this.client.distributorLinkRecord.deleteMany({ where: { userId: tenantId } });
   }
 
   async close(): Promise<void> {

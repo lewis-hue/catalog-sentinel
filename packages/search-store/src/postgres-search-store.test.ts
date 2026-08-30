@@ -18,9 +18,7 @@ class FakePg implements PgPoolLike {
   schemaRows: Array<Record<string, unknown>> = [
     ...[
       ['id', 'text', true],
-      ['tenant_id', 'text', true],
-      ['owner_user_id', 'text', false],
-      ['artist_workspace_id', 'text', false],
+      ['user_id', 'text', true],
       ['artist', 'text', true],
       ['distributor', 'text', true],
       ['deep_scan_status', 'text', false],
@@ -30,9 +28,7 @@ class FakePg implements PgPoolLike {
     ].map(([name, data_type, not_null]) => ({ kind: 'column', name, data_type, not_null, is_primary: false })),
     { kind: 'index', name: 'scan_records_pkey', data_type: null, not_null: false, is_primary: true, index_columns: ['id'], descending: [false] },
     { kind: 'index', name: 'scan_records_created_idx', data_type: null, not_null: false, is_primary: false, index_columns: ['created_at'], descending: [true] },
-    { kind: 'index', name: 'scan_records_tenant_created_idx', data_type: null, not_null: false, is_primary: false, index_columns: ['tenant_id', 'created_at'], descending: [false, true] },
-    { kind: 'index', name: 'scan_records_tenant_owner_created_idx', data_type: null, not_null: false, is_primary: false, index_columns: ['tenant_id', 'owner_user_id', 'created_at'], descending: [false, false, true] },
-    { kind: 'index', name: 'scan_records_tenant_workspace_created_idx', data_type: null, not_null: false, is_primary: false, index_columns: ['tenant_id', 'artist_workspace_id', 'created_at'], descending: [false, false, true] },
+    { kind: 'index', name: 'scan_records_user_created_idx', data_type: null, not_null: false, is_primary: false, index_columns: ['user_id', 'created_at'], descending: [false, true] },
   ];
   beforeInsert?: (incoming: SearchRecord) => Promise<void>;
   async query(text: string, params: unknown[] = []): Promise<{ rows: Array<Record<string, unknown>>; rowCount?: number | null }> {
@@ -45,22 +41,18 @@ class FakePg implements PgPoolLike {
       const incoming = JSON.parse(params[6] as string) as SearchRecord;
       await this.beforeInsert?.(incoming);
       const existing = this.rows.get(id);
-      if (existing && (
-        existing.tenantId !== incoming.tenantId
-        || (existing.ownerUserId ?? null) !== (incoming.ownerUserId ?? null)
-        || (existing.artistWorkspaceId ?? null) !== (incoming.artistWorkspaceId ?? null)
-      )) return { rows: [], rowCount: 0 };
+      if (existing && existing.userId !== incoming.userId) return { rows: [], rowCount: 0 };
       if (existing && revisionOf(existing) >= revisionOf(incoming)) return { rows: [], rowCount: 0 };
       this.rows.set(id, incoming);
       return { rows: [{ id }], rowCount: 1 };
     }
     if (text.includes('UPDATE scan_records SET')) {
       const id = params[0] as string;
-      const tenantId = params[1] as string;
+      const userId = params[1] as string;
       const incoming = JSON.parse(params[5] as string) as SearchRecord;
       const expectedRevision = params[6] as number;
       const existing = this.rows.get(id);
-      if (!existing || existing.tenantId !== tenantId || revisionOf(existing) !== expectedRevision) {
+      if (!existing || existing.userId !== userId || revisionOf(existing) !== expectedRevision) {
         return { rows: [], rowCount: 0 };
       }
       this.rows.set(id, incoming);
@@ -69,39 +61,28 @@ class FakePg implements PgPoolLike {
     if (text.includes('DELETE FROM scan_records')) {
       const id = params[0] as string;
       const existing = this.rows.get(id);
-      if (!existing
-        || (text.includes('tenant_id = $2') && existing.tenantId !== params[1])
-        || (text.includes('owner_user_id = $3') && existing.ownerUserId !== params[2])) {
+      if (!existing || (text.includes('user_id = $2') && existing.userId !== params[1])) {
         return { rows: [], rowCount: 0 };
       }
       this.rows.delete(id);
       return { rows: [{ id }], rowCount: 1 };
     }
-    if (text.includes('SELECT tenant_id, owner_user_id')) {
+    if (text.includes('SELECT user_id, record')) {
       const rec = this.rows.get(params[0] as string);
-      return { rows: rec ? [{
-        tenant_id: rec.tenantId ?? 'default',
-        owner_user_id: rec.ownerUserId ?? null,
-        artist_workspace_id: rec.artistWorkspaceId ?? null,
-        record: rec,
-      }] : [] };
+      return { rows: rec ? [{ user_id: rec.userId, record: rec }] : [] };
     }
-    if (text.includes('WHERE id =')) {
+    if (text.includes('SELECT record FROM scan_records WHERE id')) {
       const rec = this.rows.get(params[0] as string);
-      if (rec && text.includes('tenant_id = $2') && rec.tenantId !== params[1]) return { rows: [] };
       return { rows: rec ? [{ record: rec }] : [] };
     }
     if (text.includes('ORDER BY created_at')) {
       const records = [...this.rows.values()];
-      let filtered = text.includes('owner_user_id = $2')
-        ? records.filter((record) => record.tenantId === params[0] && record.ownerUserId === params[1])
-        : text.includes('WHERE tenant_id = $1')
-          ? records.filter((record) => record.tenantId === params[0])
-          : records;
+      let filtered = text.includes('WHERE user_id = $1')
+        ? records.filter((record) => record.userId === params[0])
+        : records;
       if (text.includes('(created_at, id) <')) {
-        const ownerScoped = text.includes('owner_user_id = $2');
-        const afterCreatedAt = params[ownerScoped ? 2 : 1] as string;
-        const afterId = params[ownerScoped ? 3 : 2] as string;
+        const afterCreatedAt = params[1] as string;
+        const afterId = params[2] as string;
         filtered = filtered.filter((record) =>
           record.createdAt < afterCreatedAt || (record.createdAt === afterCreatedAt && record.id < afterId));
       }
@@ -170,7 +151,7 @@ describe('PostgresSearchStore', () => {
     const store = new PostgresSearchStore(pg);
     expect(pg.queryTexts).toHaveLength(0); // construction has no database side effects
     const saved = await store.save({ artist: 'Lewis KE', distributor: 'distrokid' }, result());
-    expect(saved.tenantId).toBe('default');
+    expect(saved.userId).toBe('');
     const got = await store.get(saved.id);
     expect(got?.artist).toBe('Lewis KE');
     expect((await store.list())[0]?.id).toBe(saved.id);
@@ -180,11 +161,11 @@ describe('PostgresSearchStore', () => {
 
   it('fails before DML when a required migrated column or index is absent', async () => {
     const missingIndex = new FakePg();
-    missingIndex.schemaRows = missingIndex.schemaRows.filter((row) => row.name !== 'scan_records_tenant_created_idx');
+    missingIndex.schemaRows = missingIndex.schemaRows.filter((row) => row.name !== 'scan_records_user_created_idx');
     const store = new PostgresSearchStore(missingIndex);
 
     await expect(store.save({ artist: 'Lewis KE', distributor: 'distrokid' }, result()))
-      .rejects.toThrow(/schema is incomplete.*scan_records_tenant_created_idx/i);
+      .rejects.toThrow(/schema is incomplete.*scan_records_user_created_idx/i);
     expect(missingIndex.queryTexts.some((text) => text.includes('INSERT INTO'))).toBe(false);
   });
 
@@ -195,54 +176,45 @@ describe('PostgresSearchStore', () => {
     expect((await store.get(saved.id))?.deepScan?.status).toBe('done');
   });
 
-  it('deletes a record durably and removes it from tenant history', async () => {
+  it('deletes a record durably and removes it from user history', async () => {
     const pg = new FakePg();
     const store = new PostgresSearchStore(pg);
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Lewis KE', distributor: 'distrokid' }, result());
+    const saved = await store.save({ artist: 'Lewis KE', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
 
     expect(await store.delete(saved.id)).toBe(true);
     expect(await store.delete(saved.id)).toBe(false);
     expect(await store.get(saved.id)).toBeNull();
-    expect(await store.listForTenant('tenant-a')).toEqual([]);
+    expect(await store.listForUser('user-a')).toEqual([]);
   });
 
-  it('persists each record under its actual tenant in an application-wide store', async () => {
+  it('persists each record under its actual user in an application-wide store', async () => {
     const pg = new FakePg();
     const store = new PostgresSearchStore(pg);
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Private Artist', distributor: 'distrokid' }, result());
-    expect(saved.tenantId).toBe('tenant-a');
-    expect(pg.rows.get(saved.id)?.tenantId).toBe('tenant-a');
-    expect((await store.get(saved.id))?.tenantId).toBe('tenant-a');
+    const saved = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
+    expect(saved.userId).toBe('user-a');
+    expect(pg.rows.get(saved.id)?.userId).toBe('user-a');
+    expect((await store.get(saved.id))?.userId).toBe('user-a');
   });
 
-  it('lists at the SQL tenant boundary instead of filtering a global capped page', async () => {
+  it('lists at the SQL user boundary instead of filtering a global capped page, and excludes unowned legacy rows', async () => {
     const pg = new FakePg();
     const store = new PostgresSearchStore(pg);
-    await store.save({ tenantId: 'tenant-a', artist: 'A', distributor: 'distrokid' }, result());
-    await store.save({ tenantId: 'tenant-b', artist: 'B', distributor: 'distrokid' }, result());
-    expect((await store.listForTenant('tenant-a')).map((item) => item.artist)).toEqual(['A']);
-    expect((await store.listForTenant('tenant-b')).map((item) => item.artist)).toEqual(['B']);
+    await store.save({ artist: 'Alice', distributor: 'distrokid' }, result(), undefined, { userId: 'alice' });
+    await store.save({ artist: 'Bob', distributor: 'distrokid' }, result(), undefined, { userId: 'bob' });
+    await store.save({ artist: 'Legacy', distributor: 'distrokid' }, result()); // no owner: userId ''
+
+    expect((await store.listForUser('alice')).map((item) => item.artist)).toEqual(['Alice']);
+    expect((await store.listForUser('bob')).map((item) => item.artist)).toEqual(['Bob']);
+    expect(pg.queryTexts.some((text) => text.includes('user_id = $1'))).toBe(true);
   });
 
-  it('lists at the SQL tenant-and-owner boundary and excludes ownerless legacy rows', async () => {
-    const pg = new FakePg();
-    const store = new PostgresSearchStore(pg);
-    await store.save({ tenantId: 'tenant-a', ownerUserId: 'alice', artistWorkspaceId: 'aw-a', artist: 'Alice', distributor: 'distrokid' }, result());
-    await store.save({ tenantId: 'tenant-a', ownerUserId: 'bob', artistWorkspaceId: 'aw-b', artist: 'Bob', distributor: 'distrokid' }, result());
-    await store.save({ tenantId: 'tenant-a', artist: 'Legacy', distributor: 'distrokid' }, result());
-
-    expect((await store.listForOwner('tenant-a', 'alice')).map((item) => item.artist)).toEqual(['Alice']);
-    expect(pg.queryTexts.some((text) => text.includes('owner_user_id = $2'))).toBe(true);
-  });
-
-  it('seek-paginates more than 200 owner rows with deterministic id ordering for equal timestamps', async () => {
+  it('seek-paginates more than 200 user rows with deterministic id ordering for equal timestamps', async () => {
     const pg = new FakePg();
     const store = new PostgresSearchStore(pg);
     const seed = await store.save({
-      tenantId: 'tenant-a', ownerUserId: 'alice', artistWorkspaceId: 'aw-a',
       artist: 'Seed', distributor: 'distrokid',
-    }, result());
-    await store.delete(seed.id, 'tenant-a', 'alice');
+    }, result(), undefined, { userId: 'alice' });
+    await store.delete(seed.id, 'alice');
     const createdAt = '2026-07-22T12:00:00.000Z';
     for (let index = 0; index < 225; index++) {
       await store.put({ ...seed, id: `search_${String(index).padStart(3, '0')}`, createdAt, artist: `Artist ${index}` });
@@ -251,7 +223,7 @@ describe('PostgresSearchStore', () => {
     const ids: string[] = [];
     let after: { createdAt: string; id: string } | undefined;
     do {
-      const page = await store.pageForOwner('tenant-a', 'alice', { limit: 37, ...(after ? { after } : {}) });
+      const page = await store.pageForUser('alice', { limit: 37, ...(after ? { after } : {}) });
       ids.push(...page.items.map((item) => item.id));
       after = page.nextCursor;
     } while (after);
@@ -263,35 +235,33 @@ describe('PostgresSearchStore', () => {
     expect(pg.queryTexts.some((text) => text.includes('ORDER BY created_at DESC, id DESC'))).toBe(true);
   });
 
-  it('rejects a record id collision across tenants without overwriting the owner', async () => {
+  it('rejects a record id collision across users without overwriting the owner', async () => {
     const pg = new FakePg();
     const store = new PostgresSearchStore(pg);
-    const original = await store.save({ tenantId: 'tenant-a', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    const original = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
 
-    await expect(store.put({ ...original, tenantId: 'tenant-b', artist: 'Attacker Rewrite' })).rejects.toThrow(
-      'already owned by another tenant',
+    await expect(store.put({ ...original, userId: 'user-b', artist: 'Attacker Rewrite' })).rejects.toThrow(
+      'scan record is owned by another user',
     );
-    expect(pg.rows.get(original.id)?.tenantId).toBe('tenant-a');
+    expect(pg.rows.get(original.id)?.userId).toBe('user-a');
     expect(pg.rows.get(original.id)?.artist).toBe('Private Artist');
   });
 
-  it('rejects full-record ownership or workspace rewrites at the durable boundary', async () => {
+  it('rejects a full-record ownership rewrite at the durable boundary', async () => {
     const pg = new FakePg();
     const store = new PostgresSearchStore(pg);
     const original = await store.save({
-      tenantId: 'tenant-a', ownerUserId: 'alice', artistWorkspaceId: 'aw-alice',
       artist: 'Private Artist', distributor: 'distrokid',
-    }, result());
+    }, result(), undefined, { userId: 'alice' });
 
-    await expect(store.put({ ...original, revision: 2, ownerUserId: 'bob' })).rejects.toThrow('another user');
-    await expect(store.put({ ...original, revision: 2, artistWorkspaceId: 'aw-other' })).rejects.toThrow('another artist workspace');
-    expect(pg.rows.get(original.id)).toMatchObject({ ownerUserId: 'alice', artistWorkspaceId: 'aw-alice' });
+    await expect(store.put({ ...original, revision: 2, userId: 'bob' })).rejects.toThrow('scan record is owned by another user');
+    expect(pg.rows.get(original.id)).toMatchObject({ userId: 'alice' });
   });
 
   it('accepts an idempotent same-revision projection independent of JSON object key order', async () => {
     const pg = new FakePg();
     const store = new PostgresSearchStore(pg);
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    const saved = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result(), undefined, { userId: 'alice' });
     const reordered: SearchRecord = {
       result: saved.result,
       song: saved.song,
@@ -299,7 +269,7 @@ describe('PostgresSearchStore', () => {
       distributor: saved.distributor,
       artist: saved.artist,
       createdAt: saved.createdAt,
-      tenantId: saved.tenantId,
+      userId: saved.userId,
       revision: saved.revision,
       id: saved.id,
     };
@@ -310,7 +280,7 @@ describe('PostgresSearchStore', () => {
   it('never promotes stale full-record puts over newer durable state', async () => {
     const pg = new FakePg();
     const store = new PostgresSearchStore(pg);
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    const saved = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result());
     const newer: SearchRecord = { ...saved, revision: 3, result: { ...saved.result, note: 'newer' } };
     await store.put(newer);
     await store.put({ ...saved, revision: 2, result: { ...saved.result, note: 'stale' } });
@@ -323,9 +293,9 @@ describe('PostgresSearchStore', () => {
 });
 
 describe('revision-aware hot store', () => {
-  it('ignores stale cache refreshes and rejects equal-revision conflicts across tenants or data', async () => {
+  it('ignores stale cache refreshes and rejects equal-revision conflicts across users or data', async () => {
     const store = new RedisSearchStore(new FakeRedis());
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Lewis KE', distributor: 'distrokid' }, result());
+    const saved = await store.save({ artist: 'Lewis KE', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
     const updated = await store.update(saved.id, (record) => ({
       ...record,
       result: { ...record.result, note: 'new authoritative state' },
@@ -335,57 +305,55 @@ describe('revision-aware hot store', () => {
     await store.put(saved); // delayed revision 1 cache refresh
     expect((await store.get(saved.id))?.result.note).toBe('new authoritative state');
     await expect(store.put({ ...updated!, artist: 'same revision, different data' })).rejects.toThrow('conflicting');
-    await expect(store.put({ ...updated!, revision: 3, tenantId: 'tenant-b' })).rejects.toThrow('another tenant');
+    await expect(store.put({ ...updated!, revision: 3, userId: 'user-b' })).rejects.toThrow('another user');
   });
 
-  it('atomically removes Redis values plus global and tenant index entries', async () => {
+  it('atomically removes Redis values plus global and user index entries', async () => {
     const redis = new FakeRedis();
     const store = new RedisSearchStore(redis);
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Lewis KE', distributor: 'distrokid' }, result());
+    const saved = await store.save({ artist: 'Lewis KE', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
 
     expect(await store.delete(saved.id)).toBe(true);
     expect(await store.get(saved.id)).toBeNull();
     expect(await store.list()).toEqual([]);
-    expect(await store.listForTenant('tenant-a')).toEqual([]);
+    expect(await store.listForUser('user-a')).toEqual([]);
     expect(redis.lists.get('search:index')).not.toContain(saved.id);
-    expect(redis.lists.get('search:tenant:tenant-a:index')).not.toContain(saved.id);
+    expect(redis.lists.get('search:user:user-a:index')).not.toContain(saved.id);
 
-    const partiallyRemoved = await store.save({ tenantId: 'tenant-a', artist: 'Second', distributor: 'distrokid' }, result());
+    const partiallyRemoved = await store.save({ artist: 'Second', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
     redis.values.delete(`search:${partiallyRemoved.id}`);
-    expect(await store.delete(partiallyRemoved.id, 'tenant-a')).toBe(false);
+    expect(await store.delete(partiallyRemoved.id, 'user-a')).toBe(false);
     expect(redis.lists.get('search:index')).not.toContain(partiallyRemoved.id);
-    expect(redis.lists.get('search:tenant:tenant-a:index')).not.toContain(partiallyRemoved.id);
+    expect(redis.lists.get('search:user:user-a:index')).not.toContain(partiallyRemoved.id);
   });
 
-  it('uses a dedicated owner index so 205 peer records cannot starve another owner', async () => {
+  it('uses a dedicated user index so 205 peer records cannot starve another owner', async () => {
     const redis = new FakeRedis();
     const store = new RedisSearchStore(redis);
     const bob = await store.save({
-      tenantId: 'tenant-a', ownerUserId: 'bob', artistWorkspaceId: 'aw-bob',
       artist: 'Bob', distributor: 'distrokid',
-    }, result());
+    }, result(), undefined, { userId: 'bob' });
     for (let i = 0; i < 205; i++) {
       await store.save({
-        tenantId: 'tenant-a', ownerUserId: 'alice', artistWorkspaceId: 'aw-alice',
         artist: `Alice ${i}`, distributor: 'distrokid',
-      }, result());
+      }, result(), undefined, { userId: 'alice' });
     }
 
-    expect((await store.listForOwner('tenant-a', 'bob')).map((item) => item.id)).toEqual([bob.id]);
-    expect(await store.listForOwner('tenant-a', 'alice')).toHaveLength(200);
-    const aliceIndex = redis.lists.get('search:tenant:tenant-a:owner:alice:index')!;
+    expect((await store.listForUser('bob')).map((item) => item.id)).toEqual([bob.id]);
+    expect(await store.listForUser('alice')).toHaveLength(200);
+    const aliceIndex = redis.lists.get('search:user:alice:index')!;
     aliceIndex.unshift(aliceIndex[0]!); // tolerate a stale duplicate left by a retried index write
     const pagedIds: string[] = [];
     let after: { createdAt: string; id: string } | undefined;
     do {
-      const page = await store.pageForOwner('tenant-a', 'alice', { limit: 41, ...(after ? { after } : {}) });
+      const page = await store.pageForUser('alice', { limit: 41, ...(after ? { after } : {}) });
       pagedIds.push(...page.items.map((item) => item.id));
       after = page.nextCursor;
     } while (after);
     expect(pagedIds).toHaveLength(205);
     expect(new Set(pagedIds).size).toBe(205);
-    await store.delete(bob.id, 'tenant-a', 'bob');
-    expect(redis.lists.get('search:tenant:tenant-a:owner:bob:index')).not.toContain(bob.id);
+    await store.delete(bob.id, 'bob');
+    expect(redis.lists.get('search:user:bob:index')).not.toContain(bob.id);
   });
 });
 
@@ -412,12 +380,12 @@ describe('TieredSearchStore', () => {
     const pg = new FakePg();
     const durable = new PostgresSearchStore(pg);
     const tiered = new TieredSearchStore(hot, durable);
-    const saved = await tiered.save({ tenantId: 'tenant-a', artist: 'Lewis KE', distributor: 'distrokid' }, result());
+    const saved = await tiered.save({ artist: 'Lewis KE', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
 
     expect(await tiered.delete(saved.id)).toBe(true);
     expect(await hot.get(saved.id)).toBeNull();
     expect(await durable.get(saved.id)).toBeNull();
-    expect(await tiered.listForTenant('tenant-a')).toEqual([]);
+    expect(await tiered.listForUser('user-a')).toEqual([]);
   });
 
   it('durably projects every mutation, including metadata-only changes', async () => {
@@ -459,7 +427,7 @@ describe('TieredSearchStore', () => {
     const hot = new InMemorySearchStore();
     const pg = new FakePg();
     const tiered = new TieredSearchStore(hot, new PostgresSearchStore(pg));
-    const saved = await tiered.save({ tenantId: 'tenant-a', artist: 'Lewis KE', distributor: 'distrokid' }, result());
+    const saved = await tiered.save({ artist: 'Lewis KE', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
 
     const staleProjection = {
       ...saved,
@@ -475,7 +443,7 @@ describe('TieredSearchStore', () => {
     expect(durable?.revision).toBe(2);
     expect(durable?.result.note).toBe('');
     expect(durable?.deepScan?.status).toBe('running');
-    expect(durable?.tenantId).toBe('tenant-a');
+    expect(durable?.userId).toBe('user-a');
     expect((await hot.get(saved.id))?.revision).toBe(newer?.revision);
   });
 
@@ -484,7 +452,7 @@ describe('TieredSearchStore', () => {
     const pg = new FakePg();
     const durable = new PostgresSearchStore(pg);
     const tiered = new TieredSearchStore(hot, durable);
-    const saved = await tiered.save({ tenantId: 'tenant-a', artist: 'Lewis KE', distributor: 'distrokid' }, result());
+    const saved = await tiered.save({ artist: 'Lewis KE', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
 
     await Promise.all([
       tiered.update(saved.id, (record) => ({ ...record, result: { ...record.result, note: 'human-reviewed' } })),
@@ -503,14 +471,14 @@ describe('TieredSearchStore', () => {
 
   it('fails closed in production instead of serving a stale hot record when Postgres is down', async () => {
     const hot = new InMemorySearchStore();
-    const cached = await hot.save({ tenantId: 'tenant-a', artist: 'Cached Artist', distributor: 'distrokid' }, result());
+    const cached = await hot.save({ artist: 'Cached Artist', distributor: 'distrokid' }, result(), undefined, { userId: 'user-a' });
     const brokenPg: PgPoolLike = {
       query: async () => { throw new Error('pg down'); },
     };
     const tiered = new TieredSearchStore(hot, new PostgresSearchStore(brokenPg));
 
     await expect(tiered.get(cached.id)).rejects.toThrow('pg down');
-    await expect(tiered.listForTenant('tenant-a')).rejects.toThrow('durable search store unavailable');
+    await expect(tiered.listForUser('user-a')).rejects.toThrow('durable search store unavailable');
   });
 
   it('never acknowledges a write when the durable tier throws', async () => {

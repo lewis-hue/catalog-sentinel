@@ -8,8 +8,7 @@ import { RedisSearchStore, type CatalogResultLike, type SearchPageCursor, type S
 const enabled = Boolean(process.env.DATABASE_URL && process.env.REDIS_URL);
 const describeInfrastructure = enabled ? describe : describe.skip;
 const suffix = randomUUID();
-const tenantId = `pagination-${suffix}`;
-const ownerUserId = `owner-${suffix}`;
+const userId = `owner-${suffix}`;
 const prefix = `sentinel:test:pagination:${suffix}`;
 const recordIds = Array.from({ length: 205 }, (_, index) => `search_infra_${suffix}_${String(index).padStart(3, '0')}`);
 
@@ -33,9 +32,7 @@ function record(id: string): SearchRecord {
   return {
     id,
     revision: 1,
-    tenantId,
-    ownerUserId,
-    artistWorkspaceId: `aw-${suffix}`,
+    userId,
     createdAt: '2026-07-22T12:00:00.000Z',
     artist: id,
     distributor: 'distrokid',
@@ -49,7 +46,7 @@ async function collect(store: PostgresSearchStore | RedisSearchStore): Promise<s
   const ids: string[] = [];
   let after: SearchPageCursor | undefined;
   do {
-    const page = await store.pageForOwner(tenantId, ownerUserId, { limit: 29, ...(after ? { after } : {}) });
+    const page = await store.pageForUser(userId, { limit: 29, ...(after ? { after } : {}) });
     ids.push(...page.items.map((item) => item.id));
     after = page.nextCursor;
   } while (after);
@@ -72,8 +69,8 @@ describeInfrastructure('real Redis/Postgres search history pagination', () => {
   afterAll(async () => {
     if (!enabled) return;
     for (const id of recordIds) {
-      await postgresStore.delete(id, tenantId, ownerUserId);
-      await redisStore.delete(id, tenantId, ownerUserId);
+      await postgresStore.delete(id, userId);
+      await redisStore.delete(id, userId);
     }
     redis.disconnect();
     await pgPool.end();

@@ -8,7 +8,11 @@ export const CONSENT_PURPOSE = 'Read authorized DistroKid catalog metadata and v
 export const CONSENT_RETENTION_DAYS = 30;
 
 export interface LinkConsent extends TenantEntity {
-  artistWorkspaceId: string;
+  /**
+   * Per-user isolation: workspaces are gone, so this is vestigial and optional. New grants omit it;
+   * the scope key is the granting subject (`tenantId`/`grantedByUserId`), never a workspace.
+   */
+  artistWorkspaceId?: string;
   /** Proof fields are optional only on legacy rows; production refuses to reuse rows lacking them. */
   grantedByUserId?: string;
   grantedAt?: string;
@@ -77,7 +81,6 @@ export interface LinkDeepScan extends TenantEntity {
  */
 export interface ConsentRevocationIntent extends TenantEntity {
   consentId: string;
-  artistWorkspaceId: string;
   attempts: number;
   availableAt: string;
   leaseToken: string | null;
@@ -185,7 +188,6 @@ export class InMemoryDistributorLinkRepository implements DistributorLinkReposit
         id: `consent-revoke-${randomUUID()}`,
         tenantId: ctx.tenantId,
         consentId,
-        artistWorkspaceId: consent.artistWorkspaceId,
         attempts: 0,
         availableAt: revokedAt,
         leaseToken: null,

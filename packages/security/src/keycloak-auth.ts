@@ -12,12 +12,17 @@ type VerifyKey = KeyLike | Uint8Array | JWK | JWTVerifyGetKey;
  * otherwise fails closed unless ENABLE_KEYCLOAK_AUTH is enabled. No admin credentials or client secrets
  * are exposed to browser JavaScript; the web BFF uses Authorization Code + PKCE.
  */
-export const SENTINEL_ROLES = ['user', 'artist_manager', 'tenant_admin', 'platform_admin', 'service_worker'] as const;
+export const SENTINEL_ROLES = ['user', 'platform_admin', 'service_worker'] as const;
 export type SentinelRole = (typeof SENTINEL_ROLES)[number];
-export const SENTINEL_INTERACTIVE_ROLES = ['user', 'artist_manager', 'tenant_admin', 'platform_admin'] as const;
+export const SENTINEL_INTERACTIVE_ROLES = ['user', 'platform_admin'] as const;
 
 export interface AuthIdentity {
   sub: string;
+  /**
+   * Per-user isolation: there is no organization/workspace tenancy. This is always the Keycloak
+   * `sub`; it is retained equal to `sub` only so existing structural consumers keep compiling, and
+   * no code derives authority from it. The sole scope key everywhere is the subject itself.
+   */
   tenantId: string;
   roles: string[];
   username?: string;
@@ -90,7 +95,6 @@ export function identityFromPayload(p: JWTPayload): AuthIdentity {
     (SENTINEL_ROLES as readonly string[]).includes(role));
   const sub = typeof p.sub === 'string' ? p.sub.trim() : '';
   if (!sub) throw new Error('Authenticated token is missing the required subject claim.');
-  const claimedTenantId = typeof p.tenant_id === 'string' ? p.tenant_id.trim() : '';
   if (roles.length === 0) {
     throw new Error('Authenticated token has no recognized Sentinel role.');
   }
@@ -109,7 +113,9 @@ export function identityFromPayload(p: JWTPayload): AuthIdentity {
     : undefined;
   return {
     sub,
-    tenantId: claimedTenantId || sub,
+    // Per-user isolation: the subject is the only scope. A `tenant_id` claim, if present, is
+    // deliberately ignored so a caller cannot assert authority over anyone else's data.
+    tenantId: sub,
     roles,
     username: typeof p.preferred_username === 'string' ? p.preferred_username : undefined,
     ...(emailVerified ? { email: assertedEmail } : {}),

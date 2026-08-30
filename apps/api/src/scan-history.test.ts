@@ -77,7 +77,7 @@ describe('scan history mutation routes', () => {
   it('renames a tenant-owned scan, exposes the name in history, and audits the mutation', async () => {
     const store = new InMemorySearchStore();
     const audit = new InMemoryAuditLogger();
-    const saved = await store.save({ tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    const saved = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result(), undefined, { userId: 'anonymous' });
     const app = await readyApp({ searchStore: store, auditLogger: audit });
 
     const invalid = await app.inject({ method: 'PATCH', url: `/api/searches/${saved.id}`, payload: { name: '   ' } });
@@ -101,7 +101,7 @@ describe('scan history mutation routes', () => {
     const audit = new InMemoryAuditLogger();
     const enqueue = vi.fn(async () => {});
     const fastScan = vi.fn(async (artist: string) => result(artist));
-    const theirs = await store.save({ tenantId: 'tenant-other', artist: 'Secret Artist', distributor: 'distrokid' }, result('Secret Artist'));
+    const theirs = await store.save({ artist: 'Secret Artist', distributor: 'distrokid' }, result('Secret Artist'), undefined, { userId: 'other-user' });
     const app = await readyApp({ searchStore: store, auditLogger: audit, enqueueDeepScan: enqueue, runFastCatalogScan: fastScan });
 
     const rename = await app.inject({ method: 'PATCH', url: `/api/searches/${theirs.id}`, payload: { name: 'stolen' } });
@@ -118,7 +118,7 @@ describe('scan history mutation routes', () => {
   it('rejects deletion while distributor reading or idle/queued/running, then removes terminal history and audits it', async () => {
     const store = new InMemorySearchStore();
     const audit = new InMemoryAuditLogger();
-    const saved = await store.save({ tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    const saved = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result(), undefined, { userId: 'anonymous' });
     await store.update(saved.id, (record) => ({
       ...record,
       result: { ...record.result, warnings: ['__reading_in_progress__'] },
@@ -156,7 +156,7 @@ describe('scan history mutation routes', () => {
     }));
     expect((await app.inject({ method: 'DELETE', url: `/api/searches/${saved.id}` })).statusCode).toBe(204);
     expect(await store.get(saved.id)).toBeNull();
-    expect(await store.listForTenant('default')).toEqual([]);
+    expect(await store.listForUser('anonymous')).toEqual([]);
     expect((await audit.list()).map((entry) => entry.action)).toEqual(['catalog.search.deleted']);
   });
 
@@ -168,9 +168,10 @@ describe('scan history mutation routes', () => {
       title: 'Track One', primaryArtist: 'Private Artist', isrc: 'QZABC1234567', releaseTitle: 'Release One',
     }];
     const source = await store.save(
-      { tenantId: 'default', name: 'Original audit', artist: 'Private Artist', distributor: 'distrokid', platforms: ['Spotify'] },
+      { name: 'Original audit', artist: 'Private Artist', distributor: 'distrokid', platforms: ['Spotify'] },
       result(),
       released,
+      { userId: 'anonymous' },
     );
     await store.update(source.id, (record) => ({
       ...record,
@@ -212,7 +213,7 @@ describe('scan history mutation routes', () => {
     expect(body.result.note).toMatch(/saved distributor snapshot/i);
     expect(body.result.note).toMatch(/not re-extracted/i);
     expect(body.id).not.toBe(source.id);
-    expect(enqueue).toHaveBeenCalledWith(body.id, 'default');
+    expect(enqueue).toHaveBeenCalledWith(body.id, 'anonymous');
 
     const created = await store.get(body.id);
     expect(created).toMatchObject({ sourceSearchId: source.id, name: 'July rerun', deepScan: { status: 'queued' } });
@@ -230,7 +231,7 @@ describe('scan history mutation routes', () => {
       title: 'Track One', primaryArtist: 'Private Artist', isrc: 'QZABC1234567', releaseTitle: 'Release One',
     }];
     const saved = await store.save(
-      { tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result(), released,
+      { artist: 'Private Artist', distributor: 'distrokid' }, result(), released, { userId: 'anonymous' },
     );
     // The decoupled scrape leaves a terminal "unchecked" record, no presence job queued.
     await store.update(saved.id, (record) => ({
@@ -246,10 +247,10 @@ describe('scan history mutation routes', () => {
       id: saved.id, operation: 'STORE_PRESENCE_CHECK', deepScan: { status: 'queued' },
     });
     // In place: THIS record is queued (results join back to the same catalogue), no new record derived.
-    expect(enqueue).toHaveBeenCalledWith(saved.id, 'default');
+    expect(enqueue).toHaveBeenCalledWith(saved.id, 'anonymous');
     const after = await store.get(saved.id);
     expect(after?.deepScan).toMatchObject({ status: 'queued', platformsDone: [] });
-    expect(await store.listForTenant('default')).toHaveLength(1);
+    expect(await store.listForUser('anonymous')).toHaveLength(1);
     expect((await audit.list()).map((entry) => entry.action)).toContain('catalog.search.store-check.triggered');
   });
 
@@ -258,13 +259,14 @@ describe('scan history mutation routes', () => {
     const enqueue = vi.fn(async () => {});
     const released: ReleasedTrackLike[] = [{ title: 'Track One', primaryArtist: 'Private Artist', isrc: 'QZABC1234567' }];
 
-    const foreign = await store.save({ tenantId: 'tenant-other', artist: 'Secret', distributor: 'distrokid' }, result('Secret'), released);
-    const inFlight = await store.save({ tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result(), released);
+    const foreign = await store.save({ artist: 'Secret', distributor: 'distrokid' }, result('Secret'), released, { userId: 'other-user' });
+    const inFlight = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result(), released, { userId: 'anonymous' });
     await store.update(inFlight.id, (record) => ({ ...record, deepScan: { status: 'running', platformsPending: ['Spotify'], platformsDone: [] } }));
     const empty = await store.save(
-      { tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' },
+      { artist: 'Private Artist', distributor: 'distrokid' },
       { ...result(), tracks: [], summary: { tracks: 0, live: 0, notLive: 0, wrongProfile: 0, needsReview: 0 } },
       [],
+      { userId: 'anonymous' },
     );
     await store.update(empty.id, (record) => ({ ...record, deepScan: { status: 'done', platformsPending: [], platformsDone: [] } }));
 
@@ -282,7 +284,7 @@ describe('scan history mutation routes', () => {
     const store = new InMemorySearchStore();
     const audit = new InMemoryAuditLogger();
     const enqueue = vi.fn(async () => {});
-    const saved = await store.save({ tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    const saved = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result(), undefined, { userId: 'anonymous' });
     // A store-presence scan is in flight, it must NOT block the independent lyrics check.
     await store.update(saved.id, (record) => ({ ...record, deepScan: { status: 'running', platformsPending: ['Spotify'], platformsDone: [] } }));
 
@@ -291,22 +293,24 @@ describe('scan history mutation routes', () => {
 
     expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({ id: saved.id, operation: 'LYRICS_CHECK', lyricsScan: { status: 'queued' } });
-    expect(enqueue).toHaveBeenCalledWith(saved.id, 'default');
+    expect(enqueue).toHaveBeenCalledWith(saved.id, 'anonymous');
     const after = await store.get(saved.id);
     // Independence: the lyrics check writes Postgres (not the record), so the store-presence state is untouched.
     expect(after?.deepScan?.status).toBe('running');
-    expect(await store.listForTenant('default')).toHaveLength(1);
+    expect(await store.listForUser('anonymous')).toHaveLength(1);
     expect((await audit.list()).map((entry) => entry.action)).toContain('catalog.search.lyrics-check.triggered');
   });
 
   it('guards the lyrics check: 404 across tenants, 409 while in flight, 422 with no tracks', async () => {
     const store = new InMemorySearchStore();
     const enqueue = vi.fn(async () => {});
-    const foreign = await store.save({ tenantId: 'tenant-other', artist: 'Secret', distributor: 'distrokid' }, result('Secret'));
-    const inFlight = await store.save({ tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' }, result());
+    const foreign = await store.save({ artist: 'Secret', distributor: 'distrokid' }, result('Secret'), undefined, { userId: 'other-user' });
+    const inFlight = await store.save({ artist: 'Private Artist', distributor: 'distrokid' }, result(), undefined, { userId: 'anonymous' });
     const empty = await store.save(
-      { tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' },
+      { artist: 'Private Artist', distributor: 'distrokid' },
       { ...result(), tracks: [], summary: { tracks: 0, live: 0, notLive: 0, wrongProfile: 0, needsReview: 0 } },
+      undefined,
+      { userId: 'anonymous' },
     );
 
     // The "already running" state now lives on the snapshot's Postgres progress, not the record.
@@ -326,9 +330,10 @@ describe('scan history mutation routes', () => {
     const enqueue = vi.fn(async () => {});
     const releasedScan = vi.fn(async () => result());
     const source = await store.save(
-      { tenantId: 'default', artist: 'Private Artist', distributor: 'distrokid' },
+      { artist: 'Private Artist', distributor: 'distrokid' },
       { ...result(), warnings: ['__reading_in_progress__'] },
       [],
+      { userId: 'anonymous' },
     );
     const app = await readyApp({
       searchStore: store,

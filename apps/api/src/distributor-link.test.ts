@@ -25,7 +25,6 @@ function consent(overrides: Partial<LinkConsent> = {}): LinkConsent {
   return {
     id: 'consent-1',
     tenantId: 'tenant-1',
-    artistWorkspaceId: 'workspace-1',
     grantedByUserId: 'user-1',
     grantedAt: new Date().toISOString(),
     purpose: CONSENT_PURPOSE,
@@ -46,7 +45,6 @@ describe('consent authority for the Steel connect flow', () => {
     const granted = await service().grantConsent(
       { tenantId: 'tenant-lease' },
       {
-        artistWorkspaceId: 'workspace-lease',
         distributor: 'distrokid',
         provider: 'steel',
         ttlMinutes: 1,
@@ -61,21 +59,19 @@ describe('consent authority for the Steel connect flow', () => {
     });
   });
 
-  it('binds consent to the exact tenant, workspace, provider, distributor, and subject', async () => {
+  it('binds consent to the exact tenant, provider, distributor, and subject', async () => {
     const repo = new InMemoryDistributorLinkRepository();
     const ctx = { tenantId: 'tenant-1' };
     await repo.consents.put(ctx, consent());
     const link = service(repo);
 
     await expect(link.assertReadConsent(ctx, 'consent-1', {
-      artistWorkspaceId: 'workspace-1',
       distributor: 'distrokid',
       provider: 'steel',
       actorUserId: 'user-1',
       minimumRemainingMs: 60_000,
     })).resolves.toMatchObject({ id: 'consent-1' });
     await expect(link.assertReadConsent(ctx, 'consent-1', {
-      artistWorkspaceId: 'workspace-1',
       distributor: 'distrokid',
       provider: 'steel',
       actorUserId: 'other-user',

@@ -32,7 +32,6 @@ interface RecoveryRow extends Record<string, unknown> {
   distributor: string;
   artists: string[];
   consentId: string;
-  artistWorkspaceId: string;
   steelSessionId: string;
   sessionExpiresAt: Date | string;
   deadlineAt: Date | string;
@@ -40,10 +39,9 @@ interface RecoveryRow extends Record<string, unknown> {
 }
 
 const rowProjection = `
-  "tenantId", "connectionId", "snapshotId", "distributor",
+  "userId" AS "tenantId", "connectionId", "snapshotId", "distributor",
   "recoveryArtists" AS "artists",
   "recoveryConsentId" AS "consentId",
-  "recoveryArtistWorkspaceId" AS "artistWorkspaceId",
   "recoverySteelSessionIdEncrypted" AS "steelSessionId",
   "recoverySessionExpiresAt" AS "sessionExpiresAt",
   "recoveryDeadlineAt" AS "deadlineAt",
@@ -58,8 +56,8 @@ const dateIso = (value: Date | string): string => {
 function validatedRecoveryJob(raw: unknown, nowMs?: number): CatalogIndexJob {
   const parsed = catalogIndexJobSchema.parse(raw);
   if (parsed.distributor !== 'distrokid') throw new Error('durable DistroKid recovery envelope has the wrong distributor');
-  if (!parsed.consentId || !parsed.artistWorkspaceId) {
-    throw new Error('durable DistroKid recovery envelope requires consent and workspace bindings');
+  if (!parsed.consentId) {
+    throw new Error('durable DistroKid recovery envelope requires a durable consent binding');
   }
   if (!parsed.steelSessionId || !/^v[12]\./.test(parsed.steelSessionId) || parsed.steelSessionId.length > 16_384) {
     throw new Error('durable DistroKid recovery requires an application-envelope-encrypted Steel handle');
@@ -90,7 +88,10 @@ function fromRow(row: RecoveryRow): CatalogIndexJob {
     distributor: row.distributor,
     artists: row.artists,
     consentId: row.consentId,
-    artistWorkspaceId: row.artistWorkspaceId,
+    // Per-user isolation collapsed the workspace binding into the owning subject: the durable
+    // envelope keys off userId (projected as tenantId), and the scan id-namespace is that same
+    // subject. No separate workspace column survives, so derive the slot from the subject.
+    artistWorkspaceId: row.tenantId,
     steelSessionId: row.steelSessionId,
     sessionExpiresAt: dateIso(row.sessionExpiresAt),
     deadlineAt: dateIso(row.deadlineAt),
@@ -108,7 +109,6 @@ function sameImmutablePrincipal(existing: CatalogIndexJob, proposed: CatalogInde
     && existing.distributor === proposed.distributor
     && sameStrings(existing.artists, proposed.artists)
     && existing.consentId === proposed.consentId
-    && existing.artistWorkspaceId === proposed.artistWorkspaceId
     && existing.sessionExpiresAt === proposed.sessionExpiresAt;
 }
 
@@ -137,27 +137,26 @@ export class PostgresDistroKidRecoveryRepository implements DistroKidRecoveryRep
     const job = validatedRecoveryJob(input, this.now());
     const result = await this.pool.query<RecoveryRow>(
       `INSERT INTO "DistroKidSnapshotCheckpoint" AS checkpoint (
-         "tenantId", "connectionId", "snapshotId", "distributor",
-         "recoveryArtists", "recoveryConsentId", "recoveryArtistWorkspaceId",
+         "userId", "connectionId", "snapshotId", "distributor",
+         "recoveryArtists", "recoveryConsentId",
          "recoverySteelSessionIdEncrypted", "recoverySessionExpiresAt",
          "recoveryDeadlineAt", "recoverySchemaVersion"
-       ) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9::timestamptz,$10::timestamptz,$11)
+       ) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8::timestamptz,$9::timestamptz,$10)
        ON CONFLICT ("snapshotId") DO UPDATE SET
          "recoveryArtists" = COALESCE(checkpoint."recoveryArtists", EXCLUDED."recoveryArtists"),
          "recoveryConsentId" = COALESCE(checkpoint."recoveryConsentId", EXCLUDED."recoveryConsentId"),
-         "recoveryArtistWorkspaceId" = COALESCE(checkpoint."recoveryArtistWorkspaceId", EXCLUDED."recoveryArtistWorkspaceId"),
          "recoverySteelSessionIdEncrypted" = COALESCE(checkpoint."recoverySteelSessionIdEncrypted", EXCLUDED."recoverySteelSessionIdEncrypted"),
          "recoverySessionExpiresAt" = COALESCE(checkpoint."recoverySessionExpiresAt", EXCLUDED."recoverySessionExpiresAt"),
          "recoveryDeadlineAt" = COALESCE(checkpoint."recoveryDeadlineAt", EXCLUDED."recoveryDeadlineAt"),
          "recoverySchemaVersion" = COALESCE(checkpoint."recoverySchemaVersion", EXCLUDED."recoverySchemaVersion")
-       WHERE checkpoint."tenantId" = EXCLUDED."tenantId"
+       WHERE checkpoint."userId" = EXCLUDED."userId"
          AND checkpoint."connectionId" = EXCLUDED."connectionId"
          AND checkpoint."distributor" = EXCLUDED."distributor"
          AND (
            checkpoint."recoverySteelSessionIdEncrypted" IS NOT NULL
            OR NOT EXISTS (
              SELECT 1 FROM "DistroKidCheckpointTerminal" terminal
-              WHERE terminal."tenantId" = checkpoint."tenantId"
+              WHERE terminal."userId" = checkpoint."userId"
                 AND terminal."connectionId" = checkpoint."connectionId"
                 AND terminal."snapshotId" = checkpoint."snapshotId"
            )
@@ -165,7 +164,7 @@ export class PostgresDistroKidRecoveryRepository implements DistroKidRecoveryRep
        RETURNING ${rowProjection}`,
       [
         job.tenantId, job.connectionId, job.snapshotId, job.distributor, JSON.stringify(job.artists),
-        job.consentId, job.artistWorkspaceId, job.steelSessionId,
+        job.consentId, job.steelSessionId,
         job.sessionExpiresAt, job.deadlineAt, job.schemaVersion,
       ],
     );
@@ -174,10 +173,10 @@ export class PostgresDistroKidRecoveryRepository implements DistroKidRecoveryRep
       const state = await this.pool.query<{
         tenantId: string; connectionId: string; distributor: string; terminal: boolean;
       }>(
-        `SELECT root."tenantId", root."connectionId", root."distributor",
+        `SELECT root."userId" AS "tenantId", root."connectionId", root."distributor",
                 EXISTS (
                   SELECT 1 FROM "DistroKidCheckpointTerminal" terminal
-                   WHERE terminal."tenantId" = root."tenantId"
+                   WHERE terminal."userId" = root."userId"
                      AND terminal."connectionId" = root."connectionId"
                      AND terminal."snapshotId" = root."snapshotId"
                 ) AS "terminal"
@@ -219,12 +218,11 @@ export class PostgresDistroKidRecoveryRepository implements DistroKidRecoveryRep
       `UPDATE "DistroKidSnapshotCheckpoint" SET
          "recoveryArtists" = NULL,
          "recoveryConsentId" = NULL,
-         "recoveryArtistWorkspaceId" = NULL,
          "recoverySteelSessionIdEncrypted" = NULL,
          "recoverySessionExpiresAt" = NULL,
          "recoveryDeadlineAt" = NULL,
          "recoverySchemaVersion" = NULL
-       WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3
+       WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3
          AND "recoverySteelSessionIdEncrypted" IS NOT NULL`,
       [job.tenantId, job.connectionId, job.snapshotId],
     );

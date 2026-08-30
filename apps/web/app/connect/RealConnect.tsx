@@ -25,7 +25,6 @@ interface ConsentGrant {
 }
 
 interface ScanResult { searchId: string; tracksRead: number; reading?: boolean }
-interface EditableWorkspace { id: string; canEdit: boolean }
 type Phase = 'form' | 'login' | 'scanning' | 'done' | 'expired';
 
 async function responseError(response: Response, fallback: string): Promise<string> {
@@ -73,29 +72,6 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
   const [notice, setNotice] = useState('');
   const [result, setResult] = useState<ScanResult | null>(null);
   const [busy, setBusy] = useState(false);
-  const [workspaces, setWorkspaces] = useState<EditableWorkspace[]>([]);
-  const [workspaceId, setWorkspaceId] = useState('');
-  const [workspaceState, setWorkspaceState] = useState<'loading' | 'ready' | 'error'>('loading');
-
-  useEffect(() => {
-    let active = true;
-    void apiFetch('/api/organization/workspace-memberships')
-      .then(async (response) => {
-        if (!response.ok) throw new Error(await responseError(response, 'Workspace access could not be loaded'));
-        return response.json() as Promise<{ workspaces?: EditableWorkspace[] }>;
-      })
-      .then((payload) => {
-        if (!active) return;
-        const editable = (payload.workspaces ?? []).filter((workspace) => workspace.canEdit);
-        setWorkspaces(editable);
-        setWorkspaceId((current) => current && editable.some((workspace) => workspace.id === current)
-          ? current
-          : editable[0]?.id ?? '');
-        setWorkspaceState('ready');
-      })
-      .catch(() => { if (active) setWorkspaceState('error'); });
-    return () => { active = false; };
-  }, []);
 
   const consentExpiry = useMemo(() => {
     if (!consent?.expiresAt) return null;
@@ -144,7 +120,7 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
 
   async function start() {
     const roster = [...new Set([...artists, ...(artistInput.trim() ? [artistInput.trim()] : [])])].slice(0, 100);
-    if (!roster.length || !consented || (workspaces.length > 1 && !workspaceId)) return;
+    if (!roster.length || !consented) return;
     setBusy(true);
     setError('');
     setNotice('');
@@ -154,7 +130,6 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          ...(workspaceId ? { artistWorkspaceId: workspaceId } : {}),
           distributor: 'distrokid',
           scope: SCOPE,
           provider: 'steel',
@@ -276,30 +251,9 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
   if (phase === 'form' || phase === 'expired') {
     return (
       <div className="card" style={{ maxWidth: 680 }}>
-        {workspaces.length > 1 ? (
-          <>
-            <label className="field-label" htmlFor="artist-workspace">Catalog workspace</label>
-            <select
-              id="artist-workspace"
-              className="field"
-              value={workspaceId}
-              disabled={workspaceState !== 'ready' || busy}
-              onChange={(event) => setWorkspaceId(event.target.value)}
-              style={{ marginBottom: 8 }}
-            >
-              {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.id}</option>)}
-            </select>
-            <p className="hint" style={{ marginTop: 0, marginBottom: 16 }}>
-              Choose where this catalog and its audit history should be stored.
-            </p>
-          </>
-        ) : (
-          <p className="hint" style={{ marginTop: 0, marginBottom: 16 }}>
-            {workspaceState === 'loading' && 'Preparing your private personal catalog…'}
-            {workspaceState === 'error' && 'Your personal catalog will be resolved securely when the scan starts.'}
-            {workspaceState === 'ready' && 'Saved to your private catalog.'}
-          </p>
-        )}
+        <p className="hint" style={{ marginTop: 0, marginBottom: 16 }}>
+          Saved to your private catalog.
+        </p>
         <label className="field-label" htmlFor="artist">Your artist name(s)</label>
         {artists.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
@@ -337,7 +291,7 @@ export function RealConnect({ viewerOrigins }: { viewerOrigins: string[] }) {
 
         {notice && <div className="notice-banner" role="status" style={{ borderColor: 'var(--live-edge)', background: 'var(--live-tint)', color: 'var(--live)' }}>{notice}</div>}
         {error && <div className="notice-banner" role="alert" style={{ borderColor: 'var(--wrong-edge)', background: 'var(--wrong-tint)', color: 'var(--wrong)' }}>{error}</div>}
-        <button className="btn" disabled={(artists.length === 0 && !artistInput.trim()) || (workspaces.length > 1 && !workspaceId) || !consented || busy} onClick={() => void start()}>
+        <button className="btn" disabled={(artists.length === 0 && !artistInput.trim()) || !consented || busy} onClick={() => void start()}>
           {busy ? <><span className="spinner" /> Opening Steel…</> : 'Open Steel and sign in to DistroKid'}
         </button>
       </div>

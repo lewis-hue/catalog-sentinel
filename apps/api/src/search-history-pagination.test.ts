@@ -26,8 +26,9 @@ const result: CatalogResultLike = {
   note: '',
 };
 
-async function bearer(sub: string, roles: string[], tenantId = 'tenant-a'): Promise<{ authorization: string }> {
-  const token = await new SignJWT({ tenant_id: tenantId, realm_access: { roles } })
+// The subject is the only scope key. A tenant claim, if present, is ignored.
+async function bearer(sub: string): Promise<{ authorization: string }> {
+  const token = await new SignJWT({ realm_access: { roles: ['user'] } })
     .setProtectedHeader({ alg: 'RS256' })
     .setIssuer(ISSUER)
     .setAudience(AUDIENCE)
@@ -40,8 +41,7 @@ async function bearer(sub: string, roles: string[], tenantId = 'tenant-a'): Prom
 
 async function addRows(
   template: SearchRecord,
-  tenantId: string,
-  ownerUserId: string,
+  userId: string,
   prefix: string,
   count: number,
 ): Promise<void> {
@@ -49,9 +49,7 @@ async function addRows(
     await store.put({
       ...template,
       id: `search_${prefix}_${String(index).padStart(3, '0')}`,
-      tenantId,
-      ownerUserId,
-      artistWorkspaceId: `aw-${ownerUserId}`,
+      userId,
       artist: `${prefix}-${index}`,
       createdAt: '2026-07-22T12:00:00.000Z',
     });
@@ -62,14 +60,11 @@ beforeAll(async () => {
   const pair = await generateKeyPair('RS256');
   privateKey = pair.privateKey;
   publicKey = pair.publicKey;
-  const template = await store.save({
-    tenantId: 'fixture', ownerUserId: 'fixture', artistWorkspaceId: 'aw-fixture',
-    artist: 'Fixture', distributor: 'distrokid',
-  }, result);
-  await store.delete(template.id, 'fixture', 'fixture');
-  await addRows(template, 'tenant-a', 'alice', 'alice', 225);
-  await addRows(template, 'tenant-a', 'bob', 'bob', 3);
-  await addRows(template, 'tenant-other', 'alice', 'other', 2);
+  const template = await store.save({ artist: 'Fixture', distributor: 'distrokid' }, result, [], { userId: 'fixture' });
+  await store.delete(template.id, 'fixture');
+  await addRows(template, 'alice', 'alice', 225);
+  await addRows(template, 'bob', 'bob', 3);
+  await addRows(template, 'carol', 'carol', 2);
 
   app = buildApp({
     ...createAppTestServices(),
@@ -96,9 +91,9 @@ async function collectAll(headers: { authorization: string }, limit: number): Pr
   return rows;
 }
 
-describe('principal-scoped search history pagination', () => {
+describe('per-user search history pagination', () => {
   it('defaults to 50 and traverses all 225 equal-timestamp Alice rows exactly once', async () => {
-    const headers = await bearer('alice', ['artist_manager']);
+    const headers = await bearer('alice');
     const first = await app.inject({ method: 'GET', url: '/api/searches', headers });
     expect(first.statusCode).toBe(200);
     expect(first.json().searches).toHaveLength(50);
@@ -113,34 +108,19 @@ describe('principal-scoped search history pagination', () => {
     expect(all.every((row) => row.artist.startsWith('alice-'))).toBe(true);
   });
 
-  it('keeps Bob and another tenant out of Alice pages, including after page 200', async () => {
-    const bob = await collectAll(await bearer('bob', ['artist_manager']), 2);
-    const otherTenant = await collectAll(await bearer('alice', ['artist_manager'], 'tenant-other'), 1);
+  it('keeps every other user out of Alice pages, including after page 200', async () => {
+    const bob = await collectAll(await bearer('bob'), 2);
+    const carol = await collectAll(await bearer('carol'), 1);
     expect(bob.map((row) => row.id)).toEqual(['search_bob_002', 'search_bob_001', 'search_bob_000']);
-    expect(otherTenant.map((row) => row.id)).toEqual(['search_other_001', 'search_other_000']);
-  });
-
-  it('lets a tenant admin traverse only same-tenant rows and binds cursors to admin scope', async () => {
-    const aliceHeaders = await bearer('alice', ['artist_manager']);
-    const aliceFirst = await app.inject({ method: 'GET', url: '/api/searches?limit=10', headers: aliceHeaders });
-    const aliceCursor = aliceFirst.headers[SEARCH_HISTORY_NEXT_CURSOR_HEADER] as string;
-    const adminHeaders = await bearer('admin', ['tenant_admin']);
-    const wrongScope = await app.inject({
-      method: 'GET', url: `/api/searches?cursor=${encodeURIComponent(aliceCursor)}`, headers: adminHeaders,
-    });
-    expect(wrongScope.statusCode).toBe(400);
-
-    const adminRows = await collectAll(adminHeaders, 100);
-    expect(adminRows).toHaveLength(228);
-    expect(adminRows.some((row) => row.id.includes('_other_'))).toBe(false);
+    expect(carol.map((row) => row.id)).toEqual(['search_carol_001', 'search_carol_000']);
   });
 
   it('rejects malformed, tampered, cross-principal cursors and invalid page sizes with 400', async () => {
-    const aliceHeaders = await bearer('alice', ['artist_manager']);
+    const aliceHeaders = await bearer('alice');
     const first = await app.inject({ method: 'GET', url: '/api/searches?limit=10', headers: aliceHeaders });
     const cursor = first.headers[SEARCH_HISTORY_NEXT_CURSOR_HEADER] as string;
     const tampered = `${cursor.slice(0, -1)}${cursor.endsWith('A') ? 'B' : 'A'}`;
-    const bobHeaders = await bearer('bob', ['artist_manager']);
+    const bobHeaders = await bearer('bob');
     const urls = [
       '/api/searches?cursor=not-a-cursor',
       `/api/searches?cursor=${encodeURIComponent(tampered)}`,
@@ -154,6 +134,7 @@ describe('principal-scoped search history pagination', () => {
       expect(response.statusCode, url).toBe(400);
       expect(response.json()).toEqual({ error: 'invalid search history pagination' });
     }
+    // A cursor minted for Alice must not be usable by Bob: the cursor scope is bound to the subject.
     const crossPrincipal = await app.inject({
       method: 'GET', url: `/api/searches?cursor=${encodeURIComponent(cursor)}`, headers: bobHeaders,
     });

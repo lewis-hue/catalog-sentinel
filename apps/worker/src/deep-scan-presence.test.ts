@@ -34,13 +34,13 @@ function record(): SearchRecord {
       },
     },
   };
-  return { id: 'search_1', createdAt: 'now', artist: 'Lewis KE', distributor: 'distrokid', platforms: [], song: null, result };
+  return { id: 'search_1', userId: 'tenant-a', createdAt: 'now', artist: 'Lewis KE', distributor: 'distrokid', platforms: [], song: null, result };
 }
 
 describe('mergePlatform', () => {
   it('rejects a queue job whose tenant does not own the search record', async () => {
     const store = new InMemorySearchStore();
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Lewis KE', distributor: 'distrokid' }, record().result, []);
+    const saved = await store.save({ artist: 'Lewis KE', distributor: 'distrokid' }, record().result, [], { userId: 'tenant-a' });
     await expect(runStorePresenceDeepScan(saved.id, { store, env: {} }, 'tenant-b')).rejects.toThrow(/tenant/i);
   });
 
@@ -113,7 +113,7 @@ describe('mergePlatform', () => {
       },
     };
     const store = new InMemorySearchStore();
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Scale Artist', distributor: 'distrokid' }, result, released);
+    const saved = await store.save({ artist: 'Scale Artist', distributor: 'distrokid' }, result, released, { userId: 'tenant-a' });
 
     await runStorePresenceDeepScan(saved.id, { store, env: {}, targets: [target], maxTracks: 2_000, chunkSize: 25 }, 'tenant-a');
 
@@ -144,7 +144,7 @@ describe('mergePlatform', () => {
       },
     };
     const store = new InMemorySearchStore();
-    const saved = await store.save({ tenantId: 'tenant-a', artist: 'Scale Artist', distributor: 'distrokid' }, result, released);
+    const saved = await store.save({ artist: 'Scale Artist', distributor: 'distrokid' }, result, released, { userId: 'tenant-a' });
 
     await expect(runStorePresenceDeepScan(saved.id, { store, env: {}, targets: [target], maxTracks: 1_000 }, 'tenant-a'))
       .rejects.toThrow(/no track was silently truncated/i);

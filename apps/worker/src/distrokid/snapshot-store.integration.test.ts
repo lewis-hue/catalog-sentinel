@@ -136,7 +136,7 @@ describe.skipIf(!DATABASE_URL || !REDIS_URL)('tiered DistroKid checkpoints - rea
     expect(all).toHaveLength(1_100);
     expect(new Set(releaseIds).size).toBe(1_100);
     const durableCount = await pool.query(
-      'SELECT count(*)::int AS count FROM "DistroKidCheckpointOutcome" WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3',
+      'SELECT count(*)::int AS count FROM "DistroKidCheckpointOutcome" WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3',
       [scope.tenantId, scope.connectionId, scope.snapshotId],
     );
     expect(durableCount.rows[0]?.count).toBe(1_100);

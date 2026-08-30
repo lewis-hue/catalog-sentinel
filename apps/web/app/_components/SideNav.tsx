@@ -23,7 +23,6 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; pr
       { href: '/fixer', label: 'One-click fixer' },
       { href: '/review', label: 'Manual review' },
       { href: '/support', label: 'Support center' },
-      { href: '/organization', label: 'Organization' },
     ],
   },
 ];

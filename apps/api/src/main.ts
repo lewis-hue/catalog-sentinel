@@ -1,19 +1,12 @@
 import { startNodeTelemetry } from '@sentinel/core';
 import {
   envelopeEncryptorFromEnv,
-  isProductionEnvironment,
   PostgresAuditLogger,
   validateServerConfig,
   verifyEnvelopeEncryptor,
   type AuditSqlClient,
 } from '@sentinel/security';
-import {
-  createDistributorLinkRepository,
-  createLocalTenantErasureRequestRuntime,
-  createProductionTenantErasureRequestRuntime,
-  PostgresOrganizationRepository,
-  type GovernanceSqlPool,
-} from '@sentinel/db';
+import { createDistributorLinkRepository } from '@sentinel/db';
 import { createPgPool } from '@sentinel/search-store';
 import { buildApp } from './app';
 import { DistributorLinkService } from './distributor-link';
@@ -41,17 +34,6 @@ async function start(): Promise<void> {
   }
   const auditPool = createPgPool(process.env.DATABASE_URL);
   const audit = new PostgresAuditLogger(auditPool as unknown as AuditSqlClient);
-  const governancePool = auditPool as unknown as GovernanceSqlPool;
-  const tenantErasureRuntime = isProductionEnvironment(process.env)
-    ? createProductionTenantErasureRequestRuntime(governancePool, process.env)
-    : createLocalTenantErasureRequestRuntime(governancePool, process.env);
-  const organization = new PostgresOrganizationRepository(auditPool, tenantErasureRuntime.pseudonymizer);
-  try {
-    await tenantErasureRuntime.verifyReady();
-  } catch (error) {
-    await Promise.allSettled([tenantErasureRuntime.close(), repo.close(), auditPool.end(), telemetry.shutdown()]);
-    throw error;
-  }
   const distributorLink = new DistributorLinkService(audit, {
     repo,
   });
@@ -59,11 +41,8 @@ async function start(): Promise<void> {
   const app = buildApp({
     distributorLink,
     auditLogger: audit,
-    organization,
-    tenantErasure: tenantErasureRuntime.erasure,
     envelopeEncryptor,
     closeAudit: async () => {
-      await tenantErasureRuntime.close();
       await auditPool.end();
     },
   });

@@ -27,7 +27,7 @@ const job: FinalizeJob = {
   status: 'PARTIAL_RETRYABLE', completeness, pass: 3,
 };
 const record: SearchRecord = {
-  id: 'search-1', tenantId: 'tenant-a', createdAt: '2026-01-01T00:00:00.000Z', artist: 'Artist',
+  id: 'search-1', userId: 'tenant-a', createdAt: '2026-01-01T00:00:00.000Z', artist: 'Artist',
   distributor: 'distrokid', platforms: [], song: null,
   result: { artist: 'Artist', stores: [], profiles: [], tracks: [], summary: { tracks: 0, live: 0, notLive: 0, wrongProfile: 0, needsReview: 0 }, generatedAt: 'old', warnings: ['__reading_in_progress__'], note: 'reading' },
 };
@@ -108,7 +108,7 @@ describe('projectFinalizedSnapshot', () => {
   });
 
   it('rejects a cross-tenant finalization', () => {
-    expect(() => projectFinalizedSnapshot({ ...record, tenantId: 'tenant-b' }, job, outcomes)).toThrow(/tenant/i);
+    expect(() => projectFinalizedSnapshot({ ...record, userId: 'tenant-b' }, job, outcomes)).toThrow(/tenant/i);
   });
 
   it('owns each featured-artist array and falls back to the correlated release title', () => {

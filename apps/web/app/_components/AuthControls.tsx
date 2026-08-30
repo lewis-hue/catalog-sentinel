@@ -6,7 +6,6 @@ interface AuthSession {
   mode: 'keycloak';
   authenticated: boolean;
   displayName?: string;
-  tenantId?: string | null;
 }
 
 export function AuthControls() {
@@ -39,7 +38,7 @@ export function AuthControls() {
   const initial = (session.displayName ?? '?').trim().charAt(0).toUpperCase() || '?';
   return (
     <>
-      <div className="ws" title={session.tenantId ? `Tenant: ${session.tenantId}` : undefined}>
+      <div className="ws">
         <span className="avatar">{initial}</span>
         {session.displayName}
       </div>

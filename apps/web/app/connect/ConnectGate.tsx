@@ -21,9 +21,7 @@ export function ConnectGate({ viewerOrigins }: { viewerOrigins: string[] }) {
     setLoading(true);
     setError('');
     try {
-      // Steel readiness is identity-scoped and must not be blocked by an optional/stale
-      // organization selector.
-      const response = await apiFetch('/api/integrations/steel/status', { organizationId: null });
+      const response = await apiFetch('/api/integrations/steel/status');
       if (!response.ok) throw new Error(`Steel readiness check returned HTTP ${response.status}.`);
       setStatus((await response.json()) as SteelStatus);
     } catch (cause) {

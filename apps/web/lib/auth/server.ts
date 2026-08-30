@@ -21,7 +21,6 @@ export interface KeycloakTokenSet {
 export interface SessionDisplay {
   subject: string;
   displayName: string;
-  tenantId: string | null;
 }
 
 interface TokenEndpointResponse {
@@ -45,7 +44,6 @@ interface JwtClaims {
   preferred_username?: unknown;
   name?: unknown;
   email?: unknown;
-  tenant_id?: unknown;
 }
 
 const SESSION_COOKIE_AGE = 30 * 24 * 60 * 60;
@@ -319,9 +317,6 @@ export function sessionDisplayFromAccessToken(token: string): SessionDisplay | n
     return {
       subject: claims.sub,
       displayName: candidate?.trim() ?? 'Signed-in user',
-      // Personal isolation is keyed by the verified Keycloak subject. Shared organizations are
-      // explicit database-authorized selections, never a browser-readable token claim.
-      tenantId: claims.sub,
     };
   } catch {
     return null;

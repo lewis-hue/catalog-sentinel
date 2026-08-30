@@ -44,9 +44,6 @@ export function registerAuth(app: FastifyInstance, configOverride?: Partial<Keyc
     if (!token) { req.auth = { ...ANONYMOUS_IDENTITY }; return void reply.status(401).send({ error: 'missing bearer token' }); }
     try {
       req.auth = await verifier.verify(token);
-      // Legacy tenant-scoped routes still read x-tenant-id. When auth is enabled the verified
-      // claim is authoritative: overwrite any caller-supplied value so it cannot be spoofed.
-      req.headers['x-tenant-id'] = req.auth.tenantId;
     } catch (err) {
       req.auth = { ...ANONYMOUS_IDENTITY };
       // JOSE errors can contain issuer/JWKS/configuration details. Keep the wire response stable

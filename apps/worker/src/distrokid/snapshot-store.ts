@@ -618,12 +618,12 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     const cached = this.bindings.get(binding.snapshotId);
     if (cached && !sameBinding(cached, binding)) throw new SnapshotPrincipalMismatchError();
     await this.pool.query(
-      `INSERT INTO "DistroKidSnapshotCheckpoint" ("tenantId", "connectionId", "snapshotId", "distributor")
+      `INSERT INTO "DistroKidSnapshotCheckpoint" ("userId", "connectionId", "snapshotId", "distributor")
        VALUES ($1,$2,$3,$4) ON CONFLICT ("snapshotId") DO NOTHING`,
       [binding.tenantId, binding.connectionId, binding.snapshotId, binding.distributor],
     );
     const result = await this.pool.query(
-      `SELECT "tenantId", "connectionId", "snapshotId", "distributor",
+      `SELECT "userId" AS "tenantId", "connectionId", "snapshotId", "distributor",
               "indexVersion", "outcomesVersion", "progressVersion", "chunksVersion", "plansVersion", "terminalVersion"
          FROM "DistroKidSnapshotCheckpoint" WHERE "snapshotId" = $1`,
       [binding.snapshotId],
@@ -643,7 +643,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     const column = VERSION_COLUMNS[part];
     const result = await this.pool.query(
       `SELECT "${column}" AS "version" FROM "DistroKidSnapshotCheckpoint"
-        WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3`,
+        WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3`,
       this.params(binding),
     );
     if (!result.rows[0]) throw new SnapshotPrincipalMismatchError();
@@ -689,7 +689,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
   private async lock(client: PoolClient, binding: SnapshotCheckpointBinding): Promise<void> {
     const locked = await client.query(
       `SELECT 1 FROM "DistroKidSnapshotCheckpoint"
-        WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 FOR UPDATE`,
+        WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 FOR UPDATE`,
       this.params(binding),
     );
     if (locked.rowCount !== 1) throw new SnapshotPrincipalMismatchError();
@@ -700,7 +700,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     const result = await client.query(
       `UPDATE "DistroKidSnapshotCheckpoint"
           SET "${column}"="${column}"+1, "updatedAt"=clock_timestamp()
-        WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3
+        WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3
         RETURNING "${column}" AS "version"`,
       this.params(binding),
     );
@@ -720,7 +720,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     await this.transaction(async (client) => {
       await this.lock(client, binding);
       await client.query(
-        `DELETE FROM "DistroKidCheckpointIndex" WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3`,
+        `DELETE FROM "DistroKidCheckpointIndex" WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3`,
         this.params(binding),
       );
       for (let offset = 0; offset < sanitized.length; offset += this.batchSize) {
@@ -732,7 +732,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
         ]);
         await client.query(
           `INSERT INTO "DistroKidCheckpointIndex"
-             ("tenantId","connectionId","snapshotId","releaseId","ordinal","dashboardUrl","title","artist","expectedTrackCount")
+             ("userId","connectionId","snapshotId","releaseId","ordinal","dashboardUrl","title","artist","expectedTrackCount")
            VALUES ${placeholders(batch.length, 9)}`,
           values,
         );
@@ -749,7 +749,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
       const query = await this.pool.query(
         `SELECT "releaseId", "dashboardUrl", "title", "artist", "expectedTrackCount", "ordinal"
            FROM "DistroKidCheckpointIndex"
-          WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "ordinal">$4
+          WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "ordinal">$4
           ORDER BY "ordinal" LIMIT $5`,
         [...this.params(binding), after, CHECKPOINT_PAGE_SIZE],
       );
@@ -775,9 +775,9 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
         ]);
         await client.query(
           `INSERT INTO "DistroKidCheckpointOutcome"
-             ("tenantId","connectionId","snapshotId","releaseId","outcome")
+             ("userId","connectionId","snapshotId","releaseId","outcome")
            VALUES ${placeholders(batch.length, 5)}
-           ON CONFLICT ("tenantId","connectionId","snapshotId","releaseId") DO UPDATE
+           ON CONFLICT ("userId","connectionId","snapshotId","releaseId") DO UPDATE
              SET "outcome"=EXCLUDED."outcome", "updatedAt"=clock_timestamp()`,
           values,
         );
@@ -793,7 +793,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     while (true) {
       const query = await this.pool.query(
         `SELECT "releaseId", "outcome" FROM "DistroKidCheckpointOutcome"
-          WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "releaseId">$4
+          WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "releaseId">$4
           ORDER BY "releaseId" LIMIT $5`,
         [...this.params(binding), after, CHECKPOINT_PAGE_SIZE],
       );
@@ -813,9 +813,9 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
       await this.lock(client, binding);
       await client.query(
         `INSERT INTO "DistroKidCheckpointProgress"
-         ("tenantId","connectionId","snapshotId","distributor","status","expectedReleases","completedReleases","failedReleases","chunkCount","completedChunks","startedAt","updatedAt")
+         ("userId","connectionId","snapshotId","distributor","status","expectedReleases","completedReleases","failedReleases","chunkCount","completedChunks","startedAt","updatedAt")
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       ON CONFLICT ("tenantId","connectionId","snapshotId") DO UPDATE SET
+       ON CONFLICT ("userId","connectionId","snapshotId") DO UPDATE SET
          "distributor"=EXCLUDED."distributor", "status"=EXCLUDED."status",
          "expectedReleases"=EXCLUDED."expectedReleases", "completedReleases"=EXCLUDED."completedReleases",
          "failedReleases"=EXCLUDED."failedReleases", "chunkCount"=EXCLUDED."chunkCount",
@@ -833,11 +833,11 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
   async getProgress(snapshotId: string): Promise<SnapshotProgress | null> {
     const binding = this.binding(snapshotId);
     const query = await this.pool.query(
-      `SELECT "snapshotId", "tenantId", "connectionId", "distributor", "status",
+      `SELECT "snapshotId", "userId" AS "tenantId", "connectionId", "distributor", "status",
               "expectedReleases", "completedReleases", "failedReleases", "chunkCount",
               "completedChunks", "startedAt", "updatedAt"
          FROM "DistroKidCheckpointProgress"
-        WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3`,
+        WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3`,
       this.params(binding),
     );
     const raw = query.rows[0] as (Omit<SnapshotProgress, 'startedAt' | 'updatedAt'> & { startedAt: Date | string; updatedAt: Date | string }) | undefined;
@@ -857,7 +857,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     await this.transaction(async (client) => {
       await this.lock(client, binding);
       const inserted = await client.query(
-        `INSERT INTO "DistroKidCheckpointChunk" ("tenantId","connectionId","snapshotId","pass","chunkIndex")
+        `INSERT INTO "DistroKidCheckpointChunk" ("userId","connectionId","snapshotId","pass","chunkIndex")
          VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING 1`,
         [...this.params(binding), safePass, safeChunk],
       );
@@ -874,7 +874,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     while (true) {
       const query = await this.pool.query(
         `SELECT "chunkIndex" FROM "DistroKidCheckpointChunk"
-          WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "pass"=$4 AND "chunkIndex">$5
+          WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "pass"=$4 AND "chunkIndex">$5
           ORDER BY "chunkIndex" LIMIT $6`,
         [...this.params(binding), safePass, after, CHECKPOINT_PAGE_SIZE],
       );
@@ -893,7 +893,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     if (safePass < 1) throw new Error('checkpoint pass must be positive');
     const query = await this.pool.query(
       `SELECT count(*)::bigint AS "count" FROM "DistroKidCheckpointChunk"
-        WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "pass"=$4`,
+        WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "pass"=$4`,
       [...this.params(binding), safePass],
     );
     return BigInt(query.rows[0]?.['count'] as string | bigint);
@@ -911,7 +911,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
       await this.lock(client, binding);
       await client.query(
         `DELETE FROM "DistroKidCheckpointPassPlanChunk"
-          WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "pass"=$4`,
+          WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "pass"=$4`,
         [...this.params(binding), safePass],
       );
       for (let offset = 0; offset < plan.length; offset += this.batchSize) {
@@ -921,7 +921,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
         ]);
         await client.query(
           `INSERT INTO "DistroKidCheckpointPassPlanChunk"
-             ("tenantId","connectionId","snapshotId","pass","chunkIndex","releaseIds")
+             ("userId","connectionId","snapshotId","pass","chunkIndex","releaseIds")
            VALUES ${placeholders(batch.length, 6)}`,
           values,
         );
@@ -939,7 +939,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     while (true) {
       const query = await this.pool.query(
         `SELECT "chunkIndex", "releaseIds" FROM "DistroKidCheckpointPassPlanChunk"
-          WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "pass"=$4 AND "chunkIndex">$5
+          WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3 AND "pass"=$4 AND "chunkIndex">$5
           ORDER BY "chunkIndex" LIMIT $6`,
         [...this.params(binding), safePass, after, CHECKPOINT_PAGE_SIZE],
       );
@@ -959,7 +959,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     const inserted = await this.transaction(async (client) => {
       await this.lock(client, binding);
       const result = await client.query(
-        `INSERT INTO "DistroKidCheckpointTerminal" ("tenantId","connectionId","snapshotId","tombstone")
+        `INSERT INTO "DistroKidCheckpointTerminal" ("userId","connectionId","snapshotId","tombstone")
          VALUES ($1,$2,$3,$4::jsonb) ON CONFLICT DO NOTHING RETURNING "tombstone"`,
         [...this.params(binding), JSON.stringify(proposed)],
       );
@@ -976,7 +976,7 @@ export class PostgresSnapshotCheckpointStore implements SnapshotCheckpointStore 
     const binding = this.binding(snapshotId);
     const query = await this.pool.query(
       `SELECT "tombstone" FROM "DistroKidCheckpointTerminal"
-        WHERE "tenantId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3`,
+        WHERE "userId"=$1 AND "connectionId"=$2 AND "snapshotId"=$3`,
       this.params(binding),
     );
     if (!query.rows[0]) return null;

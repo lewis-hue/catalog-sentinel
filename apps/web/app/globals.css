@@ -476,13 +476,6 @@ input.filter { min-width: 240px; }
 .history-rename .filter { min-width: min(280px, 100%); }
 .history-load-more { display: flex; justify-content: center; margin-top: 18px; }
 
-/* Organization and workspace access */
-.org-stack { display: flex; flex-direction: column; gap: 18px; }
-.org-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
-.org-form { display: flex; flex-direction: column; gap: 13px; }
-.org-form-grid { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) minmax(130px, 0.7fr) auto; gap: 12px; align-items: end; }
-.org-actions { display: flex; gap: 7px; flex-wrap: wrap; justify-content: center; }
-.org-token { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--gap-edge); border-radius: var(--radius-sm); background: var(--gap-tint); }
 .field.compact { min-width: 125px; padding: 7px 9px; }
 
 /* ===== Coverage matrix + evidence drawer (the signature view) ============= */
@@ -569,5 +562,4 @@ input.filter { min-width: 240px; }
   .history-stats { flex: 0 0 100%; flex-wrap: wrap; }
   .history-actions .btn { flex: 1 1 auto; text-align: center; }
   .history-delete { margin-left: 0; }
-  .org-form-grid { grid-template-columns: 1fr; }
 }

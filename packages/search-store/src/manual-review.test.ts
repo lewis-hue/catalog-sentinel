@@ -14,7 +14,7 @@ function record(): SearchRecord {
     ],
     summary: { tracks: 1, live: 1, notLive: 0, wrongProfile: 0, needsReview: 2 }, generatedAt: 'now', warnings: [], note: '',
   };
-  return { id: 'search_1', createdAt: 'now', artist: 'Lewis KE', distributor: 'distrokid', platforms: [], song: null, result };
+  return { id: 'search_1', userId: 'user-1', createdAt: 'now', artist: 'Lewis KE', distributor: 'distrokid', platforms: [], song: null, result };
 }
 
 describe('manual-review', () => {

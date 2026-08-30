@@ -1,13 +1,12 @@
-import {
-  ownerOf,
-  type CatalogResultLike,
-  type ReleasedTrackLike,
-  type SearchInput,
-  type SearchPage,
-  type SearchPageOptions,
-  type SearchRecord,
-  type SearchStore,
-  type SearchSummary,
+import type {
+  CatalogResultLike,
+  ReleasedTrackLike,
+  SearchInput,
+  SearchPage,
+  SearchPageOptions,
+  SearchRecord,
+  SearchStore,
+  SearchSummary,
 } from './search-store';
 import type { PostgresSearchStore } from './postgres-search-store';
 
@@ -24,8 +23,8 @@ export class TieredSearchStore implements SearchStore {
     private readonly log: (msg: string, extra?: Record<string, unknown>) => void = () => {},
   ) {}
 
-  async save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[]): Promise<SearchRecord> {
-    const rec = await this.durable.save(input, result, released);
+  async save(input: SearchInput, result: CatalogResultLike, released?: ReleasedTrackLike[], owner?: { userId: string }): Promise<SearchRecord> {
+    const rec = await this.durable.save(input, result, released, owner);
     await this.warm(rec);
     return rec;
   }
@@ -50,33 +49,17 @@ export class TieredSearchStore implements SearchStore {
     }
   }
 
-  async listForTenant(tenantId: string): Promise<SearchSummary[]> {
+  async listForUser(userId: string): Promise<SearchSummary[]> {
     try {
-      return await this.durable.listForTenant(tenantId);
+      return await this.durable.listForUser(userId);
     } catch {
       throw new Error('durable search store unavailable');
     }
   }
 
-  async listForOwner(tenantId: string, ownerUserId: string): Promise<SearchSummary[]> {
+  async pageForUser(userId: string, options: SearchPageOptions): Promise<SearchPage> {
     try {
-      return await this.durable.listForOwner(tenantId, ownerUserId);
-    } catch {
-      throw new Error('durable search store unavailable');
-    }
-  }
-
-  async pageForTenant(tenantId: string, options: SearchPageOptions): Promise<SearchPage> {
-    try {
-      return await this.durable.pageForTenant(tenantId, options);
-    } catch {
-      throw new Error('durable search store unavailable');
-    }
-  }
-
-  async pageForOwner(tenantId: string, ownerUserId: string, options: SearchPageOptions): Promise<SearchPage> {
-    try {
-      return await this.durable.pageForOwner(tenantId, ownerUserId, options);
+      return await this.durable.pageForUser(userId, options);
     } catch {
       throw new Error('durable search store unavailable');
     }
@@ -88,16 +71,14 @@ export class TieredSearchStore implements SearchStore {
     return next;
   }
 
-  async delete(recordId: string, tenantId?: string, ownerUserId?: string): Promise<boolean> {
+  async delete(recordId: string, userId?: string): Promise<boolean> {
     // Delete from the durable source first. If that fails, keep the cache intact so a record can
     // never appear deleted and then re-emerge from Postgres after a Redis flush/restart.
     const durableRecord = await this.durable.get(recordId);
-    if (durableRecord && tenantId && ownerOf(durableRecord) !== tenantId) return false;
-    if (durableRecord && ownerUserId && durableRecord.ownerUserId !== ownerUserId) return false;
-    const owner = tenantId ?? (durableRecord ? ownerOf(durableRecord) : undefined);
-    const userOwner = ownerUserId ?? durableRecord?.ownerUserId;
-    const durableDeleted = await this.durable.delete(recordId, owner, userOwner);
-    const hotDeleted = await this.hot.delete(recordId, owner, userOwner).catch((err) => {
+    if (durableRecord && userId && durableRecord.userId !== userId) return false;
+    const owner = userId ?? durableRecord?.userId;
+    const durableDeleted = await this.durable.delete(recordId, owner);
+    const hotDeleted = await this.hot.delete(recordId, owner).catch((err) => {
       this.log('hot search-store cache delete failed', { err: String(err) });
       return false;
     });

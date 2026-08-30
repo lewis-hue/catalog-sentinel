@@ -17,9 +17,6 @@ type RouteContext = { params: Promise<{ path: string[] }> };
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const REQUEST_HEADERS = new Set([
   'accept', 'accept-language', 'content-type', 'if-match', 'if-none-match', 'range',
-  // This is a tenant selector, never authority. The API validates the signed OIDC subject against
-  // its durable organization membership before using it.
-  'x-sentinel-organization-id',
 ]);
 const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024;
 

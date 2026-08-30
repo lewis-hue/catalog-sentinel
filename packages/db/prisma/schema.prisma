@@ -1,8 +1,8 @@
-// Artist Catalog Sentinel — canonical data model (PRD §D).
+// Artist Catalog Sentinel - canonical data model (PRD §D).
 // PostgreSQL is the production persistence source of truth (see docs/runbook.md).
 //
-// Multi-tenant: every row is scoped to a Tenant; the app enforces per-tenant
-// isolation at the query layer (row-level security recommended in prod).
+// Per-user: every row is scoped to a userId (the authenticated subject); the app enforces
+// per-user isolation at the query layer (row-level security recommended in prod).
 
 generator client {
   provider = "prisma-client-js"
@@ -19,26 +19,6 @@ enum UserRole {
   manager
   analyst
   viewer
-}
-
-enum OrganizationRole {
-  OWNER
-  ADMIN
-  MEMBER
-  AUDITOR
-  BILLING
-}
-
-enum WorkspaceRole {
-  OWNER
-  MANAGER
-  EDITOR
-  VIEWER
-}
-
-enum MembershipStatus {
-  ACTIVE
-  SUSPENDED
 }
 
 enum GovernanceJobStatus {
@@ -75,23 +55,9 @@ enum IssueStatus {
   dismissed
 }
 
-model Tenant {
-  id        String   @id @default(cuid())
-  name      String
-  plan      String   @default("free")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  users                   User[]
-  workspaces              Workspace[]
-  auditLogs               AuditLog[]
-  organizationMemberships OrganizationMembership[]
-  organizationInvitations OrganizationInvitation[]
-}
-
 model User {
   id          String   @id @default(cuid())
-  tenantId    String
+  userId      String
   email       String
   displayName String
   role        UserRole @default(viewer)
@@ -99,130 +65,25 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   consentGrants ConsentGrant[]
 
-  @@unique([tenantId, email])
-  @@index([tenantId])
-}
-
-model Workspace {
-  id              String   @id @default(cuid())
-  tenantId        String
-  name            String
-  primaryArtistId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  tenant               Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  artists              Artist[]
-  distributorAccounts  DistributorAccount[]
-  dspAccounts          DSPAccount[]
-  credentialReferences CredentialReference[]
-  catalogSnapshots     CatalogSnapshot[]
-  releases             Release[]
-  tracks               Track[]
-  issues               Issue[]
-  supportPackets       SupportPacket[]
-  scanJobs             ScanJob[]
-  scanRuns             ScanRun[]
-  consentGrants        ConsentGrant[]
-  royaltyReports       RoyaltyReport[]
-  workspaceMemberships WorkspaceMembership[]
-  invitationGrants     InvitationWorkspaceGrant[]
-
-  @@unique([tenantId, id])
-  @@index([tenantId])
-}
-
-/// OIDC subjects, rather than mutable email addresses, are the authorization identity.
-/// A subject may belong to multiple organizations (Tenant is the legacy organization name).
-model OrganizationMembership {
-  id        String           @id @default(cuid())
-  tenantId  String
-  subjectId String
-  role      OrganizationRole
-  status    MembershipStatus @default(ACTIVE)
-  createdAt DateTime         @default(now()) @db.Timestamptz(3)
-  updatedAt DateTime         @updatedAt @db.Timestamptz(3)
-
-  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceMemberships WorkspaceMembership[]
-
-  @@unique([tenantId, subjectId])
-  @@index([subjectId, status])
-}
-
-model WorkspaceMembership {
-  id          String           @id @default(cuid())
-  tenantId    String
-  workspaceId String
-  subjectId   String
-  role        WorkspaceRole
-  status      MembershipStatus @default(ACTIVE)
-  createdAt   DateTime         @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime         @updatedAt @db.Timestamptz(3)
-
-  organizationMembership OrganizationMembership @relation(fields: [tenantId, subjectId], references: [tenantId, subjectId], onDelete: Cascade)
-  workspace              Workspace              @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-
-  @@unique([tenantId, workspaceId, subjectId])
-  @@index([tenantId, subjectId, status])
-  @@index([workspaceId, status])
-}
-
-/// Only a SHA-256 digest of the bearer token is persisted. The plaintext token is returned once.
-model OrganizationInvitation {
-  id                  String           @id @default(cuid())
-  tenantId            String
-  emailNormalized     String
-  tokenHash           String           @unique
-  organizationRole    OrganizationRole
-  issuedBySubjectId   String
-  acceptedBySubjectId String?
-  expiresAt           DateTime         @db.Timestamptz(3)
-  acceptedAt          DateTime?        @db.Timestamptz(3)
-  revokedAt           DateTime?        @db.Timestamptz(3)
-  idempotencyKey      String
-  createdAt           DateTime         @default(now()) @db.Timestamptz(3)
-  updatedAt           DateTime         @updatedAt @db.Timestamptz(3)
-
-  tenant          Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  workspaceGrants InvitationWorkspaceGrant[]
-
-  @@unique([tenantId, idempotencyKey])
-  @@unique([tenantId, id])
-  @@index([tenantId, emailNormalized, expiresAt])
-}
-
-model InvitationWorkspaceGrant {
-  id           String        @id @default(cuid())
-  tenantId     String
-  invitationId String
-  workspaceId  String
-  role         WorkspaceRole
-
-  invitation OrganizationInvitation @relation(fields: [tenantId, invitationId], references: [tenantId, id], onDelete: Cascade)
-  workspace  Workspace              @relation(fields: [tenantId, workspaceId], references: [tenantId, id], onDelete: Cascade)
-
-  @@unique([invitationId, workspaceId])
-  @@index([tenantId, workspaceId])
+  @@unique([userId, email])
+  @@index([userId])
 }
 
 model Artist {
-  id          String   @id @default(cuid())
-  workspaceId String
-  name        String
-  label       String?
-  country     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  label     String?
+  country   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  aliases   ArtistAlias[]
-  profiles  ArtistProfile[]
+  aliases  ArtistAlias[]
+  profiles ArtistProfile[]
 
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 model ArtistAlias {
@@ -255,7 +116,7 @@ model ArtistProfile {
 
 model DistributorAccount {
   id                    String   @id @default(cuid())
-  workspaceId           String
+  userId                String
   provider              String
   displayLabel          String
   ingestionMode         String
@@ -264,14 +125,12 @@ model DistributorAccount {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 model DSPAccount {
   id                    String   @id @default(cuid())
-  workspaceId           String
+  userId                String
   platform              String
   displayLabel          String
   ingestionMode         String
@@ -280,16 +139,14 @@ model DSPAccount {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 // Stores ONLY an opaque handle to a secret held in KMS/Secrets Manager.
 // NEVER stores a password or secret value.
 model CredentialReference {
   id           String    @id @default(cuid())
-  workspaceId  String
+  userId       String
   provider     String
   secretHandle String
   kind         String    @default("none")
@@ -297,14 +154,12 @@ model CredentialReference {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 model CatalogSnapshot {
   id           String   @id @default(cuid())
-  workspaceId  String
+  userId       String
   source       String
   sourceMode   String
   capturedAt   DateTime
@@ -314,15 +169,14 @@ model CatalogSnapshot {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  releases  Release[]
+  releases Release[]
 
-  @@index([workspaceId, source])
+  @@index([userId, source])
 }
 
 model Release {
   id                   String   @id @default(cuid())
-  workspaceId          String
+  userId               String
   snapshotId           String
   title                String
   primaryArtistName    String
@@ -334,13 +188,12 @@ model Release {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   snapshot        CatalogSnapshot     @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
   tracks          Track[]
   storeSelections StoreSelection[]
   identifiers     ReleaseIdentifier[]
 
-  @@index([workspaceId])
+  @@index([userId])
   @@index([upc])
 }
 
@@ -359,7 +212,7 @@ model ReleaseIdentifier {
 
 model Track {
   id                String   @id @default(cuid())
-  workspaceId       String
+  userId            String
   releaseId         String
   title             String
   primaryArtistName String
@@ -370,11 +223,10 @@ model Track {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   release     Release           @relation(fields: [releaseId], references: [id], onDelete: Cascade)
   identifiers TrackIdentifier[]
 
-  @@index([workspaceId])
+  @@index([userId])
   @@index([isrc])
 }
 
@@ -405,7 +257,7 @@ model StoreSelection {
 
 model Issue {
   id                String      @id @default(cuid())
-  workspaceId       String
+  userId            String
   reasonCode        String
   severity          String
   status            IssueStatus @default(open)
@@ -419,16 +271,15 @@ model Issue {
   createdAt         DateTime    @default(now())
   updatedAt         DateTime    @updatedAt
 
-  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  evidence  IssueEvidence[]
+  evidence IssueEvidence[]
 
-  @@index([workspaceId, reasonCode])
-  @@index([workspaceId, severity])
+  @@index([userId, reasonCode])
+  @@index([userId, severity])
 }
 
 model IssueEvidence {
   id                        String   @id @default(cuid())
-  workspaceId               String
+  userId                    String
   issueId                   String?
   snapshotId                String?
   sourceMode                String
@@ -445,12 +296,13 @@ model IssueEvidence {
 
   issue Issue? @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@index([issueId])
 }
 
 model SupportPacket {
   id             String   @id @default(cuid())
-  workspaceId    String
+  userId         String
   template       String
   targetAudience String
   targetProvider String
@@ -461,10 +313,9 @@ model SupportPacket {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  workspace Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   artifacts SupportPacketArtifact[]
 
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 model SupportPacketArtifact {
@@ -480,24 +331,23 @@ model SupportPacketArtifact {
 }
 
 model ScanJob {
-  id          String   @id @default(cuid())
-  workspaceId String
-  kind        String
-  params      Json
-  schedule    String   @default("on-demand")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  params    Json
+  schedule  String   @default("on-demand")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  runs      ScanRun[]
+  runs ScanRun[]
 
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 model ScanRun {
   id             String     @id @default(cuid())
   scanJobId      String
-  workspaceId    String
+  userId         String
   status         ScanStatus @default(queued)
   startedAt      DateTime?
   finishedAt     DateTime?
@@ -507,25 +357,23 @@ model ScanRun {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  scanJob   ScanJob   @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scanJob ScanJob @relation(fields: [scanJobId], references: [id], onDelete: Cascade)
 
   @@unique([scanJobId, idempotencyKey])
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 model RoyaltyReport {
   id          String   @id @default(cuid())
-  workspaceId String
+  userId      String
   periodStart String
   periodEnd   String
   source      String
   createdAt   DateTime @default(now())
 
-  workspace Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lineItems RoyaltyLineItem[]
 
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 model RoyaltyLineItem {
@@ -544,7 +392,7 @@ model RoyaltyLineItem {
 
 model ConsentGrant {
   id              String    @id @default(cuid())
-  workspaceId     String
+  userId          String
   grantedByUserId String
   scopes          String[]
   purpose         String
@@ -555,16 +403,14 @@ model ConsentGrant {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [grantedByUserId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [grantedByUserId], references: [id], onDelete: Cascade)
 
-  @@index([workspaceId])
+  @@index([userId])
 }
 
 model AuditLog {
   id          String   @id @default(cuid())
-  tenantId    String
-  workspaceId String?
+  userId      String
   actorUserId String?
   action      String
   targetType  String
@@ -572,19 +418,15 @@ model AuditLog {
   metadata    Json
   createdAt   DateTime @default(now())
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@index([tenantId, createdAt])
-  @@index([workspaceId])
+  @@index([userId, createdAt(sort: Desc)])
 }
 
-/// Append-only operational audit stream. This intentionally has no Tenant foreign key so the
-/// first authenticated action for a newly issued tenant can be recorded before provisioning.
+/// Append-only operational audit stream. This intentionally has no foreign key so the
+/// first authenticated action for a newly issued user can be recorded before provisioning.
 model SecurityAuditEvent {
   id               String   @id
   occurredAt       DateTime @default(now()) @map("occurred_at") @db.Timestamptz(3)
-  tenantId         String   @map("tenant_id")
-  workspaceId      String?  @map("workspace_id")
+  userId           String   @map("user_id")
   actorUserId      String?  @map("actor_user_id")
   action           String
   targetType       String   @map("target_type")
@@ -596,15 +438,15 @@ model SecurityAuditEvent {
   canonicalPayload String   @map("canonical_payload")
   canonicalVersion Int      @default(1) @map("canonical_version")
 
-  @@unique([tenantId, chainSequence])
-  @@index([tenantId, occurredAt])
+  @@unique([userId, chainSequence])
+  @@index([userId, occurredAt])
   @@index([targetType, targetId])
   @@map("security_audit_events")
 }
 
 /// Mutable pointer used only to serialize appends. The immutable events remain the authority.
 model AuditChainHead {
-  tenantId     String   @id @map("tenant_id")
+  userId       String   @id @map("user_id")
   lastSequence BigInt   @default(0) @map("last_sequence")
   lastHash     String   @default("") @map("last_hash")
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -616,7 +458,7 @@ model AuditChainHead {
 /// detectable even to an offline verifier that does not trust this database.
 model AuditChainAnchor {
   id            String   @id
-  tenantId      String   @map("tenant_id")
+  userId        String   @map("user_id")
   chainSequence BigInt   @map("chain_sequence")
   eventHash     String   @map("event_hash")
   signerKeyId   String   @map("signer_key_id")
@@ -624,8 +466,8 @@ model AuditChainAnchor {
   externalRef   String   @map("external_ref")
   anchoredAt    DateTime @default(now()) @map("anchored_at") @db.Timestamptz(3)
 
-  @@unique([tenantId, chainSequence])
-  @@index([tenantId, anchoredAt])
+  @@unique([userId, chainSequence])
+  @@index([userId, anchoredAt])
   @@map("audit_chain_anchors")
 }
 
@@ -653,7 +495,7 @@ model AuditErasureReceipt {
 /// Crash-recovery outbox holding the exact KMS signature until its immutable S3 anchor and
 /// database reference commit. This is operational state, not an audit event.
 model AuditAnchorOutbox {
-  tenantId      String   @map("tenant_id")
+  userId        String   @map("user_id")
   chainSequence BigInt   @map("chain_sequence")
   eventHash     String   @map("event_hash")
   payload       String
@@ -661,7 +503,7 @@ model AuditAnchorOutbox {
   signature     String
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  @@id([tenantId, chainSequence])
+  @@id([userId, chainSequence])
   @@map("audit_anchor_outbox")
 }
 
@@ -684,8 +526,8 @@ model AuditPurgeManifest {
 
 // ===========================================================================
 // Secure Distributor Link + Deep Catalog Scan (production models).
-// Standalone (string tenantId + indexes) to keep migrations simple. Sensitive
-// references are stored ONLY as envelope-encrypted blobs — never raw cookies.
+// Standalone (string userId + indexes) to keep migrations simple. Sensitive
+// references are stored ONLY as envelope-encrypted blobs - never raw cookies.
 // ===========================================================================
 
 enum BrowserSessionStatus {
@@ -727,9 +569,7 @@ enum DeepScanStatus {
 
 model BrowserLinkSession {
   id                          String               @id @default(cuid())
-  tenantId                    String
-  userId                      String?
-  artistWorkspaceId           String?
+  userId                      String
   provider                    String
   distributor                 String
   status                      BrowserSessionStatus @default(CREATED)
@@ -746,14 +586,14 @@ model BrowserLinkSession {
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 
-  @@index([tenantId])
-  @@index([tenantId, status])
+  @@index([userId])
+  @@index([userId, status])
   @@index([expiresAt])
 }
 
 model BrowserStateRef {
   id           String           @id @default(cuid())
-  tenantId     String
+  userId       String
   provider     String
   kind         BrowserStateKind
   encryptedRef String
@@ -762,14 +602,13 @@ model BrowserStateRef {
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
 
-  @@index([tenantId])
+  @@index([userId])
   @@index([expiresAt])
 }
 
 model DistributorConnection {
   id                String                      @id @default(cuid())
-  tenantId          String
-  artistWorkspaceId String
+  userId            String
   distributor       String
   status            DistributorConnectionStatus @default(PENDING)
   connectionMode    String
@@ -780,14 +619,13 @@ model DistributorConnection {
   createdAt         DateTime                    @default(now())
   updatedAt         DateTime                    @updatedAt
 
-  @@unique([tenantId, artistWorkspaceId, distributor])
-  @@index([tenantId])
+  @@unique([userId, distributor])
+  @@index([userId])
 }
 
 model DeepScanRun {
   id                      String         @id @default(cuid())
-  tenantId                String
-  artistWorkspaceId       String
+  userId                  String
   distributorConnectionId String
   status                  DeepScanStatus @default(QUEUED)
   progressPercent         Int            @default(0)
@@ -805,13 +643,13 @@ model DeepScanRun {
   updatedAt               DateTime       @updatedAt
 
   @@unique([distributorConnectionId, idempotencyKey])
-  @@index([tenantId, status])
+  @@index([userId, status])
   @@index([distributorConnectionId])
 }
 
 model DeepScanCheckpoint {
   id                  String   @id @default(cuid())
-  tenantId            String
+  userId              String
   deepScanRunId       String   @unique
   currentReleaseIndex Int      @default(0)
   scannedReleaseIds   String[]
@@ -819,29 +657,28 @@ model DeepScanCheckpoint {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  @@index([tenantId])
+  @@index([userId])
 }
 
 model DistributorCatalogSnapshot {
-  id                String   @id @default(cuid())
-  tenantId          String
-  artistWorkspaceId String
-  distributor       String
-  deepScanRunId     String?
-  releaseCount      Int      @default(0)
-  trackCount        Int      @default(0)
-  capturedAt        DateTime @default(now())
-  createdAt         DateTime @default(now())
+  id            String   @id @default(cuid())
+  userId        String
+  distributor   String
+  deepScanRunId String?
+  releaseCount  Int      @default(0)
+  trackCount    Int      @default(0)
+  capturedAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
 
   releases DistributorRelease[]
 
-  @@index([tenantId])
-  @@index([tenantId, distributor])
+  @@index([userId])
+  @@index([userId, distributor])
 }
 
 model DistributorRelease {
   id                    String   @id @default(cuid())
-  tenantId              String
+  userId                String
   snapshotId            String
   distributor           String
   distributorReleaseId  String?
@@ -849,7 +686,7 @@ model DistributorRelease {
   title                 String
   normalizedTitle       String
   primaryArtist         String
-  // UPC is a RELEASE-level identifier and lives only here — never on a track.
+  // UPC is a RELEASE-level identifier and lives only here - never on a track.
   upc                   String?
   releaseDate           String?
   scanSource            String?
@@ -860,14 +697,13 @@ model DistributorRelease {
   tracks   DistributorTrack[]
 
   @@unique([snapshotId, distributorReleaseId])
-  @@index([tenantId])
+  @@index([userId])
   @@index([snapshotId])
 }
 
 model DistributorTrack {
   id                      String   @id @default(cuid())
-  tenantId                String
-  artistWorkspaceId       String
+  userId                  String
   snapshotId              String
   releaseId               String
   distributor             String
@@ -894,14 +730,14 @@ model DistributorTrack {
 
   release DistributorRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
 
-  // ISRC duplicates are DETECTED and flagged, never blocked — so no unique on ISRC.
-  @@index([tenantId])
+  // ISRC duplicates are DETECTED and flagged, never blocked - so no unique on ISRC.
+  @@index([userId])
   @@index([snapshotId])
   @@index([isrc])
 }
 
 // ============================================================================
-// Network-first extraction — the DURABLE system of record.
+// Network-first extraction - the DURABLE system of record.
 //
 // Redis holds operational checkpoints so a crashed read can resume; it is NOT the catalog
 // system of record and may be flushed at any time. These tables are what survive.
@@ -916,7 +752,7 @@ model DistributorTrack {
 
 model DistributorExtractionSnapshot {
   id           String @id @default(cuid())
-  tenantId     String
+  userId       String
   connectionId String
   /// The application-level snapshot id (the scan/search id). Idempotency key for finalization.
   snapshotId   String
@@ -934,7 +770,7 @@ model DistributorExtractionSnapshot {
   expectedTracks      Int     @default(0)
   extractedTracks     Int     @default(0)
 
-  // Coverage per identifier LEVEL — never blended into one number.
+  // Coverage per identifier LEVEL - never blended into one number.
   releasesWithUpc     Int @default(0)
   releasesWithArtwork Int @default(0)
   tracksWithIsrc      Int @default(0)
@@ -962,18 +798,18 @@ model DistributorExtractionSnapshot {
 
   releases DistributorReleaseOutcome[]
 
-  @@unique([tenantId, snapshotId])
-  @@index([tenantId])
-  @@index([tenantId, connectionId])
-  @@index([tenantId, distributor, status])
+  @@unique([userId, snapshotId])
+  @@index([userId])
+  @@index([userId, connectionId])
+  @@index([userId, distributor, status])
 }
 
 model DistributorReleaseOutcome {
   id                   String  @id @default(cuid())
-  tenantId             String
+  userId               String
   extractionSnapshotId String
   distributorReleaseId String
-  /// COMPLETED | FAILED | SKIPPED — every indexed release gets one. A release with no row is
+  /// COMPLETED | FAILED | SKIPPED - every indexed release gets one. A release with no row is
   /// what makes a snapshot PARTIAL_RETRYABLE rather than silently short.
   kind                 String
   /// Reason CODE for a non-COMPLETED outcome: TIMEOUT | REQUEST_FAILED | PARSE_FAILED |
@@ -1015,16 +851,16 @@ model DistributorReleaseOutcome {
 
   // Finalization is idempotent: a retried finalize upserts on this key rather than duplicating.
   @@unique([extractionSnapshotId, distributorReleaseId])
-  @@index([tenantId])
+  @@index([userId])
   @@index([extractionSnapshotId, kind])
 }
 
 model DistributorTrackOutcome {
   id                 String   @id @default(cuid())
-  tenantId           String
+  userId             String
   releaseOutcomeId   String
   distributorTrackId String?
-  /// Position within the release — the stable key when the distributor exposes no track id.
+  /// Position within the release - the stable key when the distributor exposes no track id.
   trackIndex         Int
   title              String?
   primaryArtist      String?
@@ -1038,7 +874,7 @@ model DistributorTrackOutcome {
   isrcStatus String  @default("UNKNOWN")
 
   /// Distributor-side lyric availability per type: present | processing | none | unknown.
-  /// `unknown` (the default) means the scrape did not read the cell — never rendered as "missing".
+  /// `unknown` (the default) means the scrape did not read the cell - never rendered as "missing".
   plainLyricsStatus  String @default("unknown")
   syncedLyricsStatus String @default("unknown")
 
@@ -1065,13 +901,13 @@ model DistributorTrackOutcome {
   release DistributorReleaseOutcome @relation(fields: [releaseOutcomeId], references: [id], onDelete: Cascade)
 
   @@unique([releaseOutcomeId, trackIndex])
-  @@index([tenantId])
+  @@index([userId])
   @@index([isrc])
 }
 
 model DistributorEndpointProfile {
   id          String @id @default(cuid())
-  tenantId    String
+  userId      String
   distributor String
   /// SANITIZED identity: hash of (method, host, masked path, query KEY names, operationName).
   /// Never contains query VALUES, cookies, headers or tokens.
@@ -1112,14 +948,14 @@ model DistributorEndpointProfile {
   promotedAt  DateTime?
   degradedAt  DateTime?
 
-  @@unique([tenantId, distributor, fingerprint])
-  @@index([tenantId, distributor, status])
+  @@unique([userId, distributor, fingerprint])
+  @@index([userId, distributor, status])
 }
 
 model DistributorEndpointCandidate {
   id          String @id @default(cuid())
-  tenantId    String
-  /// The scan that observed it — candidates are discovery output, scoped to their scan.
+  userId      String
+  /// The scan that observed it - candidates are discovery output, scoped to their scan.
   scanId      String
   distributor String
   fingerprint String
@@ -1135,32 +971,32 @@ model DistributorEndpointCandidate {
   score            Int     @default(0)
   observations     Int     @default(1)
   distinctPayloads Int     @default(1)
-  /// Whether the payload varied per release — a constant payload cannot be release data.
+  /// Whether the payload varied per release - a constant payload cannot be release data.
   variesPerRelease Boolean @default(false)
   sizeBytes        Int?
 
   firstSeenAt DateTime @default(now())
   lastSeenAt  DateTime @updatedAt
 
-  @@unique([tenantId, scanId, fingerprint])
-  @@index([tenantId, scanId])
+  @@unique([userId, scanId, fingerprint])
+  @@index([userId, scanId])
 }
 
 model ScanEvent {
   id            String   @id @default(cuid())
-  tenantId      String
+  userId        String
   deepScanRunId String
   type          String
   at            DateTime @default(now())
   dataJson      Json?
 
   @@index([deepScanRunId, at])
-  @@index([tenantId])
+  @@index([userId])
 }
 
 model ObjectStorageArtifact {
   id        String    @id @default(cuid())
-  tenantId  String
+  userId    String
   kind      String
   objectKey String
   byteSize  Int       @default(0)
@@ -1168,21 +1004,21 @@ model ObjectStorageArtifact {
   expiresAt DateTime?
   createdAt DateTime  @default(now())
 
-  @@index([tenantId])
+  @@index([userId])
 }
 
-/// Operational, tenant-scoped store for the distributor-link feature state
+/// Operational, user-scoped store for the distributor-link feature state
 /// (sessions, consents, connections, scan runs). One JSON payload per record,
-/// keyed by kind. Every query filters by tenantId (cross-tenant isolation).
+/// keyed by kind. Every query filters by userId (cross-user isolation).
 model DistributorLinkRecord {
   id        String   @id
-  tenantId  String
+  userId    String
   kind      String
   dataJson  Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([tenantId, kind])
+  @@index([userId, kind])
 }
 
 /// Transactional outbox for consent revocation side effects. The application updates the
@@ -1190,51 +1026,46 @@ model DistributorLinkRecord {
 /// `FOR UPDATE SKIP LOCKED`. Lease-token CAS prevents a stale worker from acknowledging another
 /// replica's retry.
 model ConsentRevocationIntent {
-  id                String    @id
-  tenantId          String
-  consentId         String
-  artistWorkspaceId String
-  attempts          Int       @default(0)
-  availableAt       DateTime  @default(now()) @db.Timestamptz(3)
-  leaseToken        String?
-  leaseExpiresAt    DateTime? @db.Timestamptz(3)
-  lastError         String?
-  completedAt       DateTime? @db.Timestamptz(3)
-  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt         DateTime  @updatedAt @db.Timestamptz(3)
+  id             String    @id
+  userId         String
+  consentId      String
+  attempts       Int       @default(0)
+  availableAt    DateTime  @default(now()) @db.Timestamptz(3)
+  leaseToken     String?
+  leaseExpiresAt DateTime? @db.Timestamptz(3)
+  lastError      String?
+  completedAt    DateTime? @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @db.Timestamptz(3)
 
-  @@unique([tenantId, consentId])
+  @@unique([userId, consentId])
   @@index([availableAt, leaseExpiresAt])
-  @@index([tenantId, completedAt])
+  @@index([userId, completedAt])
 }
 
-/// Durable, tenant-owned projection served by the search API and updated by scan workers.
+/// Durable, user-owned projection served by the search API and updated by scan workers.
 /// The runtime uses revision-conditional SQL for cross-process convergence; schema ownership
 /// remains exclusively in the Prisma migration chain.
 model ScanRecord {
-  id                String   @id
-  tenantId          String   @default("default") @map("tenant_id")
-  ownerUserId       String?  @map("owner_user_id")
-  artistWorkspaceId String?  @map("artist_workspace_id")
-  artist            String
-  distributor       String
-  deepScanStatus    String?  @map("deep_scan_status")
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  record            Json
+  id             String   @id
+  userId         String   @map("user_id")
+  artist         String
+  distributor    String
+  deepScanStatus String?  @map("deep_scan_status")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  record         Json
 
   @@index([createdAt(sort: Desc)], map: "scan_records_created_idx")
-  @@index([tenantId, createdAt(sort: Desc)], map: "scan_records_tenant_created_idx")
-  @@index([tenantId, ownerUserId, createdAt(sort: Desc)], map: "scan_records_tenant_owner_created_idx")
-  @@index([tenantId, artistWorkspaceId, createdAt(sort: Desc)], map: "scan_records_tenant_workspace_created_idx")
+  @@index([userId, createdAt(sort: Desc)], map: "scan_records_user_created_idx")
   @@map("scan_records")
 }
 
-/// Durable request retained after erasure as a pseudonymous compliance receipt. `tenantId` is
+/// Durable request retained after erasure as a pseudonymous compliance receipt. `userId` is
 /// nulled only after every required resource reports success or an explicit legal-hold outcome.
 model TenantErasureRequest {
   id                     String              @id @default(cuid())
-  tenantId               String?
+  userId                 String?
   tenantHash             String
   requestedBySubjectHash String
   pseudonymKeyVersion    String
@@ -1278,11 +1109,12 @@ model TenantErasureStep {
   @@index([requestId, status])
 }
 
-/// Policies are versioned and can be global (`tenantId = null`, `scopeKey = GLOBAL`) or tenant
-/// specific (`scopeKey = tenant:<id>`). `scopeKey` closes PostgreSQL's nullable-unique loophole.
+/// Policies are versioned and can be global (`userId = null`, `scopeKey = GLOBAL`) or user
+/// specific (`scopeKey` referencing the owning userId). `scopeKey` closes PostgreSQL's
+/// nullable-unique loophole.
 model RetentionPolicy {
   id                 String   @id @default(cuid())
-  tenantId           String?
+  userId             String?
   scopeKey           String
   resourceKind       String
   retentionDays      Int
@@ -1298,13 +1130,13 @@ model RetentionPolicy {
 
   @@unique([scopeKey, resourceKind])
   @@index([enabled, nextRunAt])
-  @@index([tenantId, resourceKind])
+  @@index([userId, resourceKind])
 }
 
 model RetentionRun {
   id             String              @id @default(cuid())
   policyId       String
-  tenantId       String?
+  userId         String?
   idempotencyKey String
   status         GovernanceJobStatus @default(PENDING)
   cutoffAt       DateTime            @db.Timestamptz(3)
@@ -1324,14 +1156,14 @@ model RetentionRun {
 
   @@unique([policyId, idempotencyKey])
   @@index([status, availableAt, leaseExpiresAt])
-  @@index([tenantId, createdAt])
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 /// Durable ownership anchor for an in-flight DistroKid catalogue read. `snapshotId` is globally
-/// unique so a queue job can never re-bind a snapshot to another tenant or connection. Redis is
+/// unique so a queue job can never re-bind a snapshot to another user or connection. Redis is
 /// only a rehydratable hot projection of the child rows below.
 model DistroKidSnapshotCheckpoint {
-  tenantId        String
+  userId          String
   connectionId    String
   snapshotId      String
   distributor     String
@@ -1346,7 +1178,7 @@ model DistroKidSnapshotCheckpoint {
   /// provider ids, cookies, storage state, passwords, and 2FA values are rejected by the writer.
   recoveryArtists                Json?     @db.JsonB
   recoveryConsentId              String?
-  recoveryArtistWorkspaceId      String?
+  recoveryUserId                 String?
   recoverySteelSessionIdEncrypted String?
   recoverySessionExpiresAt       DateTime? @db.Timestamptz(3)
   recoveryDeadlineAt             DateTime? @db.Timestamptz(3)
@@ -1361,15 +1193,15 @@ model DistroKidSnapshotCheckpoint {
   passPlanChunks  DistroKidCheckpointPassPlanChunk[]
   terminal        DistroKidCheckpointTerminal?
 
-  @@id([tenantId, connectionId, snapshotId])
+  @@id([userId, connectionId, snapshotId])
   @@unique([snapshotId])
-  @@index([tenantId, connectionId])
+  @@index([userId, connectionId])
 }
 
 /// Sanitized release references only. No response body, request headers, cookie or token is
 /// representable in this table.
 model DistroKidCheckpointIndex {
-  tenantId           String
+  userId             String
   connectionId       String
   snapshotId         String
   releaseId          String
@@ -1379,29 +1211,29 @@ model DistroKidCheckpointIndex {
   artist             String?
   expectedTrackCount Int?
 
-  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [tenantId, connectionId, snapshotId], references: [tenantId, connectionId, snapshotId], onDelete: Cascade)
+  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [userId, connectionId, snapshotId], references: [userId, connectionId, snapshotId], onDelete: Cascade)
 
-  @@id([tenantId, connectionId, snapshotId, releaseId])
-  @@unique([tenantId, connectionId, snapshotId, ordinal])
+  @@id([userId, connectionId, snapshotId, releaseId])
+  @@unique([userId, connectionId, snapshotId, ordinal])
 }
 
 /// One normalized extraction outcome per release. The application reconstructs this JSON from
 /// the canonical metadata contract and strips unknown/raw transport fields before every write.
 model DistroKidCheckpointOutcome {
-  tenantId     String
+  userId       String
   connectionId String
   snapshotId   String
   releaseId    String
   outcome      Json
   updatedAt    DateTime @updatedAt @db.Timestamptz(3)
 
-  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [tenantId, connectionId, snapshotId], references: [tenantId, connectionId, snapshotId], onDelete: Cascade)
+  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [userId, connectionId, snapshotId], references: [userId, connectionId, snapshotId], onDelete: Cascade)
 
-  @@id([tenantId, connectionId, snapshotId, releaseId])
+  @@id([userId, connectionId, snapshotId, releaseId])
 }
 
 model DistroKidCheckpointProgress {
-  tenantId          String
+  userId            String
   connectionId      String
   snapshotId        String
   distributor       String
@@ -1414,50 +1246,50 @@ model DistroKidCheckpointProgress {
   startedAt         DateTime @db.Timestamptz(3)
   updatedAt         DateTime @db.Timestamptz(3)
 
-  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [tenantId, connectionId, snapshotId], references: [tenantId, connectionId, snapshotId], onDelete: Cascade)
+  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [userId, connectionId, snapshotId], references: [userId, connectionId, snapshotId], onDelete: Cascade)
 
-  @@id([tenantId, connectionId, snapshotId])
+  @@id([userId, connectionId, snapshotId])
 }
 
 model DistroKidCheckpointChunk {
-  tenantId     String
+  userId       String
   connectionId String
   snapshotId   String
   pass         Int
   chunkIndex   Int
   completedAt  DateTime @default(now()) @db.Timestamptz(3)
 
-  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [tenantId, connectionId, snapshotId], references: [tenantId, connectionId, snapshotId], onDelete: Cascade)
+  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [userId, connectionId, snapshotId], references: [userId, connectionId, snapshotId], onDelete: Cascade)
 
-  @@id([tenantId, connectionId, snapshotId, pass, chunkIndex])
-  @@index([tenantId, connectionId, snapshotId, pass])
+  @@id([userId, connectionId, snapshotId, pass, chunkIndex])
+  @@index([userId, connectionId, snapshotId, pass])
 }
 
 /// One bounded row per planned chunk rather than one unbounded plan document.
 model DistroKidCheckpointPassPlanChunk {
-  tenantId     String
+  userId       String
   connectionId String
   snapshotId   String
   pass         Int
   chunkIndex   Int
   releaseIds   String[]
 
-  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [tenantId, connectionId, snapshotId], references: [tenantId, connectionId, snapshotId], onDelete: Cascade)
+  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [userId, connectionId, snapshotId], references: [userId, connectionId, snapshotId], onDelete: Cascade)
 
-  @@id([tenantId, connectionId, snapshotId, pass, chunkIndex])
-  @@index([tenantId, connectionId, snapshotId, pass])
+  @@id([userId, connectionId, snapshotId, pass, chunkIndex])
+  @@index([userId, connectionId, snapshotId, pass])
 }
 
 /// First-writer-wins terminal/cancellation record. Queue session handles may be present only in
 /// their application envelope-encrypted v1/v2 form; the durable store rejects plaintext handles.
 model DistroKidCheckpointTerminal {
-  tenantId     String
+  userId       String
   connectionId String
   snapshotId   String
   tombstone    Json
   createdAt    DateTime @default(now()) @db.Timestamptz(3)
 
-  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [tenantId, connectionId, snapshotId], references: [tenantId, connectionId, snapshotId], onDelete: Cascade)
+  checkpoint DistroKidSnapshotCheckpoint @relation(fields: [userId, connectionId, snapshotId], references: [userId, connectionId, snapshotId], onDelete: Cascade)
 
-  @@id([tenantId, connectionId, snapshotId])
+  @@id([userId, connectionId, snapshotId])
 }

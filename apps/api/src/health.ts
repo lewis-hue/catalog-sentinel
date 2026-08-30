@@ -89,8 +89,8 @@ export class HealthChecker {
           SELECT to_regclass('public.security_audit_events') IS NOT NULL
             AND (SELECT count(*) FROM information_schema.columns
                  WHERE table_schema = 'public' AND table_name = 'security_audit_events'
-                   AND column_name = ANY (ARRAY['id','occurred_at','tenant_id','workspace_id',
-                     'actor_user_id','action','target_type','target_id','metadata'])) = 9 AS complete
+                   AND column_name = ANY (ARRAY['id','occurred_at','user_id',
+                     'actor_user_id','action','target_type','target_id','metadata'])) = 8 AS complete
         `),
         2500,
         'audit schema',

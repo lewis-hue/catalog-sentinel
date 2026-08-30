@@ -10,7 +10,6 @@ export interface SnapshotPrincipalBinding {
   tenantId: string;
   snapshotId: string;
   consentId?: string;
-  artistWorkspaceId?: string;
   distributor: string;
 }
 
@@ -25,18 +24,18 @@ export async function snapshotPrincipalBindingValid(
   job: SnapshotPrincipalBinding,
   nowMs = Date.now(),
 ): Promise<boolean> {
-  if (!job.consentId || !job.artistWorkspaceId) return false;
+  if (!job.consentId) return false;
   const [record, consent] = await Promise.all([
     store.get(job.snapshotId),
     repository.consents.get({ tenantId: job.tenantId }, job.consentId),
   ]);
-  if (!record || !consent || !record.ownerUserId || !record.artistWorkspaceId) return false;
+  if (!record || !consent || !record.userId) return false;
+  // Per-user isolation: the whole binding is the user boundary. Workspaces are gone, so the check
+  // is that the record owner, the consent tenant, and the consent's granting user all agree.
   return Boolean(
     ownerOf(record) === job.tenantId
-    && record.artistWorkspaceId === job.artistWorkspaceId
     && consent.tenantId === job.tenantId
-    && consent.artistWorkspaceId === record.artistWorkspaceId
-    && consent.grantedByUserId === record.ownerUserId
+    && consent.grantedByUserId === record.userId
     && consent.distributor?.toLowerCase() === job.distributor.toLowerCase()
     && consent.provider === 'steel'
     && consent.scope === 'distributor:read-catalog'
@@ -56,7 +55,7 @@ export async function assertSnapshotPrincipalBinding(
   nowMs = Date.now(),
 ): Promise<void> {
   if (!await snapshotPrincipalBindingValid(store, repository, job, nowMs)) {
-    const error = new Error('DistroKid snapshot principal, workspace, and consent binding is invalid');
+    const error = new Error('DistroKid snapshot principal and consent binding is invalid');
     error.name = 'SnapshotPrincipalBindingError';
     throw error;
   }
