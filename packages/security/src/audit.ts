@@ -62,9 +62,9 @@ export class PostgresAuditLogger implements AuditLogger {
     const record = auditRecord(event, `audit_${randomUUID()}`, this.clockIso());
     await this.client.query(
       `INSERT INTO security_audit_events
-       (id, occurred_at, tenant_id, workspace_id, actor_user_id, action, target_type, target_id, metadata)
-       VALUES ($1, $2::timestamptz, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
-      [record.id, record.at, record.tenantId, record.workspaceId, record.actorUserId,
+       (id, occurred_at, user_id, actor_user_id, action, target_type, target_id, metadata)
+       VALUES ($1, $2::timestamptz, $3, $4, $5, $6, $7, $8::jsonb)`,
+      [record.id, record.at, record.tenantId, record.actorUserId,
         record.action, record.targetType, record.targetId, JSON.stringify(record.metadata)],
     );
     return record;
@@ -75,20 +75,22 @@ export class PostgresAuditLogger implements AuditLogger {
       id: string;
       at: Date | string;
       tenantId: string;
-      workspaceId: string | null;
       actorUserId: string | null;
       action: string;
       targetType: string;
       targetId: string | null;
       metadata: Record<string, unknown>;
     }>(
-      `SELECT id, occurred_at AS "at", tenant_id AS "tenantId", workspace_id AS "workspaceId",
+      `SELECT id, occurred_at AS "at", user_id AS "tenantId",
               actor_user_id AS "actorUserId", action, target_type AS "targetType",
               target_id AS "targetId", metadata
        FROM security_audit_events ORDER BY occurred_at ASC, id ASC`,
     );
     return result.rows.map((row) => ({
       ...row,
+      // Per-user isolation dropped the workspace column; keep the vestigial field null-valued so
+      // AuditRecord stays shape-stable for callers that never populated it.
+      workspaceId: null,
       at: row.at instanceof Date ? row.at.toISOString() : row.at,
       metadata: row.metadata ?? {},
     }));
