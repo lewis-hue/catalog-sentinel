@@ -1119,6 +1119,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return { ok: true, summary: updated?.result.summary };
   });
 
+  // Redact URIs, connection strings, and id-like tokens from a downstream error message before it is
+  // logged as a diagnostic "reason", so a wrapped library error cannot leak session IDs, redis URIs,
+  // or URL userinfo/query strings. Keeps the human-readable prefix, drops the sensitive parts.
+  function redactErrorDetail(message: string): string {
+    return message
+      .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s'")]+/gi, '[uri]')
+      .replace(/\b(?:connect|search|scan|sess|steel|job)[_-][A-Za-z0-9-]{6,}\b/gi, '[id]')
+      .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '[uuid]')
+      .slice(0, 300);
+  }
+
   // --- One-click "connect distributor & scan" (cloud browser) -------------
   const connectRegistry = built.redis
     ? new RedisConnectSessionRegistry(
@@ -1308,7 +1319,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply.status(503).send({ error: 'workspace authorization unavailable' });
       }
       app.log.warn(
-        { errorType: err instanceof Error ? err.name : 'Error', reason: err instanceof Error ? err.message : String(err) },
+        { errorType: err instanceof Error ? err.name : 'Error', reason: err instanceof Error ? redactErrorDetail(err.message) : 'unknown' },
         'catalogue read/scan failed',
       );
       return reply.status(502).send({ error: 'catalogue read/scan failed' });
