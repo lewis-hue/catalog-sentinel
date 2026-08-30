@@ -1307,7 +1307,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       if (err instanceof Error && err.name === 'ConnectWorkspaceAuthorizationUnavailableError') {
         return reply.status(503).send({ error: 'workspace authorization unavailable' });
       }
-      app.log.warn({ errorType: err instanceof Error ? err.name : 'Error' }, 'catalogue read/scan failed');
+      app.log.warn(
+        { errorType: err instanceof Error ? err.name : 'Error', reason: err instanceof Error ? err.message : String(err) },
+        'catalogue read/scan failed',
+      );
       return reply.status(502).send({ error: 'catalogue read/scan failed' });
     }
   });
