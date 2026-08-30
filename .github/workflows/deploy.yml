@@ -1,0 +1,41 @@
+name: Deploy to AWS
+
+# Auto-deploy the single-instance AWS demo on every push to main. The EC2 host pulls the new commit
+# and rebuilds/recreates the stack. App secrets live only in the instance's .env, never in CI.
+#
+# Required repository secrets:
+#   EC2_HOST     - the instance's public IP / Elastic IP
+#   EC2_SSH_KEY  - the deploy SSH private key (PEM) for the ubuntu user
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: aws-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          if [ -z "$EC2_HOST" ] || [ -z "$EC2_SSH_KEY" ]; then
+            echo "EC2_HOST / EC2_SSH_KEY secrets are not set; skipping deploy." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/deploy_key "ubuntu@${EC2_HOST}" '
+            set -e
+            cd /opt/catalog-sentinel
+            git pull --ff-only origin main
+            docker compose -f docker-compose.yml -f docker-compose.aws.yml build scanner
+            docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d --force-recreate web scanner worker keycloak-init caddy
+            docker compose -f docker-compose.yml -f docker-compose.aws.yml ps
+          '
