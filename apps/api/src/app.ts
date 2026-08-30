@@ -126,6 +126,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     '/api/consent', '/api/searches', '/api/connect', '/api/distributor-imports',
     '/api/integrations/steel', '/api/search-provider', '/api/platforms/credential-status',
     '/api/queues/status', '/api/catalogue/engine', '/api/admin/distributor-scans',
+    '/api/account',
   ];
   app.addHook('preHandler', async (req, reply) => {
     const production = isProductionEnvironment(process.env);
