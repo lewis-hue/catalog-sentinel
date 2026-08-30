@@ -209,8 +209,9 @@ export function useStorePresence(searchId: string | null): StorePresence {
   };
 }
 
-/** One pip per verified store; a store with no cell for this track shows as an unchecked pip. */
-export function StorePips({ cells, stores, delivered }: { cells: PerStore[]; stores: string[]; delivered?: Map<string, string | null> }) {
+/** One pip per verified store; a store with no cell for this track shows as an unchecked pip. A `♪`
+ *  superscript marks a store confirmed (via Serper) to actually DISPLAY this song's lyrics. */
+export function StorePips({ cells, stores, delivered, lyrics }: { cells: PerStore[]; stores: string[]; delivered?: Map<string, string | null>; lyrics?: Record<string, string> }) {
   if (!stores.length) return <span className="status unk">Not checked</span>;
   const byStore = new Map(cells.map((c) => [c.store, c] as const));
   return (
@@ -221,17 +222,27 @@ export function StorePips({ cells, stores, delivered }: { cells: PerStore[]; sto
         const isDelivered = (!c || c.status === 'unverifiable') && !!delivered?.has(s);
         const cls = isDelivered ? 'delivered' : c ? statusClass(c.status) : 'unk';
         const url = isDelivered ? (delivered!.get(s) || undefined) : (c?.url || undefined);
-        const title = isDelivered
+        const showsLyrics = lyrics?.[s] === 'shown';
+        const title = (isDelivered
           ? `${s}: Delivered by DistroKid (not independently verified)`
           : c
             ? `${s}: ${statusLabel(c.status)}${c.foundArtist ? ` (${c.foundArtist})` : ''}`
-            : `${s}: not checked`;
+            : `${s}: not checked`) + (showsLyrics ? ' · shows lyrics' : '');
+        const body = <>{platformCode(s)}{showsLyrics ? <sup style={{ fontSize: 8, marginLeft: 1, opacity: 0.9 }}>♪</sup> : null}</>;
         return url
-          ? <a key={s} className={`pip ${cls}`} href={url} target="_blank" rel="noreferrer" title={title} style={{ textDecoration: 'none' }}>{platformCode(s)}</a>
-          : <span key={s} className={`pip ${cls}`} title={title}>{platformCode(s)}</span>;
+          ? <a key={s} className={`pip ${cls}`} href={url} target="_blank" rel="noreferrer" title={title} style={{ textDecoration: 'none' }}>{body}</a>
+          : <span key={s} className={`pip ${cls}`} title={title}>{body}</span>;
       })}
     </div>
   );
+}
+
+/** Per-song signal that DistroKid distributed the lyrics to stores (a LyricFind page confirms it). */
+export function LyricFindPill({ url }: { url?: string | null }) {
+  const title = 'LyricFind confirms DistroKid distributed this song’s lyrics to stores';
+  return url
+    ? <a className="status live" href={url} target="_blank" rel="noreferrer" title={title} style={{ textDecoration: 'none' }}>Lyrics distributed</a>
+    : <span className="status live" title={title}>Lyrics distributed</span>;
 }
 
 /** Compact verdict for a track's worst per-store outcome. */

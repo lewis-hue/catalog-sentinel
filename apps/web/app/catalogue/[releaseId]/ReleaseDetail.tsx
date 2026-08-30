@@ -4,13 +4,14 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { apiErrorMessage, apiFetch } from '@/lib/api-client';
 import { Cover, Pill, artistLine } from '../CatalogueView';
-import { useStorePresence, StorePips, VerdictPill, StoreCheckBar, worstOf, deliveredMapFrom, type Worst } from '../store-presence';
+import { useStorePresence, StorePips, LyricFindPill, VerdictPill, StoreCheckBar, worstOf, deliveredMapFrom, type Worst } from '../store-presence';
 import { useLyricsCheck, LyricsCheckBar, LyricsStoreCell, LyricCompareCell, computeLyricsCoverage } from '../lyrics-check';
 
 interface CatTrack {
   title: string | null; isrc: string | null; isrcStatus: string; trackNumber: number | null; trackIndex: number;
   featuredArtists: string[]; plainLyrics: string; syncedLyrics: string;
   storeLyricStatus: string; storeHasPlain: boolean; storeHasSynced: boolean;
+  storeLyricsPerStore?: Record<string, string>; lyricfindDistributed?: boolean | null; lyricfindUrl?: string | null;
 }
 
 /** DistroKid lyric-availability status → design-system status pill. */
@@ -166,9 +167,9 @@ export function ReleaseDetail() {
                 return (
                   <tr key={i}>
                     <td className="mono">{t.trackNumber ?? i + 1}</td>
-                    <td>{t.title || 'Untitled'}</td>
+                    <td>{t.title || 'Untitled'}{t.lyricfindDistributed ? <> <LyricFindPill url={t.lyricfindUrl} /></> : null}</td>
                     <td className="mono" style={{ color: t.isrc ? 'var(--paper)' : 'var(--mist)' }}>{t.isrc || 'no ISRC'}</td>
-                    <td><StorePips cells={cells} stores={presence.stores} delivered={deliveredMap} /></td>
+                    <td><StorePips cells={cells} stores={presence.stores} delivered={deliveredMap} lyrics={t.storeLyricsPerStore} /></td>
                     <td><VerdictPill worst={worstOf(cells)} /></td>
                   </tr>
                 );
