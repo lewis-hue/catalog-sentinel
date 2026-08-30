@@ -55,3 +55,6 @@ test-results/
 
 # CI/local test reports (consumed by scripts/assert-infra-tests-ran.mjs)
 vitest-report*.json
+
+# Superpowers SDD execution scratch (briefs, reports, review packages, ledgers)
+.superpowers/sdd/
