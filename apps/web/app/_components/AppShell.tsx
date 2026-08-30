@@ -58,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     try {
       setCollapsed(window.localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
     } catch {
-      /* localStorage unavailable — stay expanded */
+      /* localStorage unavailable, stay expanded */
     }
   }, []);
 

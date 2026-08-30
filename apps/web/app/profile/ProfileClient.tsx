@@ -12,6 +12,11 @@ interface Account {
   roles: string[];
 }
 
+/** Display an identity-provider name with a capital first letter ("google" becomes "Google"). */
+function formatProvider(provider: string): string {
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 20, padding: '11px 0', borderBottom: '1px solid var(--line-soft)' }}>
@@ -89,7 +94,7 @@ function UsernameRow({ value, onSaved }: { value: string | null; onSaved: (usern
         <button className="btn ghost" disabled={saving} onClick={cancel}>Cancel</button>
       </div>
       <p style={{ color: 'var(--mist-2)', fontSize: 12, margin: '8px 0 0' }}>
-        3 to 255 characters. Letters, numbers, and . _ - Takes effect across the app the next time you sign in.
+        Use 3 to 255 characters. Your new username appears across the app the next time you sign in.
       </p>
       {error ? (
         <div className="notice-banner" style={{ background: 'var(--panel)', borderColor: 'var(--wrong-edge)', color: 'var(--wrong)', marginTop: 10 }}>{error}</div>
@@ -164,7 +169,7 @@ export function ProfileClient() {
                   {account.username ?? account.email ?? 'Your account'}
                 </div>
                 {account.identityProvider ? (
-                  <div style={{ color: 'var(--mist)', fontSize: 13, marginTop: 4 }}>Signed in with {account.identityProvider}</div>
+                  <div style={{ color: 'var(--mist)', fontSize: 13, marginTop: 4 }}>Signed in with {formatProvider(account.identityProvider)}</div>
                 ) : null}
               </div>
             </div>
@@ -186,7 +191,7 @@ export function ProfileClient() {
 
             {account.identityProvider ? (
               <p style={{ color: 'var(--mist-2)', fontSize: 12.5, margin: '16px 0 0' }}>
-                Your email, password, and two-factor authentication are managed in your {account.identityProvider} account.
+                Your email, password, and two-factor authentication are managed in your {formatProvider(account.identityProvider)} account.
               </p>
             ) : null}
           </div>

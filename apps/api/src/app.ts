@@ -740,7 +740,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     } catch (error) {
       if (error instanceof UsernameConflictError) return reply.status(409).send({ error: 'That username is already taken.' });
       if (error instanceof UsernameInvalidError) {
-        return reply.status(400).send({ error: 'That username is not allowed. Use letters, numbers, and . _ - only.' });
+        return reply.status(400).send({ error: 'That username is not allowed. Please try a different one.' });
       }
       app.log.error({ errorType: error instanceof Error ? error.name : 'Error' }, 'account username update failed');
       return reply.status(502).send({ error: 'Could not update your username. Please try again.' });
