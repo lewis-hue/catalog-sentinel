@@ -18,6 +18,7 @@
     ]
   },
   "registrationAllowed": false,
+  "editUsernameAllowed": true,
   "roles": {
     "realm": [
       { "name": "user", "description": "Base authenticated user" },

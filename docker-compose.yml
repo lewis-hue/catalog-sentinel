@@ -93,6 +93,44 @@ services:
 
     # Not published to the host — the app reaches it over the compose network.
 
+  # One-shot realm reconciler. The realm JSON declares the right settings, but Keycloak's
+  # --import-realm SKIPS a realm that already exists in keycloak-db, so on every restart after the
+  # first the JSON has no effect. Two settings must hold or the app breaks, so we re-apply them here
+  # (idempotently) on every `up`:
+  #   1. default-roles-sentinel must grant `user` — otherwise fresh logins mint tokens with no
+  #      Sentinel role, the API rejects every bearer token, and the web app flickers in a redirect loop.
+  #   2. editUsernameAllowed must be true — otherwise the profile page's "edit username" is rejected
+  #      by Keycloak with error-user-attribute-read-only.
+  # This replaces the manual kcadm step that previously had to be run by hand after each restart.
+  keycloak-init:
+    image: quay.io/keycloak/keycloak:26.0
+    entrypoint: ['/bin/bash', '-c']
+    command:
+      - |
+        set -eu
+        kc(){ /opt/keycloak/bin/kcadm.sh "$$@"; }
+        echo "keycloak-init: waiting for the admin API..."
+        until kc config credentials --server http://keycloak:8080 --realm master \
+              --user "$$KC_BOOTSTRAP_ADMIN_USERNAME" --password "$$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null 2>&1; do
+          sleep 3
+        done
+        echo "keycloak-init: waiting for the sentinel realm..."
+        until kc get roles/user -r sentinel > /tmp/user-role.json 2>/dev/null; do sleep 3; done
+        kc update realms/sentinel -s editUsernameAllowed=true >/dev/null 2>&1 \
+          && echo "keycloak-init: editUsernameAllowed=true" || echo "keycloak-init: could not set editUsernameAllowed"
+        printf '[%s]' "$$(cat /tmp/user-role.json)" > /tmp/composite.json
+        if kc create roles/default-roles-sentinel/composites -r sentinel -f /tmp/composite.json >/dev/null 2>&1; then
+          echo "keycloak-init: granted 'user' to default-roles-sentinel."
+        else
+          echo "keycloak-init: 'user' already granted to default-roles-sentinel (ok)."
+        fi
+        echo "keycloak-init: done."
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD}
+    depends_on: [keycloak]
+    restart: 'no'
+
   migrate:
     image: sentinel-app
     command: ['npm', 'run', '--workspace', '@sentinel/db', 'db:migrate:deploy']
