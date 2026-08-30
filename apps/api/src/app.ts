@@ -42,6 +42,7 @@ import {
 } from './distributor-connect';
 import { ScanCandidateStore } from './endpoint-candidates';
 import { registerAuth, requireAuth, requireRole } from './auth';
+import { deleteKeycloakUser, purgeUserData, type SqlPool } from './account-deletion';
 import {
   hasCustomerScanAccess,
   InvalidSearchHistoryPageError,
@@ -693,6 +694,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const catalogue = await catalogueRepo.readCatalogue(req.auth.sub, id);
     if (!catalogue) return reply.status(404).send({ error: 'no scraped catalogue for this search' });
     return catalogue;
+  });
+
+  // The caller's own account: identity claims from the verified token (never trusted from the client).
+  // Powers the Profile page; editing name/email/password/2FA is delegated to the Keycloak account console.
+  app.get('/api/account', { preHandler: [requireAuth()] }, async (req, reply) => {
+    if (!req.auth?.authenticated) return reply.status(401).send({ error: 'authentication required' });
+    return {
+      subject: req.auth.sub,
+      username: req.auth.username ?? null,
+      email: req.auth.email ?? null,
+      emailVerified: req.auth.emailVerified,
+      identityProvider: req.auth.identityProvider ?? null,
+      roles: req.auth.roles,
+    };
+  });
+
+  // Full account deletion: erase all of the caller's data, then remove their Keycloak login.
+  // Irreversible. Runs the purge in one transaction; the append-only audit trail is retained.
+  app.delete('/api/account', { preHandler: [requireRole('user')] }, async (req, reply) => {
+    const userId = req.auth?.sub;
+    if (!userId) return reply.status(401).send({ error: 'authentication required' });
+    if (!built.pgPool) return reply.status(503).send({ error: 'account deletion is unavailable' });
+    try {
+      await purgeUserData(built.pgPool as unknown as SqlPool, userId);
+      await deleteKeycloakUser(process.env, userId);
+      void audit.log({ tenantId: userId, actorUserId: userId, action: 'account.deleted', targetType: 'Account', targetId: userId, metadata: {} });
+      reply.status(204);
+      return null;
+    } catch (error) {
+      app.log.error({ errorType: error instanceof Error ? error.name : 'Error' }, 'account deletion failed');
+      return reply.status(502).send({ error: 'Account deletion could not be completed. Please try again or contact support.' });
+    }
   });
 
   // ON-DEMAND store-presence verification for an already-scraped catalogue. Scraping is decoupled

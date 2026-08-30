@@ -25,6 +25,12 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; pr
       { href: '/support', label: 'Support center' },
     ],
   },
+  {
+    group: 'Account',
+    items: [
+      { href: '/profile', label: 'Profile' },
+    ],
+  },
 ];
 
 const AUDIT_CONTEXT_ROUTES = new Set(['/scorecard', '/catalogue', '/catalog', '/identity', '/fixer', '/review', '/support']);
