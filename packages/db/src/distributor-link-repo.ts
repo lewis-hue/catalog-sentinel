@@ -81,7 +81,6 @@ export interface LinkDeepScan extends TenantEntity {
  */
 export interface ConsentRevocationIntent extends TenantEntity {
   consentId: string;
-  artistWorkspaceId: string;
   attempts: number;
   availableAt: string;
   leaseToken: string | null;
@@ -189,7 +188,6 @@ export class InMemoryDistributorLinkRepository implements DistributorLinkReposit
         id: `consent-revoke-${randomUUID()}`,
         tenantId: ctx.tenantId,
         consentId,
-        artistWorkspaceId: consent.artistWorkspaceId ?? '',
         attempts: 0,
         availableAt: revokedAt,
         leaseToken: null,
