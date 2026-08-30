@@ -159,7 +159,7 @@ services:
       # Hardened: refuses to boot in prod, loopback-only, requires DEV_RESCAN_SECRET.
       ENABLE_DEV_RESCAN: ${ENABLE_DEV_RESCAN:-}
       DEV_RESCAN_SECRET: ${DEV_RESCAN_SECRET:-}
-      APP_BASE_URL: http://localhost:3000
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       DATABASE_URL: postgresql://sentinel:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/sentinel
       BROWSER_LINK_PROVIDER: steel
       # Attended real distributor login uses Steel (the browser the user logs into directly).
