@@ -22,15 +22,15 @@
 
 ## File Structure
 
-- Create `packages/adapters/src/lyrics/web-lyrics.ts` — `WebLyricsResolver` + lyric-capable store config + snippet classifier + LyricFind detection.
-- Modify `packages/adapters/src/index.ts` — export web-lyrics, drop lrclib export.
+- Create `packages/adapters/src/lyrics/web-lyrics.ts` - `WebLyricsResolver` + lyric-capable store config + snippet classifier + LyricFind detection.
+- Modify `packages/adapters/src/index.ts` - export web-lyrics, drop lrclib export.
 - Delete `packages/adapters/src/lyrics/lrclib.ts` (+ its test).
-- Migration `packages/db/prisma/migrations/2026..._track_store_lyrics/migration.sql` + `schema.prisma` — add `storeLyricsPerStore JSONB`, `lyricfindDistributed BOOLEAN`, `lyricfindUrl TEXT` to `DistributorTrackOutcome`.
-- Modify `packages/persistence/src/outcome-repository.ts` — write/read the new columns; new per-store update shape; drop LRCLIB-specific verdict mapping.
-- Modify `apps/worker/src/lyrics-verification.ts` — Serper resolver, per-store verdicts + LyricFind, write new columns.
-- Modify `packages/search-store/src/search-store.ts` — extend `PerStoreLike` with `lyrics?`; add per-track `lyricfind?`; keep `LyricsStoreLike` only if still referenced, else remove.
-- Modify the store-presence API endpoint — merge per-store lyric flags + LyricFind into returned `perStore[]`/track.
-- Modify `apps/web/app/catalogue/store-presence.tsx` — per-store lyric badge + per-song LyricFind indicator.
+- Migration `packages/db/prisma/migrations/2026..._track_store_lyrics/migration.sql` + `schema.prisma` - add `storeLyricsPerStore JSONB`, `lyricfindDistributed BOOLEAN`, `lyricfindUrl TEXT` to `DistributorTrackOutcome`.
+- Modify `packages/persistence/src/outcome-repository.ts` - write/read the new columns; new per-store update shape; drop LRCLIB-specific verdict mapping.
+- Modify `apps/worker/src/lyrics-verification.ts` - Serper resolver, per-store verdicts + LyricFind, write new columns.
+- Modify `packages/search-store/src/search-store.ts` - extend `PerStoreLike` with `lyrics?`; add per-track `lyricfind?`; keep `LyricsStoreLike` only if still referenced, else remove.
+- Modify the store-presence API endpoint - merge per-store lyric flags + LyricFind into returned `perStore[]`/track.
+- Modify `apps/web/app/catalogue/store-presence.tsx` - per-store lyric badge + per-song LyricFind indicator.
 
 ---
 

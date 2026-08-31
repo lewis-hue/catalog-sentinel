@@ -6,16 +6,16 @@ and labels/managers as a catalog-QA and support-triage product.
 
 ## Product offerings this enables
 
-- **Catalog QA dashboard** — proactive metadata/coverage health per artist.
-- **Artist support triage platform** — auto-classify inbound issues, attach
+- **Catalog QA dashboard** - proactive metadata/coverage health per artist.
+- **Artist support triage platform** - auto-classify inbound issues, attach
   evidence, and draft responses (the support-packet engine, in reverse).
-- **Delivery health monitor** — continuous reconciliation of distributor
+- **Delivery health monitor** - continuous reconciliation of distributor
   deliveries vs. DSP reality; alert on drift.
-- **Missing-platform detector / DSP delivery reconciliation layer** — the
+- **Missing-platform detector / DSP delivery reconciliation layer** - the
   Audiomack audit, generalized to every integrated DSP.
-- **Artist-profile issue detector** — wrong/duplicate/foreign-content profiles.
-- **Metadata validation engine** — ISRC/UPC, credits, artwork, explicit flags.
-- **Royalty/statistics anomaly monitor** — missing/dropped/inconsistent stats.
+- **Artist-profile issue detector** - wrong/duplicate/foreign-content profiles.
+- **Metadata validation engine** - ISRC/UPC, credits, artwork, explicit flags.
+- **Royalty/statistics anomaly monitor** - missing/dropped/inconsistent stats.
 - **White-label distributor portal** + **API product** for labels/managers.
 
 ## Integration roadmap
@@ -31,7 +31,7 @@ and labels/managers as a catalog-QA and support-triage product.
 
 ## Multi-artist & organizations
 
-- **Label/manager multi-artist workspaces** — the `Tenant → Workspace → Artist`
+- **Label/manager multi-artist workspaces** - the `Tenant → Workspace → Artist`
   model already supports this; add roster views, roll-up dashboards, and
   cross-artist SLA reporting.
 - **RBAC** is in place (`owner/admin/manager/analyst/viewer`); extend with
@@ -39,21 +39,21 @@ and labels/managers as a catalog-QA and support-triage product.
 
 ## Security & compliance track
 
-- **SOC 2 Type II** — formalize controls already designed in: encryption
+- **SOC 2 Type II** - formalize controls already designed in: encryption
   (KMS/TLS), audit logging, access control, change management (CI/CD),
   vulnerability + secret scanning, backup/restore, data-deletion procedure.
 - **SSO / SAML** and **SCIM** provisioning for enterprise identity.
-- **Audit exports** — signed, tamper-evident audit-log exports for customers.
-- **Data residency** — per-tenant region pinning; row-level security in Postgres.
+- **Audit exports** - signed, tamper-evident audit-log exports for customers.
+- **Data residency** - per-tenant region pinning; row-level security in Postgres.
 
 ## Data & analytics track
 
-- **Data warehouse integration** — stream snapshots/issues/royalties to
+- **Data warehouse integration** - stream snapshots/issues/royalties to
   Snowflake/BigQuery/Redshift.
-- **BI dashboards** — coverage trends, delivery SLAs, issue MTTR.
-- **Anomaly detection** — statistical baselines for royalty/stream drops
+- **BI dashboards** - coverage trends, delivery SLAs, issue MTTR.
+- **Anomaly detection** - statistical baselines for royalty/stream drops
   (deterministic + statistical; no DSP content used to train models).
-- **SLA dashboards** — delivery-time and reinstatement-time tracking per
+- **SLA dashboards** - delivery-time and reinstatement-time tracking per
   distributor/DSP.
 
 ## Scale & reliability

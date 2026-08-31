@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Durable Postgres implementations of the contracts' storage ports. Depends only on @sentinel/contracts + pg — never on an app, a browser or a queue driver.",
+  "description": "Durable Postgres implementations of the contracts' storage ports. Depends only on @sentinel/contracts + pg - never on an app, a browser or a queue driver.",
   "exports": {
     ".": "./src/index.ts"
   },

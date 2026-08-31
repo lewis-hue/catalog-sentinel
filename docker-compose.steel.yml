@@ -1,7 +1,7 @@
 # DEVELOPMENT / EVALUATION OVERLAY ONLY. This file publishes Steel's live-view
 # endpoint and uses an unpinned image, so it is not a production deployment spec.
 #
-# Steel Browser overlay — adds a PRIVATE self-hosted Steel instance for attended
+# Steel Browser overlay - adds a PRIVATE self-hosted Steel instance for attended
 # distributor login. Use on an isolated Linux development host, where
 # Steel's Chromium launches cleanly:
 #
@@ -11,23 +11,23 @@
 # (see docs/steel-remote-linux-dev.md).
 #
 # SECURITY: Steel is a PRIVATE service. Only the session live-view port (3010) is
-# published, for the login iframe — put it behind the app's auth/reverse-proxy in
+# published, for the login iframe - put it behind the app's auth/reverse-proxy in
 # production and NEVER expose Steel to the public internet (docs/steel-production.md).
 
 services:
   steel:
     image: ghcr.io/steel-dev/steel-browser-api:latest
-    init: true # reap Chrome's forked children — without a PID-1 init they pile up as zombies
+    init: true # reap Chrome's forked children - without a PID-1 init they pile up as zombies
     # Steel exports DISPLAY=:10 but never starts a virtual framebuffer, so headful Chrome
     # has no X display. Start a machine-id'd system dbus + Xvfb on :10, then hand off to
-    # Steel's own entrypoint. Headful (below) is what the attended live view needs — the
+    # Steel's own entrypoint. Headful (below) is what the attended live view needs - the
     # user interacts with a real browser. (steel-browser#322, #24)
     entrypoint:
       - /bin/sh
       - -c
       - 'mkdir -p /run/dbus && rm -f /run/dbus/pid && dbus-uuidgen --ensure 2>/dev/null; dbus-daemon --system --fork 2>/dev/null || true; rm -f /tmp/.X10-lock /tmp/.X11-unix/X10; Xvfb :10 -screen 0 1920x1080x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & sleep 1; exec /app/api/entrypoint.sh'
     environment:
-      # DOMAIN shapes the browser-facing live-view URL — must be reachable from the USER'S
+      # DOMAIN shapes the browser-facing live-view URL - must be reachable from the USER'S
       # browser. Locally that's the published host port; in production set it to the private
       # hostname the app proxies. CDP_DOMAIN is internal (the backend reaches CDP via the
       # compose network; the provider rewrites its host to STEEL_CDP_INTERNAL).
@@ -39,7 +39,7 @@ services:
       LOG_STORAGE_ENABLED: 'false'
     ports:
       - '${STEEL_LIVEVIEW_PORT:-3010}:3000' # session live-view for the login iframe (keep private in prod)
-      # CDP (9223) is intentionally NOT published — the backend reaches it over the compose network.
+      # CDP (9223) is intentionally NOT published - the backend reaches it over the compose network.
     shm_size: '2gb' # Chrome needs a large /dev/shm or it crashes on heavy pages
     restart: unless-stopped
     # Some host kernels block Chrome syscalls under the default seccomp profile (SIGTRAP on

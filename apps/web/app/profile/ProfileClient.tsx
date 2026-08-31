@@ -61,7 +61,7 @@ function UsernameRow({ value, onSaved }: { value: string | null; onSaved: (usern
     } finally {
       setSaving(false);
     }
-  }, [trimmed, value, onSaved]);
+  }, [trimmed, onSaved]);
 
   if (!editing) {
     return (

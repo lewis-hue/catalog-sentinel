@@ -1,4 +1,4 @@
-# Threat Model — Secure Distributor Link
+# Threat Model - Secure Distributor Link
 
 | # | Threat | Mitigation(s) |
 | --- | --- | --- |

@@ -1,4 +1,4 @@
-# DistroKid album-page parser — design
+# DistroKid album-page parser - design
 
 **Date:** 2026-08-08
 **Status:** Approved (design), pending implementation
@@ -22,28 +22,28 @@ Live authorized scans finalize `FAILED` with every release `TIMEOUT` (observed: 
 
 ## Design
 
-### Phase 1 — Ground-truth capture *(1 rebuild + 1 attended scan)*
+### Phase 1 - Ground-truth capture *(1 rebuild + 1 attended scan)*
 
 Diagnostic gated behind `DISTROKID_ALBUM_CAPTURE_DIR` (unset = no capture; default off). For the first 1–2 releases only, after the album page fully loads, write to a mounted host scratch dir:
 
 - rendered `page.content()` (real markup),
 - inline `<script>` JSON blobs (reveals embedded-JSON vs. pure-DOM),
-- a manifest of every response's **sanitized-URL + content-type + status** (bodies **not** written) — definitively proves whether any JSON endpoint exists.
+- a manifest of every response's **sanitized-URL + content-type + status** (bodies **not** written) - definitively proves whether any JSON endpoint exists.
 
 To avoid a wasted round-trip, this build also carries a **best-effort** parser inferred from the working catalog-index DOM scraper; if it already works we get 5/5 in this same scan, otherwise the capture shows exactly how to fix it.
 
 **Compliance for the capture:** album/release pages only (never billing/tax/payment/banking/address/account-security/profile pages); local gitignored dev artifact; no external egress; personal/token fields redacted before any committed fixture is derived; capture writes to a file, never to structured logs.
 
-### Phase 2 — DistroKid album-page reader *(write freely; rebuild only to test)*
+### Phase 2 - DistroKid album-page reader *(write freely; rebuild only to test)*
 
 New isolated module `packages/browser-assist/src/distrokid/album-page.ts` exporting:
 
-- `readDistroKidAlbumPageState(page)` — Tier-4, returns embedded JSON state if present (parsed via existing `parsers.parse(state, 'PAGE_STATE')`).
-- `readDistroKidAlbumDom(page)` — Tier-5, returns a `CanonicalDistributorRelease` (tracks[title, ISRC], UPC, artwork) scraped from the DOM.
+- `readDistroKidAlbumPageState(page)` - Tier-4, returns embedded JSON state if present (parsed via existing `parsers.parse(state, 'PAGE_STATE')`).
+- `readDistroKidAlbumDom(page)` - Tier-5, returns a `CanonicalDistributorRelease` (tracks[title, ISRC], UPC, artwork) scraped from the DOM.
 
 Wire both into the extractor opts at `composition.ts` (the `NetworkFirstExtractor` construction). Reuse DOM patterns from `distrokid-attended.ts`'s catalog-index scraper. Unit-tested against the redacted fixture from Phase 1.
 
-### Phase 3 — Live verify *(1 rebuild + 1 attended scan)*
+### Phase 3 - Live verify *(1 rebuild + 1 attended scan)*
 
 Confirm 5/5 `COMPLETED` with real tracks/ISRC/UPC/artwork persisted (`DistributorReleaseOutcome` / `DistributorTrack`).
 

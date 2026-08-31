@@ -11,7 +11,7 @@ build/
 .next/
 out/
 
-# Environment / secrets — NEVER commit
+# Environment / secrets - NEVER commit
 .env
 .env.*
 !.env.example
@@ -19,14 +19,14 @@ out/
 *.key
 secrets/
 
-# Generated artifacts / evidence (may contain PII — keep out of git)
+# Generated artifacts / evidence (may contain PII - keep out of git)
 /artifacts/
 /out/
 /reports-output/
 *.local.csv
 *.local.pdf
 
-# Real captured catalog data + browser session state (your account data — never commit)
+# Real captured catalog data + browser session state (your account data - never commit)
 /captures/
 /.auth/
 

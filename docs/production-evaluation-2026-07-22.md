@@ -1,8 +1,8 @@
-# Production evaluation — updated 2026-07-23
+# Production evaluation - updated 2026-07-23
 
 ## Verdict
 
-**NO-SHIP — NOT YET PRODUCTION CERTIFIED.**
+**NO-SHIP - NOT YET PRODUCTION CERTIFIED.**
 
 The working tree now contains the production control paths requested in this
 review: durable organization membership, cross-store retention and tenant

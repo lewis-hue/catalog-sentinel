@@ -1,4 +1,4 @@
-# Reusable distributor session (idle-timeout keep-alive) — design
+# Reusable distributor session (idle-timeout keep-alive) - design
 
 **Date:** 2026-08-08
 **Status:** Approved (design), pending implementation
@@ -7,7 +7,7 @@
 ## Goal
 
 Let a user rescan their distributor catalogue without signing in again, for a warm window after a
-scan — avoiding a fresh attended login (and the CAPTCHA/bot-detection/MFA step-ups a fresh login can
+scan - avoiding a fresh attended login (and the CAPTCHA/bot-detection/MFA step-ups a fresh login can
 trigger). Do it **without increasing cost unboundedly** and **without weakening the compliance
 posture**.
 
@@ -18,8 +18,8 @@ posture**.
   reference** (`BrowserLinkSession.providerSessionIdEncrypted`).
 - **Authorized-session-only, consent-bounded.** A reusable session must never outlive the consent
   grant that authorized it.
-- **Rejected alternative (explicitly):** the "stateless" approach — close Steel, export the browser
-  auth state, store it in Redis/Postgres, replay later — is **out of scope and prohibited**. It
+- **Rejected alternative (explicitly):** the "stateless" approach - close Steel, export the browser
+  auth state, store it in Redis/Postgres, replay later - is **out of scope and prohibited**. It
   violates the no-stored-credentials rule, turns the datastore into a credential vault (one breach =
   mass DistroKid account takeover), and is self-defeating (replaying cookies in a fresh browser
   context is a classic anti-fraud trigger, re-raising the very CAPTCHA/MFA it aimed to avoid).
@@ -63,13 +63,13 @@ Reuse the existing `BrowserSessionStatus` enum
 
 ## Integration points (to detail in the implementation plan)
 
-- `apps/worker/src/distrokid/composition.ts` — `releaseSession(job)` finalizer: keep-vs-release + idle
+- `apps/worker/src/distrokid/composition.ts` - `releaseSession(job)` finalizer: keep-vs-release + idle
   deadline transition.
-- `apps/api/src/distributor-connect.ts` — the scan claim flow (`liveClaim`/`claimLive`) + reuse
+- `apps/api/src/distributor-connect.ts` - the scan claim flow (`liveClaim`/`claimLive`) + reuse
   decision; the reaper/heartbeat sweep; sign-out/disconnect hook.
-- `BrowserLinkSession` store — status transitions + `expiresAt`/`lastHeartbeatAt` updates (no schema
+- `BrowserLinkSession` store - status transitions + `expiresAt`/`lastHeartbeatAt` updates (no schema
   change expected; columns already exist).
-- Frontend — a "Rescan" affordance that reuses silently when warm; optional "session active" hint.
+- Frontend - a "Rescan" affordance that reuses silently when warm; optional "session active" hint.
 
 ## Cost & security notes
 

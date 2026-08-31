@@ -1,4 +1,4 @@
-# DistroKid metadata extraction — audit
+# DistroKid metadata extraction - audit
 
 > Historical diagnostic notes, not current production certification. Their
 > reported account observations were not independently re-run as part of the
@@ -17,7 +17,7 @@ not treat those observations as a current authorized acceptance run.
 DistroKid's dashboard is a client-routed SPA. Navigating to `/dashboard/album/?albumuuid=…`
 reloads the whole app, which then fetches the release JSON asynchronously. The page can load,
 reload, or look visually complete while the JSON carrying ISRC / UPC / artwork / tracks is still
-in flight — or while the component that would render it never mounts. Waiting on the DOM is
+in flight - or while the component that would render it never mounts. Waiting on the DOM is
 waiting on the wrong signal, so metadata was silently lost at scale.
 
 ### Evidence trail
@@ -26,7 +26,7 @@ waiting on the wrong signal, so metadata was silently lost at scale.
 |---|---|---|
 | `domcontentloaded`, 20s timeout, 4 tabs | 96/98 releases `page.goto: Timeout 20000ms exceeded` | Not merely "slow" |
 | `domcontentloaded`, 60s timeout, 3 tabs | 75/98 still timed out at 60s | `domcontentloaded` **hangs** (blocking script never settles); more timeout can't fix it |
-| `commit` + wait-for-rendered-UPC/ISRC, 2 tabs, 30s | Navigation fixed (3 errors), but only **46/107 tracks** had ISRC | Data exists but isn't rendered in time — DOM is the wrong gate |
+| `commit` + wait-for-rendered-UPC/ISRC, 2 tabs, 30s | Navigation fixed (3 errors), but only **46/107 tracks** had ISRC | Data exists but isn't rendered in time - DOM is the wrong gate |
 | `Navigation … interrupted by another navigation to <same url>` | 3 releases | Confirms client-side routing/re-navigation per album |
 
 Conclusion: no amount of timeout/concurrency tuning makes DOM-first extraction complete. The
@@ -38,10 +38,10 @@ authoritative data is the **JSON response the SPA itself fetches**.
 
 | File:line | Code | Verdict |
 |---|---|---|
-| `packages/browser-assist/src/distrokid-attended.ts:128` | `await page.waitForTimeout(700)` in the My-Music lazy-scroll loop | **Acceptable** — it is a scroll settle inside a `scrollHeight`-change loop with a break condition, not metadata synchronization. Not on the metadata path. |
+| `packages/browser-assist/src/distrokid-attended.ts:128` | `await page.waitForTimeout(700)` in the My-Music lazy-scroll loop | **Acceptable** - it is a scroll settle inside a `scrollHeight`-change loop with a break condition, not metadata synchronization. Not on the metadata path. |
 | `distrokid-attended.ts:530,545,630,657` | `waitForTimeout(1500/900/pollMs)` in historical `BrowserSession` / CSV-download test helpers | **Test support only.** Not imported by the API/production worker or used by `readDistroKidCatalogFromPage`; the former runtime route was removed. |
 | `packages/browser-assist/src/audiomack-web.ts:175,185,201` | `waitForTimeout` | Different adapter (Audiomack web verification). Out of scope. |
-| `apps/worker/src/queue.ts:73` | `sleep(2 ** attempt * 50)` | **Correct** — exponential retry backoff, not a readiness wait. |
+| `apps/worker/src/queue.ts:73` | `sleep(2 ** attempt * 50)` | **Correct** - exponential retry backoff, not a readiness wait. |
 
 No `waitForLoadState` is used as a metadata-readiness signal anywhere.
 
@@ -52,7 +52,7 @@ No fixed sleep is on the metadata path.**
 
 - `distrokid-attended.ts` → `scrapeReleaseDetailInPage()` ran in `page.evaluate` and regex-scraped
   `document.body.innerText` for UPC (`\d{12,13}`) and ISRC (`[A-Z]{2}[A-Z0-9]{3}\d{7}`).
-- It was gated on `waitForFunction(() => /upc|isrc/.test(innerText))` — i.e. **DOM render**.
+- It was gated on `waitForFunction(() => /upc|isrc/.test(innerText))` - i.e. **DOM render**.
 - On timeout it fell through to `toRawRelease(null, row, …)`, keeping only list-level info
   (title/artist) with **no error state distinguishing "absent at source" from "not captured."**
 
@@ -67,12 +67,12 @@ No fixed sleep is on the metadata path.**
 ### 4. Identifier modeling
 
 - `ReleasedTrack` flattened release-level `upc` onto every track, and coverage was logged as a
-  single combined `"46 with ISRC, 47 with UPC"` over tracks — hiding which extraction failed.
+  single combined `"46 with ISRC, 47 with UPC"` over tracks - hiding which extraction failed.
 - **UPC and artwork are release-level; ISRC is track-level.**
 
 ### 5. Steel / Playwright / CDP attachment
 
-- `packages/browser-link/src/cloud-live-provider.ts` — Steel Cloud session via `POST /v1/sessions`,
+- `packages/browser-link/src/cloud-live-provider.ts` - Steel Cloud session via `POST /v1/sessions`,
   `chromium.connectOverCDP(websocketUrl + apiKey)`. CDP is available, so
   `context.newCDPSession(page)` is possible for a response-body fallback.
 - `preparePageForEvaluate` injects the esbuild `__name` shim (string init script). Extra tabs
@@ -81,7 +81,7 @@ No fixed sleep is on the metadata path.**
 
 ### 6. Jobs / checkpoints / storage
 
-- `apps/worker/src/catalogue-read{,-queue}.ts` — a single `catalogue-read` job read the **entire**
+- `apps/worker/src/catalogue-read{,-queue}.ts` - a single `catalogue-read` job read the **entire**
   catalogue in one unit of work. A failure anywhere meant re-reading everything; **no per-release
   checkpoint, no retry-failed-only, no resume**.
 - `search-store.ts` (`InMemory` / `Redis` / `Postgres` / `Tiered`) persists a whole `SearchRecord`

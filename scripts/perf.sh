@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Performance sweep: measure Core Web Vitals (LCP/CLS/FCP/TBT) + transfer weight per route
 # inside the scanner container's Chromium against the internal web service. Exits non-zero if
-# any route breaches the "good" thresholds — suitable for CI. Requires the stack to be up.
+# any route breaches the "good" thresholds - suitable for CI. Requires the stack to be up.
 set -euo pipefail
 
 docker compose cp scripts/perf-sweep.mjs scanner:/app/perf-sweep.mjs

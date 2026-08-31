@@ -1,4 +1,4 @@
-# DistroKid metadata — live test report
+# DistroKid metadata - live test report
 
 > Historical development notes supplied to this project. Their reported
 > DOM-first observations were not independently re-run or accepted as a current
@@ -15,7 +15,7 @@ historical notes are redacted; no raw customer identifiers are reproduced here.
 
 **The extractor treated DOM rendering as the point at which data was available.** DistroKid's
 dashboard is a client-routed SPA that reloads its whole app per album and hydrates the release
-JSON asynchronously — so the page could be "loaded" while ISRC/UPC/artwork were still in flight,
+JSON asynchronously - so the page could be "loaded" while ISRC/UPC/artwork were still in flight,
 or while the component never mounted.
 
 The historical notes reported DOM-first observations for 98 releases and about
@@ -45,14 +45,14 @@ distinct-payload count, release-id correlation. **No values, cookies, headers, t
 
 Scan logs also print, per scan:
 ```
-metadata source — network-first N, DOM fallback N
+metadata source - network-first N, DOM fallback N
 catalog JSON endpoints (sanitized) → GET distrokid.com/api/… x<N>
 coverage: releases N · UPC x/N · artwork x/N · tracks M · ISRC y/M
 ```
 
 ## 3. One endpoint or several?
 
-**Not yet determined for the live account** — and the implementation deliberately does not assume.
+**Not yet determined for the live account** - and the implementation deliberately does not assume.
 `endpoint-bundle.ts` supports separate profiles per role (`catalogIndex`, `releaseDetails`,
 `trackIdentifiers`, `artwork`, `storeDeliveryStatus`, `lyricsStatus`, `creditsStatus`), infers the
 role from schema shape, and merges partial payloads. The split-endpoint case is covered by an
@@ -63,7 +63,7 @@ integration test (details endpoint + separate identifiers endpoint → merged re
 `distrokid-parser-v1` (Zod). Registry tries newest-first; total failure ⇒ `SCHEMA_CHANGED`
 + `SOURCE_SCHEMA_CHANGED` alert + endpoint `DEGRADED`. v1 is retained permanently for rollback.
 
-## 5. Coverage — before / after
+## 5. Coverage - before / after
 
 | | Before (DOM-first, live) | After (network-first) |
 |---|---|---|
@@ -80,7 +80,7 @@ integration test (details endpoint + separate identifiers endpoint → merged re
 
 Live: pending. Every release now ends with a terminal outcome carrying a reason
 (`TIMEOUT · REQUEST_FAILED · PARSE_FAILED · SCHEMA_CHANGED · REAUTH_REQUIRED · NOT_AUTHORIZED ·
-RATE_LIMITED · BUDGET_EXHAUSTED · UNKNOWN`) — no release is silently skipped.
+RATE_LIMITED · BUDGET_EXHAUSTED · UNKNOWN`) - no release is silently skipped.
 
 ## 7. Tests run
 
@@ -111,12 +111,12 @@ historical and have been superseded; they do not describe the 14-migration
 
 ## 8. Remaining legal-review items
 
-- **Direct authenticated JSON reader** — implemented, **disabled**. Requires
+- **Direct authenticated JSON reader** - implemented, **disabled**. Requires
   `ENABLE_DISTROKID_DIRECT_JSON_READER` **and** `LEGAL_REVIEW_DISTROKID_DIRECT_JSON_APPROVED`.
   Before enabling: endpoint observed during normal user-authorized navigation; access limited to
   the connected user's own catalog (enforced in code); rate limits preserved (enforced); legal /
   contractual approval or partnership; explicit user consent.
-- **Artwork storage** — we persist the source URL only. Copying images to our own object storage
+- **Artwork storage** - we persist the source URL only. Copying images to our own object storage
   needs an ownership/retention decision.
 
 ## 9. Credentials / session data
@@ -135,7 +135,7 @@ historical and have been superseded; they do not describe the 14-migration
 
 ### The two bugs that mattered most were found by ONE test
 
-A second audit found the pipeline's six workers were started but **nothing enqueued to them** —
+A second audit found the pipeline's six workers were started but **nothing enqueued to them** - 
 the API still enqueued the older `catalogue-read` job. A consumer with no producer. It passed
 every test because the tests called the stage functions directly and never touched a queue.
 
@@ -146,14 +146,14 @@ broken every production scan:
 | Defect | Consequence |
 |---|---|
 | Job ids were colon-joined | BullMQ **rejects** ids containing `:`. Every enqueue would have thrown. **Zero jobs could ever have run.** |
-| A lock-deferred chunk re-enqueued under the in-flight job's id | BullMQ silently discards the duplicate. With one chunk at a time per account, **every chunk after the first vanished** — any catalogue over 20 releases hangs at "reading…" forever, with no error anywhere. |
+| A lock-deferred chunk re-enqueued under the in-flight job's id | BullMQ silently discards the duplicate. With one chunk at a time per account, **every chunk after the first vanished** - any catalogue over 20 releases hangs at "reading…" forever, with no error anywhere. |
 
 Both are fixed and pinned by tests. The lesson generalizes: **a queue test that dispatches its own
 handlers proves nothing about the queue.** 390 green tests did not.
 
 ### Still open
 
-1. **Live coverage numbers are not measured** — a scan on the authorized account is required to
+1. **Live coverage numbers are not measured** - a scan on the authorized account is required to
    fill §2, §3, §5 and §6 with real values. Everything there is still "pending", not "achieved".
    This is the remaining extractor-coverage item that requires authorized account
    access; it is not the only production blocker. Legal/privacy approval, current
@@ -165,22 +165,22 @@ handlers proves nothing about the queue.** 390 green tests did not.
 
    ```bash
    # 1. Connect the distributor and run a scan in the UI (attended login, your own browser).
-   # 2. Read the results back — READ-ONLY; it cannot start or modify a scan:
+   # 2. Read the results back - READ-ONLY; it cannot start or modify a scan:
    npm run live:coverage -- --scan <searchId> --out docs/live-coverage-<date>.md
    ```
 
    It reports the endpoint candidates actually observed, REST vs GraphQL, single vs bundle, and
-   ISRC/UPC/artwork coverage **each separately** — the questions this report has been carrying as
+   ISRC/UPC/artwork coverage **each separately** - the questions this report has been carrying as
    unanswered.
 
 2. **Steel reconnect** is not exercised (the load test is a fast in-memory simulation, not the
    deployed topology).
-3. **Parser v1 is the only variant** — correct today, but the live payload shape should be pinned
+3. **Parser v1 is the only variant** - correct today, but the live payload shape should be pinned
    into a v2 fixture once discovery reports the real endpoint.
 4. **Resolved after this historical run:** the legacy DOM/single-job runtime
    route and its configuration selector were removed. The production path is the
    six-stage network-first pipeline.
-5. **CI has not run on a real PR yet** — the workflow is verified locally (the exact command,
+5. **CI has not run on a real PR yet** - the workflow is verified locally (the exact command,
    including the skip-detector, was executed against real Redis + Postgres), but it has not
    executed on GitHub's runners.
 6. **Resolved after this historical report:** job payloads contain only an
@@ -192,27 +192,27 @@ handlers proves nothing about the queue.** 390 green tests did not.
 ### The API no longer imports the worker
 
 `apps/api` depended on `@sentinel/worker` for the search store, three queue producers and a
-deep-scan dispatcher — so an HTTP server transitively pulled in Playwright, a browser runtime and
+deep-scan dispatcher - so an HTTP server transitively pulled in Playwright, a browser runtime and
 a scan executor it never used. The shared parts now live in packages:
 
 | Package | What moved | Why it isn't in an app |
 |---|---|---|
 | `@sentinel/contracts` | job payloads, queue names, idempotent job ids, metadata model, storage ports | both apps must agree on the wire format; neither should own it |
-| `@sentinel/queue-client` | DistroKid / presence / catalogue-read / deep-scan **producers** | enqueuing is not executing — the API needs only this half |
+| `@sentinel/queue-client` | DistroKid / presence / catalogue-read / deep-scan **producers** | enqueuing is not executing - the API needs only this half |
 | `@sentinel/search-store` | in-memory / Redis / Postgres / tiered stores + manual-review | both the API (serves records) and the workers (write results) need it |
 | `@sentinel/persistence` | durable Postgres stores for outcomes, endpoint profiles, candidates | a database layer must not transitively import a browser |
 
-Two behaviours the API genuinely could not keep — **executing** a deep scan in-process — are now
+Two behaviours the API genuinely could not keep - **executing** a deep scan in-process - are now
 injected by a composition root (`AppDeps.runDeepScanInline`, `DistributorLinkService`'s
 `dispatcher`). An API that cannot execute a scan is the point, not a limitation: it enqueues and
 serves state.
 
 An ESLint boundary rule (`@typescript-eslint/no-restricted-imports`, `allowTypeImports: false`)
-fails the build if `apps/api` imports the worker again. **Verified in both directions** — it fires
+fails the build if `apps/api` imports the worker again. **Verified in both directions** - it fires
 on a value import AND a type-only import, and passes on the clean tree. Tests may still import
 both halves: composing the system under test is a test's job.
 
-### Durable persistence — verified against a real database
+### Durable persistence - verified against a real database
 
 The historical disposable infrastructure run applied the **8 migrations that
 existed on 2026-07-22** to a fresh PostgreSQL database, exercised real
@@ -223,12 +223,12 @@ are retained only as historical evidence. The current release gate requires all
 
 | Property | Why it is tested with real SQL |
 |---|---|
-| Idempotent finalize | Three redelivered finalizes leave **one** snapshot and two releases — not three copies of a catalogue. A wrong `ON CONFLICT` target is invisible to a typechecker. |
+| Idempotent finalize | Three redelivered finalizes leave **one** snapshot and two releases - not three copies of a catalogue. A wrong `ON CONFLICT` target is invisible to a typechecker. |
 | Transactional | A mid-write failure rolls back completely: no snapshot claiming COMPLETE over half a catalogue. |
-| Failures persisted | A `FAILED` release is a **row with a reason code**, not an omission. The free-text detail is *not* stored (it can quote response content) — asserted. |
+| Failures persisted | A `FAILED` release is a **row with a reason code**, not an omission. The free-text detail is *not* stored (it can quote response content) - asserted. |
 | `ABSENT_AT_SOURCE` ≠ `TIMEOUT` | Both store `upc = NULL`; only the status says which is our failure and therefore retryable. |
 | Tenant isolation | Same fingerprint under two tenants → two rows with independent status. One tenant cannot read or overwrite another's profile. |
-| Schema enforces the allowlist | `information_schema` is queried to prove **no raw/payload/body column exists** on any catalog table, and that `DistributorTrackOutcome` has **no `upc`** — the model is checked, not just the code. |
+| Schema enforces the allowlist | `information_schema` is queried to prove **no raw/payload/body column exists** on any catalog table, and that `DistributorTrackOutcome` has **no `upc`** - the model is checked, not just the code. |
 
 The current Docker-backed infrastructure run applies all 14 migrations and
 completes **95/95 files and 752/752 tests with zero skips**. It includes the
@@ -244,7 +244,7 @@ when the suites skip, and passes when they run. A guard that never fires is not 
 
 | Finding | Fix |
 |---|---|
-| **Retry reconciliation deduplicated away (P0)** | `pass` on the job + in `jobIds.reconcile`/`finalize`; per-pass chunk tracking. It was also a default function param the queue could never supply, so every reconcile thought it was pass 1 and retried forever — a loop masked only by the id collision that dropped it |
+| **Retry reconciliation deduplicated away (P0)** | `pass` on the job + in `jobIds.reconcile`/`finalize`; per-pass chunk tracking. It was also a default function param the queue could never supply, so every reconcile thought it was pass 1 and retried forever - a loop masked only by the id collision that dropped it |
 | **Steel session lost on retry (P0)** | `refOf()` carries the handle through every hop, so a stage cannot drop it by omission |
 | **API imported the worker (P1)** | `search-store` + `queue-client` packages; inline execution injected, not imported; ESLint boundary rule verified to fire on value AND type-only imports |
 | **Temporal attribution sold as correlation (P1)** | Correlation derives from the REQUEST (path/query/GraphQL/body) matched against known ids in memory; only the CATEGORY is stored |
@@ -253,7 +253,7 @@ when the suites skip, and passes when they run. A guard that never fires is not 
 | **Pipeline was opt-in (P1)** | It is the default; `inprocess` is REFUSED in production; `/api/catalogue/engine` reports what actually runs |
 | **Lock renewal tied to checkpoint cadence (P1)** | Heartbeat on a timer at ⅓ TTL; `LockLostError` aborts rather than continuing unlocked |
 | **Cross-tenant reads (P1)** | `SearchRecord` gained `tenantId`; `TenantScopedSearchStore` binds it once; 404 not 403 so ids aren't an enumeration oracle |
-| **Infra tests unreachable from the host** | `npm run test:infra` — loopback-only throwaway Redis/Postgres, migrate, run, tear down |
+| **Infra tests unreachable from the host** | `npm run test:infra` - loopback-only throwaway Redis/Postgres, migrate, run, tear down |
 | **Nothing enqueued the pipeline (P0)** | `@sentinel/queue-client` producer; API now always enqueues `CatalogIndexJob` on login confirmation |
 | **Registries process-local (P1)** | `PostgresEndpointRegistryStore` + `PostgresCandidateStore` in `@sentinel/persistence`; tenant-scoped, upsert-on-natural-key, 16 tests against real Postgres |
 | **Infrastructure tests always skipped (P1)** | CI provisions Redis + Postgres; the 2 previously-skipped suites now run; `assert-infra-tests-ran.mjs` fails the build if any gated suite skips |

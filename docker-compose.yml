@@ -1,4 +1,4 @@
-# Artist Catalog Sentinel — local integration stack using real services only.
+# Artist Catalog Sentinel - local integration stack using real services only.
 #
 #   docker compose up --build
 #
@@ -33,7 +33,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # Self-hosted Keycloak (OIDC) — authentication + RBAC + per-tenant identity. Its own
+  # Self-hosted Keycloak (OIDC) - authentication + RBAC + per-tenant identity. Its own
   # Postgres (keycloak-db). The imported realm contains roles, clients, identity-provider
   # mappers, and a credentialless worker service account, but no interactive demo user.
   # Auth is opt-in locally; provision human users through Google or the admin console.
@@ -64,7 +64,7 @@ services:
       KC_HEALTH_ENABLED: 'true'
       # FIXED public issuer. Without this, a token minted over the internal backchannel
       # (keycloak:8080) would carry iss=http://keycloak:8080/... while the browser + API expect
-      # http://localhost:8080/... — the classic issuer mismatch that rejects every token.
+      # http://localhost:8080/... - the classic issuer mismatch that rejects every token.
       # KC_HOSTNAME pins the frontend/issuer URL; BACKCHANNEL_DYNAMIC still lets the API and the
       # web BFF reach token/JWKS endpoints over the internal service name.
       # PRODUCTION: set KC_HOSTNAME=https://auth.yourdomain.com.
@@ -91,15 +91,15 @@ services:
       - '127.0.0.1:8080:8080' # loopback-only: the local browser can reach OIDC without LAN exposure
     depends_on: [keycloak-db]
 
-    # Not published to the host — the app reaches it over the compose network.
+    # Not published to the host - the app reaches it over the compose network.
 
   # One-shot realm reconciler. The realm JSON declares the right settings, but Keycloak's
   # --import-realm SKIPS a realm that already exists in keycloak-db, so on every restart after the
   # first the JSON has no effect. Two settings must hold or the app breaks, so we re-apply them here
   # (idempotently) on every `up`:
-  #   1. default-roles-sentinel must grant `user` — otherwise fresh logins mint tokens with no
+  #   1. default-roles-sentinel must grant `user` - otherwise fresh logins mint tokens with no
   #      Sentinel role, the API rejects every bearer token, and the web app flickers in a redirect loop.
-  #   2. editUsernameAllowed must be true — otherwise the profile page's "edit username" is rejected
+  #   2. editUsernameAllowed must be true - otherwise the profile page's "edit username" is rejected
   #      by Keycloak with error-user-attribute-read-only.
   # This replaces the manual kcadm step that previously had to be run by hand after each restart.
   keycloak-init:
@@ -225,7 +225,7 @@ services:
       # Best-effort EVIDENCE only, never a source of truth. SEARCH_PROVIDER is normally left empty
       # (auto = Serper when the key is set); pin SEARCH_PROVIDER=serper to force it.
       SEARCH_PROVIDER: ${SEARCH_PROVIDER:-}
-      # Serper.dev — sign up at serper.dev (2,500 free queries), put the key in .env. The reliable
+      # Serper.dev - sign up at serper.dev (2,500 free queries), put the key in .env. The reliable
       # web-verification path for large/obscure catalogues.
       SERPER_API_KEY: ${SERPER_API_KEY:-}
       SERPER_ENDPOINT: ${SERPER_ENDPOINT:-}
@@ -251,7 +251,7 @@ services:
       DEEP_SCAN_CHECKPOINT_INTERVAL: ${DEEP_SCAN_CHECKPOINT_INTERVAL:-25}
       # Authentication (Keycloak/OIDC). The API verifies bearer tokens: RS256 signature + issuer
       # + audience. KEYCLOAK_BASE_URL is INTERNAL (JWKS fetch over the compose network), but the
-      # token's `iss` is the PUBLIC issuer the browser used — so KEYCLOAK_ISSUER must be set
+      # token's `iss` is the PUBLIC issuer the browser used - so KEYCLOAK_ISSUER must be set
       # explicitly or every token is rejected on an issuer mismatch.
       KEYCLOAK_BASE_URL: ${KEYCLOAK_BASE_URL:-http://keycloak:8080}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/sentinel}
@@ -273,7 +273,7 @@ services:
     # The API is reachable only through the web BFF. No local browser or VNC port is
     # published; attended real-browser use always goes through a Steel session.
 
-  # Background deep-scan worker(s) — the Celery-equivalent (BullMQ on Redis). Consumes the
+  # Background deep-scan worker(s) - the Celery-equivalent (BullMQ on Redis). Consumes the
   # multi-platform deep-scan queue and writes results to the SHARED Redis store. Scale with
   # `docker compose up --scale worker=3` (keep DEEP_SCAN_MAX_CONCURRENCY=1 per worker so the
   # Serper query budget isn't overwhelmed by parallel web-heavy scans).
@@ -291,10 +291,10 @@ services:
       DEEP_SCAN_CHECKPOINT_INTERVAL: ${DEEP_SCAN_CHECKPOINT_INTERVAL:-25}
       DEEP_SCAN_MAX_CONCURRENCY: ${DEEP_SCAN_MAX_CONCURRENCY:-1}
       # Decouple scraping from verification: when unset/false the DistroKid scrape does NOT
-      # auto-fire the store-presence check — a user triggers it on demand (POST /store-check).
+      # auto-fire the store-presence check - a user triggers it on demand (POST /store-check).
       # Set true to restore the legacy "scrape then immediately verify" chain.
       SCAN_STORE_PRESENCE_AUTO: ${SCAN_STORE_PRESENCE_AUTO:-}
-      # Lyric-availability verification (Missing Lyrics module) via LRCLIB — KEYLESS. Blank uses the
+      # Lyric-availability verification (Missing Lyrics module) via LRCLIB - KEYLESS. Blank uses the
       # public host (lrclib.net); point at a self-hosted mirror if desired. No key ever required.
       LYRICS_VERIFY_BASE_URL: ${LYRICS_VERIFY_BASE_URL:-}
       DATABASE_URL: postgresql://sentinel:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/sentinel
@@ -311,7 +311,7 @@ services:
       CATALOG_READ_MAX_RELEASES: ${CATALOG_READ_MAX_RELEASES:-5000}
       CATALOG_INDEX_MAX_SCROLL_ROUNDS: ${CATALOG_INDEX_MAX_SCROLL_ROUNDS:-500}
       # Per-release extraction tuning. DistroKid album pages expose NO JSON endpoint, so the
-      # network-first wait is pure overhead before the DOM reader runs — keep it short. And run
+      # network-first wait is pure overhead before the DOM reader runs - keep it short. And run
       # several release tabs on the one session so a large catalogue finishes inside the Steel
       # session window (bounded concurrency keeps the request rate on the user's own account modest).
       CATALOG_READ_CONTENT_TIMEOUT_MS: ${CATALOG_READ_CONTENT_TIMEOUT_MS:-30000}
@@ -355,14 +355,14 @@ services:
       SERPER_CIRCUIT_BREAKER_RESET_SECONDS: ${SERPER_CIRCUIT_BREAKER_RESET_SECONDS:-30}
       ENABLE_SEARCH_WEB_VERIFY: ${ENABLE_SEARCH_WEB_VERIFY:-true}
       ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?Set ENCRYPTION_MASTER_KEY}
-      # DIAGNOSTIC album-page capture — off unless DISTROKID_ALBUM_CAPTURE_DIR is set (e.g. to
+      # DIAGNOSTIC album-page capture - off unless DISTROKID_ALBUM_CAPTURE_DIR is set (e.g. to
       # /capture). When set, one real album page's HTML/scripts/response-manifest is written to the
       # mounted ./.capture dir so the DOM reader can be built/verified against DistroKid's markup.
       DISTROKID_ALBUM_CAPTURE_DIR: ${DISTROKID_ALBUM_CAPTURE_DIR:-}
       # Capture a SPECIFIC release (by album UUID) instead of the first, for targeted inspection.
       DISTROKID_ALBUM_CAPTURE_UUID: ${DISTROKID_ALBUM_CAPTURE_UUID:-}
     volumes:
-      # Host ./captures is already gitignored (real account data — never committed).
+      # Host ./captures is already gitignored (real account data - never committed).
       - ./captures:/capture
     # Wait for HEALTHY, not merely started: Postgres rejects connections with FATAL 57P03
     # ("the database system is starting up") during boot, which would crash this service on a
@@ -376,7 +376,7 @@ services:
     image: sentinel-app
     command: ['npm', 'run', 'start', '--workspace', 'apps/web']
     environment:
-      # `next start` only serves the app's routes with NODE_ENV=production — so keep it here.
+      # `next start` only serves the app's routes with NODE_ENV=production - so keep it here.
       NODE_ENV: production
       # …but APP_ENV is the authoritative security-transport signal (see lib/auth/config.ts). For
       # LOCAL testing it is "development", which permits plaintext http on the compose network

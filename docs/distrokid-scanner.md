@@ -14,12 +14,12 @@ for deterministic test pages and historical compatibility tests only.
 Per release: title, artist, release URL, distributor release id (if visible),
 UPC, release date, selected stores + delivery status (incl. Audiomack). Per track:
 title, track order, track URL, distributor track id (if visible), ISRC, lyrics
-status, synced-lyrics status, credits status. Nothing else — no payment, tax,
+status, synced-lyrics status, credits status. Nothing else - no payment, tax,
 bank, messages, address, or unrelated account data.
 
 Each data point carries **provenance**: `sourceUrlCategory`, `scannedAt`, and a
 `confidence` score. When a field cannot be read confidently, the value is
-`null`/`UNKNOWN` — never guessed.
+`null`/`UNKNOWN` - never guessed.
 
 ## Resilient locators
 

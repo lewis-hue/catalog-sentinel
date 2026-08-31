@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Accessibility sweep: run axe-core over every app route inside the scanner container
 # (which ships Playwright + Chromium) against the internal web service. Exits non-zero
-# if any serious/critical WCAG 2.1 A/AA violation is found — suitable for CI.
+# if any serious/critical WCAG 2.1 A/AA violation is found - suitable for CI.
 #
 # Prereq: the compose stack is up (docker compose up -d) and axe-core is installed
 # (npm i, it's a devDependency of @sentinel/web).

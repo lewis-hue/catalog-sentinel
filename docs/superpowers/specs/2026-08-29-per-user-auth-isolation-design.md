@@ -1,4 +1,4 @@
-# Per-User Identity & Data Isolation (remove orgs/teams) — Design Spec
+# Per-User Identity & Data Isolation (remove orgs/teams) - Design Spec
 
 **Date:** 2026-08-29
 **Status:** Approved design, pending implementation-plan.
@@ -55,7 +55,7 @@ Every authenticated user has their own identity and can access **only their own*
 **`app.ts`:**
 - **`forPrincipal` (1156-1186):** return `new UserScopedSearchStore(searchStore, principal)` directly. Remove all `deps.organization` calls and the 503 branch.
 - **Delete:** org-selection preHandler (371-459), `organizationAdministrator` (460-477), `authorizeWorkspace` (478-524) and re-point its call sites (`/api/consent` ~796, `/api/connect` ~1736, `/api/searches` ~1113, `/api/distributor-imports/csv` ~1900) to scope by `sub` directly. Delete every `/api/organization/*` route (526-780) and the erasure routes. Remove the `deps.organization` field + guard (119, 158-160) and the `/api/organization` allowlist entry (179).
-- **Remove `x-sentinel-organization-id`** handling (211-213, 270-271, 288, 325-326) and the `x-tenant-id` overwrite semantics — the principal is `sub`.
+- **Remove `x-sentinel-organization-id`** handling (211-213, 270-271, 288, 325-326) and the `x-tenant-id` overwrite semantics - the principal is `sub`.
 - **`governanceActor`/`effectiveTenantId` (322-343):** replace with a single `userId = req.auth.sub` accessor (`GovernanceActor` becomes `{ userId }` or is inlined).
 - Scan/consent/connect/csv creation stamps `user_id = sub`; the worker path preserves the record's existing `user_id`.
 

@@ -40,7 +40,7 @@ export default defineConfig({
     // Bound the worker pool. Vitest defaults to one thread per core; when the suite runs
     // alongside a build/typecheck (or against real Redis/Postgres in CI) that oversubscribes the
     // box and tests time out. Those timeouts look like flaky functional failures but are pure
-    // resource starvation — the honest fix is to bound concurrency, not to inflate timeouts
+    // resource starvation - the honest fix is to bound concurrency, not to inflate timeouts
     // until the symptom hides.
     pool: 'threads',
     maxWorkers: 4,

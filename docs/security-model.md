@@ -1,4 +1,4 @@
-# Security model — attended DistroKid access
+# Security model - attended DistroKid access
 
 ## Trust boundaries
 

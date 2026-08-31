@@ -92,7 +92,7 @@ export class ResilientSearchProvider implements SearchProvider {
     // Rate limit: reserve the next slot ATOMICALLY (the read-then-write below has no `await`
     // between it, so it's indivisible in JS's single thread). Concurrent callers each grab a
     // DISTINCT slot spaced by minInterval instead of all reading the same `nextAllowedAt` and
-    // bursting — which is what lets the caller parallelize tracks without exceeding the rate.
+    // bursting - which is what lets the caller parallelize tracks without exceeding the rate.
     const slot = Math.max(now, this.nextAllowedAt);
     this.nextAllowedAt = slot + this.minInterval;
     const wait = slot - now;

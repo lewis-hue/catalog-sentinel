@@ -2,7 +2,7 @@
   "name": "artist-catalog-sentinel",
   "version": "0.1.0",
   "private": true,
-  "description": "Artist Catalog Sentinel — audits an artist's distribution catalog against live DSP/platform catalogs, detects discrepancies, and generates evidence-backed support packets for distributors and DSPs.",
+  "description": "Artist Catalog Sentinel - audits an artist's distribution catalog against live DSP/platform catalogs, detects discrepancies, and generates evidence-backed support packets for distributors and DSPs.",
   "type": "module",
   "engines": {
     "node": ">=20"

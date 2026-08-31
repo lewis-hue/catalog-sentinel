@@ -1,4 +1,4 @@
-# Compliance Guardrails — Secure Distributor Link
+# Compliance Guardrails - Secure Distributor Link
 
 ## Non-negotiable rules (enforced)
 
@@ -18,7 +18,7 @@
   frontend, never logged.
 - Risky connector modes are feature-flagged **off** by default.
 
-## Legal review checklist — before enabling a real provider in production
+## Legal review checklist - before enabling a real provider in production
 
 - [ ] Confirm the target distributor's ToS permits attended, user-authorized,
       low-volume automation of the account holder's own catalog data.

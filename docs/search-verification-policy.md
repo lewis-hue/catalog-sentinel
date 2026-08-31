@@ -4,17 +4,17 @@ The core integrity rule of Artist Catalog Sentinel:
 
 > **We never present an unverifiable search result as a confirmed fact.**
 > A song is only "confirmed missing" from a platform when an authoritative source
-> (official API or profile scan) says so — not because a web search didn't find it.
+> (official API or profile scan) says so - not because a web search didn't find it.
 
 ## Evidence hierarchy (strongest → weakest)
 
-1. **Official platform API** — Deezer, Apple/iTunes, Spotify, Audiomack, SoundCloud,
+1. **Official platform API** - Deezer, Apple/iTunes, Spotify, Audiomack, SoundCloud,
    TIDAL, YouTube (where keys/quota exist). ISRC/UPC exact match = highest confidence.
-2. **User-authorized distributor data** — the DistroKid catalogue read over the
+2. **User-authorized distributor data** - the DistroKid catalogue read over the
    user-attended Steel session (the "expected" set).
-3. **Serper web verification** (hosted Google SERP API) — best-effort evidence for platforms
+3. **Serper web verification** (hosted Google SERP API) - best-effort evidence for platforms
    with no API. Confidence-scored, on-page verified.
-4. **Manual review** — a human confirms low-confidence / unverifiable cases.
+4. **Manual review** - a human confirms low-confidence / unverifiable cases.
 
 ## Why an empty web result ≠ "missing"
 
@@ -23,7 +23,7 @@ all (Audiomack, TIDAL, Amazon, Boomplay). A miss on a poorly-indexed platform te
 almost nothing. So:
 
 - **High-index platform + strong query + on-page verification fails** → still only
-  *evidence*, leaning toward `unverifiable`/`possible` — not an automatic `not-live`.
+  *evidence*, leaning toward `unverifiable`/`possible` - not an automatic `not-live`.
 - **Low-index platform (Audiomack, TIDAL, Amazon, Boomplay)** → an empty result is
   `unverifiable` → **manual review**. It is **never** reported as `confirmed missing`
   without an official API or profile scan confirming absence.
@@ -63,10 +63,10 @@ Implemented in `scanStorePresence` (`packages/adapters/src/stores/scan.ts`):
 
 Anything **below 0.60** is flagged `needsManualReview`. A **degraded** store (its
 catalogue read errored or reported an auth/quota/credential failure) has its misses
-downgraded to `unverifiable` — a broken or rate-limited API can never emit a false
+downgraded to `unverifiable` - a broken or rate-limited API can never emit a false
 `not-live`.
 
-## No evasion — by policy
+## No evasion - by policy
 
 We do **not** implement Tor, Privoxy, proxy/IP rotation, stealth browser plugins, CAPTCHA
 solving, or any technique whose purpose is to bypass rate limits, bot protection, or

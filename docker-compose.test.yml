@@ -1,7 +1,7 @@
 # Test-only infrastructure.
 #
 # The problem this solves: the main Compose stack keeps Redis and Postgres on the internal network
-# with no published ports (correct — they must never be reachable from outside the host). But that
+# with no published ports (correct - they must never be reachable from outside the host). But that
 # also made them unreachable from a host-run test suite, so every integration test
 # `describe.skipIf(!REDIS_URL)`d itself into a green tick that proved nothing. The important tests
 # were the ones being skipped.

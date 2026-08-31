@@ -17,7 +17,7 @@ jobs:
     # Real Redis and Postgres.
     #
     # Without these, every integration test `describe.skipIf(!REDIS_URL)`s itself into a green
-    # tick that proves nothing — which is how a pipeline with no producer passed CI. The
+    # tick that proves nothing - which is how a pipeline with no producer passed CI. The
     # infrastructure tests are the ones that catch cross-process defects, so CI must provide the
     # infrastructure.
     services:
@@ -69,7 +69,7 @@ jobs:
       - name: Apply database migrations
         run: npx prisma migrate deploy --schema packages/db/prisma/schema.prisma
 
-      # Pool concurrency is bounded in vitest.config.ts — Vitest's default (one thread per core)
+      # Pool concurrency is bounded in vitest.config.ts - Vitest's default (one thread per core)
       # oversubscribed the runner and produced resource-starvation timeouts that read as flaky
       # functional failures. Bounding concurrency fixes the cause; inflating timeouts hides it.
       #
@@ -80,7 +80,7 @@ jobs:
 
       - name: Assert infrastructure tests actually ran
         # A skipped test and a passing test look identical in a summary line. Without this, the
-        # Redis/Postgres suites can silently skip and CI still reports a green tick — which is
+        # Redis/Postgres suites can silently skip and CI still reports a green tick - which is
         # exactly how a pipeline with no producer passed every build.
         if: always()
         run: node scripts/assert-infra-tests-ran.mjs vitest-report.json
@@ -117,7 +117,7 @@ jobs:
 
       # Fails the build on high/critical known vulnerabilities. A scanner whose failure is
       # swallowed (`|| true`) reports the same green tick whether it found nothing or found
-      # everything — which makes it worse than no scanner, because it looks like coverage.
+      # everything - which makes it worse than no scanner, because it looks like coverage.
       - name: npm audit (high+)
         run: npm audit --audit-level=high
 

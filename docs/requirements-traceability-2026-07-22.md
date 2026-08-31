@@ -1,4 +1,4 @@
-# Requirements traceability — updated 2026-07-23
+# Requirements traceability - updated 2026-07-23
 
 This map covers the supplied ChatGPT transcript and the subsequent production-
 readiness requirements. “Implemented” means the control exists in the current

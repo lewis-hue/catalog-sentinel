@@ -4,7 +4,7 @@ Last reconciled: 2026-07-23.
 
 ## Current verdict
 
-**NO-SHIP — NOT YET CERTIFIED.**
+**NO-SHIP - NOT YET CERTIFIED.**
 
 This checklist is the release gate. Source code, CloudFormation, passing local
 tests, a Steel capability probe, or one successful scan cannot substitute for an

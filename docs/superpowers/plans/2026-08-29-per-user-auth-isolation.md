@@ -21,16 +21,16 @@
 
 ## File Structure (what changes and why)
 
-- `apps/api/src/tenant-scoped-search-store.ts` — the scoping authority. Becomes `UserScopedSearchStore` + `UserBoundSearchStore`; sole rule `userId === sub`.
-- `packages/search-store/src/search-store.ts` — `SearchRecord`/`SearchStore` types + in-memory + Redis stores; `user_id`-only scoping.
-- `packages/search-store/src/postgres-search-store.ts` — durable store; `user_id` column/index/SQL.
-- `apps/api/src/app.ts` — delete org routes/preHandler/helpers; `forPrincipal` returns the user store; scan creation stamps `userId`.
-- `apps/api/src/main.ts` — drop `organization` + `tenantErasure` deps.
-- `apps/api/src/auth.ts`, `packages/security/src/keycloak-auth.ts` — role set + identity (`sub`).
-- `packages/db/*` — delete `organization-repository.ts`, `tenant-erasure.ts`; trim `governance-types.ts`, `index.ts`; rewrite `schema.prisma` + one destructive migration.
-- `apps/worker/*`, `packages/persistence/*` — `tenantId` → `userId` in job payloads + writes.
-- `docker/keycloak/realm-sentinel.json` — remove org roles/attribute/mappers.
-- `apps/web/app/organization/*`, `apps/web/app/_components/SideNav.tsx`, `apps/web/lib/api-client.ts`, `apps/web/lib/auth/server.ts` — remove org UI + selector plumbing.
+- `apps/api/src/tenant-scoped-search-store.ts` - the scoping authority. Becomes `UserScopedSearchStore` + `UserBoundSearchStore`; sole rule `userId === sub`.
+- `packages/search-store/src/search-store.ts` - `SearchRecord`/`SearchStore` types + in-memory + Redis stores; `user_id`-only scoping.
+- `packages/search-store/src/postgres-search-store.ts` - durable store; `user_id` column/index/SQL.
+- `apps/api/src/app.ts` - delete org routes/preHandler/helpers; `forPrincipal` returns the user store; scan creation stamps `userId`.
+- `apps/api/src/main.ts` - drop `organization` + `tenantErasure` deps.
+- `apps/api/src/auth.ts`, `packages/security/src/keycloak-auth.ts` - role set + identity (`sub`).
+- `packages/db/*` - delete `organization-repository.ts`, `tenant-erasure.ts`; trim `governance-types.ts`, `index.ts`; rewrite `schema.prisma` + one destructive migration.
+- `apps/worker/*`, `packages/persistence/*` - `tenantId` → `userId` in job payloads + writes.
+- `docker/keycloak/realm-sentinel.json` - remove org roles/attribute/mappers.
+- `apps/web/app/organization/*`, `apps/web/app/_components/SideNav.tsx`, `apps/web/lib/api-client.ts`, `apps/web/lib/auth/server.ts` - remove org UI + selector plumbing.
 
 **Build note:** this is a coordinated cross-layer refactor. The backend build/tests are green only at the END of Task 4 (store + schema + API move together). Do the work on a branch; run the full suite at Task 4 and again at the end.
 
@@ -156,7 +156,7 @@ git commit -m "feat(auth): scope search store by user_id (keycloak sub) only"
 
 ---
 
-### Task 2: `PostgresSearchStore` — `user_id` column, index, SQL
+### Task 2: `PostgresSearchStore` - `user_id` column, index, SQL
 
 **Files:**
 - Modify: `packages/search-store/src/postgres-search-store.ts`
@@ -211,7 +211,7 @@ Delete enums `OrganizationRole`, `WorkspaceRole`, `MembershipStatus` and models 
 - [ ] **Step 3: Generate the migration**
 
 Run: `npx prisma migrate dev --name per_user_isolation --create-only --schema packages/db/prisma/schema.prisma`
-Then edit the generated `migration.sql` so it is destructive-and-safe on the fresh DB: `DROP TABLE ... CASCADE` for the org tables; `ALTER TABLE ... DROP COLUMN tenant_id/workspace_id, ADD COLUMN user_id text not null` (no backfill — data is wiped), plus the new indexes and the `scan_records` `user_id` change from Task 2.
+Then edit the generated `migration.sql` so it is destructive-and-safe on the fresh DB: `DROP TABLE ... CASCADE` for the org tables; `ALTER TABLE ... DROP COLUMN tenant_id/workspace_id, ADD COLUMN user_id text not null` (no backfill - data is wiped), plus the new indexes and the `scan_records` `user_id` change from Task 2.
 
 - [ ] **Step 4: Validate**
 
@@ -277,7 +277,7 @@ Expected: FAIL (compile errors: `deps.organization`, `forPrincipal` org calls, `
 - `main.ts`: remove the `PostgresOrganizationRepository` construction, the `tenantErasure` runtime, and both from the `buildApp({...})` deps + the `deps` type.
 - `auth.ts`/`keycloak-auth.ts`: interactive customer role check = `user`; keep `platform_admin` as super-role for `/api/admin*`/ops. `AuthIdentity` drops `tenantId` (or sets it to `sub` and nothing reads it). `hasAnyRole`/`SENTINEL_ROLES` drop `artist_manager`, `tenant_admin`.
 - `openapi.ts`: delete the `/api/organization/*` definitions.
-- Delete `packages/db/src/organization-repository.ts`, `packages/db/src/tenant-erasure.ts`; remove their `export *` from `index.ts`; trim `governance-types.ts` to only types still referenced (likely none — remove the file + its export if unused).
+- Delete `packages/db/src/organization-repository.ts`, `packages/db/src/tenant-erasure.ts`; remove their `export *` from `index.ts`; trim `governance-types.ts` to only types still referenced (likely none - remove the file + its export if unused).
 
 - [ ] **Step 5: Delete/rework tests and run the FULL backend suite**
 
@@ -416,6 +416,6 @@ gh pr create --base main --head per-user-auth-isolation --title "Per-user identi
 
 **Spec coverage:** §1 data model → Tasks 2,3; §2 search-store → Task 1; §3 API → Tasks 4,5; §4 Keycloak → Task 6; §5 frontend → Task 7; §6 testing → Tasks 1,4 (+ deletions); §7 rollout → Task 8. Identity model + global constraints → carried in the header + Task 1/4 role checks. No gaps.
 
-**Placeholders:** the only `<...>` tokens are Prisma's generated migration timestamp and a git branch/PR — both concrete conventions, not deferred work.
+**Placeholders:** the only `<...>` tokens are Prisma's generated migration timestamp and a git branch/PR - both concrete conventions, not deferred work.
 
 **Type consistency:** `UserScopedSearchStore`, `UserBoundSearchStore`, `SearchPrincipal { sub, roles, authenticated }`, `SearchRecord.userId`, `listForUser`/`pageForUser`, column `user_id`, index `scan_records_user_created_idx` are used identically across Tasks 1-4.

@@ -59,9 +59,9 @@ Do not use a mutable local tag for release. `.github/workflows/release.yml` publ
 
 ## Operations and evidence
 
-- `docs/production-acceptance.md` — release checklist and evidence rules
-- `docs/distrokid-network-first-extractor.md` — extraction and reconciliation design
-- `docs/security-model.md` — trust boundaries and data handling
-- `infra/aws/README.md` — AWS bootstrap, deployment, backup, and recovery procedure
+- `docs/production-acceptance.md` - release checklist and evidence rules
+- `docs/distrokid-network-first-extractor.md` - extraction and reconciliation design
+- `docs/security-model.md` - trust boundaries and data handling
+- `infra/aws/README.md` - AWS bootstrap, deployment, backup, and recovery procedure
 
 No real credentials, raw browser state, distributor responses, or customer catalogue exports belong in source control.
