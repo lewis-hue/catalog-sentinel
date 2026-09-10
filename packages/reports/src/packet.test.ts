@@ -75,6 +75,19 @@ describe('buildSupportPacket', () => {
     expect(packet.bodyMarkdown).toContain('https://audiomack.com/lewis_ke');
     expect(packet.bodyMarkdown).toContain('found 2 tracks');
   });
+
+  it('lists the affected releases with their UPCs inline in the ticket body', () => {
+    // The DistroKid support bot asks for each missing release's UPC, so they
+    // must be pasteable from the ticket body, not only in the attached CSV.
+    expect(packet.bodyMarkdown).toContain('Affected releases and their identifiers');
+    expect(packet.bodyMarkdown).toContain('"Lagos Nights" (UPC 088807219903)');
+    expect(packet.bodyMarkdown).toContain('(ISRC USRC11700001)');
+  });
+
+  it('marks a release whose UPC was not visible instead of dropping it', () => {
+    const p = buildSupportPacket({ ...data, rows: [row({ upc: null })] });
+    expect(p.bodyMarkdown).toContain('UPC not shown on the release page');
+  });
 });
 
 describe('templates', () => {
