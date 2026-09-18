@@ -41,7 +41,9 @@ import {
   type ConnectSessionRedis,
 } from './distributor-connect';
 import { ScanCandidateStore } from './endpoint-candidates';
-import { registerAuth, requireAuth, requireRole } from './auth';
+import { registerAuth, requireAuth, requireRole, registerTenantResolution } from './auth';
+import { registerTenantRoutes } from './tenant-routes';
+import type { MembershipStore } from '@sentinel/db';
 import {
   deleteKeycloakUser,
   fetchKeycloakUsername,
@@ -105,6 +107,8 @@ export interface AppDeps {
   runReleasedCatalogScan?: typeof scanReleasedCatalog;
   /** Test/composition seam for a concrete OIDC verifier key and issuer. */
   authConfig?: Partial<KeycloakAuthConfig>;
+  /** Membership store enabling shared multi-tenancy; when present, tenant resolution + routes are wired. */
+  membershipStore?: MembershipStore;
 }
 
 /** Build the Fastify app. Exported so tests can inject/inspect without listening. */
@@ -119,6 +123,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     throw new Error('Keycloak authentication must be enabled outside the test runtime.');
   }
   app.log.info(`Auth: ${authVerifier.enabled ? 'Keycloak (enforced)' : 'test identity'}`);
+  // Shared multi-tenancy is wired only when a membership store is composed. Without it the app is
+  // unchanged (per-user scope); with it, every authenticated request resolves a validated tenant.
+  if (deps.membershipStore) {
+    registerTenantResolution(app, deps.membershipStore);
+    registerTenantRoutes(app, deps.membershipStore);
+  }
   const requireCustomerScanPrincipal = async (req: FastifyRequest, reply: { status(code: number): { send(payload: unknown): unknown } }): Promise<void> => {
     if (!hasCustomerScanAccess(req.auth)) {
       return void reply.status(403).send({ error: 'customer scan access requires a customer role' });
@@ -134,7 +144,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     '/api/consent', '/api/searches', '/api/connect', '/api/distributor-imports',
     '/api/integrations/steel', '/api/search-provider', '/api/platforms/credential-status',
     '/api/queues/status', '/api/catalogue/engine', '/api/admin/distributor-scans',
-    '/api/account',
+    '/api/account', '/api/tenants',
   ];
   app.addHook('preHandler', async (req, reply) => {
     const production = isProductionEnvironment(process.env);
