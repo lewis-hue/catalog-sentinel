@@ -341,9 +341,38 @@ function AssistantPanel({ contextLabel }: { contextLabel: string }) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ messages: next }),
       });
-      const data = (await res.json().catch(() => ({}))) as { answer?: string; error?: string };
-      const reply = res.ok && data.answer ? data.answer : data.error || 'The assistant is unavailable right now.';
-      setMessages((m) => [...m, { role: 'assistant', content: reply }]);
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setMessages((m) => [...m, { role: 'assistant', content: data.error || 'The assistant is unavailable right now.' }]);
+        return;
+      }
+      // Stream the plain-text answer into a single assistant message as deltas arrive.
+      const reader = res.body?.getReader();
+      if (!reader) {
+        const text = await res.text().catch(() => '');
+        setMessages((m) => [...m, { role: 'assistant', content: text || 'No answer.' }]);
+        return;
+      }
+      const decoder = new TextDecoder();
+      let started = false;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk) continue;
+        if (!started) {
+          started = true;
+          setMessages((m) => [...m, { role: 'assistant', content: chunk }]);
+        } else {
+          setMessages((m) => {
+            const copy = m.slice();
+            const last = copy[copy.length - 1];
+            if (last && last.role === 'assistant') copy[copy.length - 1] = { role: 'assistant', content: last.content + chunk };
+            return copy;
+          });
+        }
+      }
+      if (!started) setMessages((m) => [...m, { role: 'assistant', content: 'No answer was returned. Try rephrasing.' }]);
     } catch {
       setMessages((m) => [...m, { role: 'assistant', content: 'Something went wrong reaching the assistant. Try again.' }]);
     } finally {
@@ -368,7 +397,9 @@ function AssistantPanel({ contextLabel }: { contextLabel: string }) {
         {messages.map((m, i) => (
           <div key={i} className={`ed-msg ed-msg-${m.role}`}>{m.content}</div>
         ))}
-        {sending && <div className="ed-msg ed-msg-assistant ed-msg-thinking">Thinking…</div>}
+        {sending && messages[messages.length - 1]?.role === 'user' && (
+          <div className="ed-msg ed-msg-assistant ed-msg-thinking">Thinking…</div>
+        )}
       </div>
       {enabled === false && (
         <div className="ed-assistant-note">Set <code>ANTHROPIC_API_KEY</code> on the API service to enable the assistant.</div>

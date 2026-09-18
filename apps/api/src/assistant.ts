@@ -131,12 +131,16 @@ export async function buildGroundingContext(
   return lines.join('\n');
 }
 
-/** Call Claude with the grounded system prompt and the conversation. Returns the assistant text. */
-export async function askAssistant(
+/**
+ * Open a streaming Claude completion. Resolves once the upstream response is confirmed OK (so the
+ * route can still return a clean error before it starts streaming); throws otherwise. The caller
+ * pipes the body through {@link parseSseDeltas}.
+ */
+export async function openAssistantStream(
   config: AssistantConfig,
   grounding: string,
   messages: AssistantMessage[],
-): Promise<string> {
+): Promise<Response> {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -149,18 +153,45 @@ export async function askAssistant(
       max_tokens: config.maxTokens,
       system: `${APP_KNOWLEDGE}\n\n${grounding}`,
       messages,
+      stream: true,
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(120_000),
   });
-  if (!response.ok) {
+  if (!response.ok || !response.body) {
     const detail = await response.text().catch(() => '');
     throw new Error(`assistant upstream ${response.status}: ${detail.slice(0, 300)}`);
   }
-  const body = (await response.json()) as { content?: Array<{ type?: string; text?: string }> };
-  const text = (body.content ?? [])
-    .filter((block) => block.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text)
-    .join('')
-    .trim();
-  return text || 'I could not produce an answer for that. Try rephrasing, or open the view directly.';
+  return response;
+}
+
+/** Parse Anthropic's message-stream SSE, yielding only the text deltas. */
+export async function* parseSseDeltas(response: Response): AsyncGenerator<string> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf('\n\n')) !== -1) {
+      const event = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      for (const line of event.split('\n')) {
+        const trimmed = line.trimStart();
+        if (!trimmed.startsWith('data:')) continue;
+        const data = trimmed.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        let evt: { type?: string; delta?: { type?: string; text?: string } };
+        try {
+          evt = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && typeof evt.delta.text === 'string') {
+          yield evt.delta.text;
+        }
+      }
+    }
+  }
 }
