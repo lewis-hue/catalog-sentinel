@@ -151,9 +151,17 @@ describe('tenant + membership routes', () => {
     expect(wrong.statusCode).toBe(404);
   });
 
-  it('a request with no tenant header stays scoped to the personal tenant', async () => {
-    // Listing tenants without a header must not error, and personal scope is the default.
+  it('bootstraps the personal tenant on first listing and marks it personal', async () => {
+    // Listing tenants without a header must not error; it idempotently materializes the caller's
+    // personal tenant (tenantId === sub, role owner) so per-user data shows as a tenant of one.
     const res = await app.inject({ method: 'GET', url: '/api/tenants', headers: await bearer('solo') });
     expect(res.statusCode).toBe(200);
+    const tenants = res.json().tenants as Array<{ tenantId: string; role: string; personal: boolean }>;
+    const personal = tenants.find((t) => t.tenantId === 'solo');
+    expect(personal).toMatchObject({ role: 'owner', personal: true });
+
+    // Bootstrap is idempotent: a second landing does not duplicate the personal membership.
+    const again = await app.inject({ method: 'GET', url: '/api/tenants', headers: await bearer('solo') });
+    expect((again.json().tenants as unknown[]).filter((t) => (t as { tenantId: string }).tenantId === 'solo')).toHaveLength(1);
   });
 });

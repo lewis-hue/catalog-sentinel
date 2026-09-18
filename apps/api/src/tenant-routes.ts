@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { MembershipStore } from '@sentinel/db';
+import { ensurePersonalMembership, type MembershipStore } from '@sentinel/db';
 import { requireAuth, requireRole } from './auth';
 import {
   acceptInvite,
@@ -27,8 +27,12 @@ function actorFrom(req: FastifyRequest): Actor {
  * prior membership; it binds to the caller's verified email, so the tenant header must be omitted.
  */
 export function registerTenantRoutes(app: FastifyInstance, store: MembershipStore): void {
-  // The tenants the caller is an active member of.
+  // The tenants the caller is an active member of. This is the call a client makes on landing, so it
+  // doubles as the login-time bootstrap: it idempotently ensures the caller owns their personal
+  // tenant (one read in steady state, a single write only the first time) so existing per-user data
+  // always resolves as a tenant of one, with no migration.
   app.get('/api/tenants', { preHandler: requireAuth() }, async (req) => {
+    await ensurePersonalMembership(store, req.auth.sub, nowIso);
     const memberships = await store.listActiveForUser(req.auth.sub);
     return {
       tenants: memberships.map((m) => ({

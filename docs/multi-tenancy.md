@@ -52,17 +52,25 @@ A `tenant_id` claim, if present, is not trusted on its own.
 - `listMembers`, `changeRole`, `removeMember` — admin+; `changeRole`/`removeMember` refuse to
   demote or remove the **last owner**, so a tenant is never orphaned.
 
+## HTTP surface (`/api/tenants`)
+
+- `GET /api/tenants` — the caller's active tenants. Doubles as the login-time bootstrap: it
+  idempotently ensures the personal membership, so per-user data always resolves as a tenant of one.
+- `POST /api/tenants` — create a shared tenant (caller becomes `owner`).
+- `POST /api/tenants/:id/invites` — invite by email; act in `:id` via `X-Sentinel-Tenant`, admin+.
+- `POST /api/tenants/:id/accept` — claim a pending invite by verified email; send **no** tenant header.
+- `GET /api/tenants/:id/members` — roster; act in `:id`.
+- `PATCH /api/tenants/:id/members/:userId` / `DELETE …` — change role / remove; act in `:id`, admin+.
+
 ## Status
 
-Implemented and unit-tested (28 tests): the `Membership` model + `MembershipStore` + personal-tenant
-bootstrap; `resolveTenant` + per-tenant RBAC (including the cross-user isolation invariant, "A cannot
-act in B's personal tenant"); and the membership-management service with its authorization rules.
+Implemented, unit- and integration-tested (57 tests): the `Membership` model + `MembershipStore`
+port + personal-tenant bootstrap; the **Postgres adapter** (`PostgresMembershipStore`, raw SQL with a
+migrated-schema assertion) + Prisma model + migration; `resolveTenant` + per-tenant RBAC (including
+the cross-user isolation invariant, "A cannot act in B's personal tenant"); the membership-management
+service; and the `/api/tenants` HTTP routes wired into `buildApp` (tenant resolution + routes turn on
+only when a `MembershipStore` is composed; `main.ts` composes the Postgres adapter over the shared
+pool), covered by signed-token integration tests.
 
-Remaining (next slice):
-1. **Postgres `MembershipStore` adapter** (runtime persistence; only the in-memory test adapter
-   exists today) and a Prisma model + migration.
-2. **HTTP routes** under `/api/tenants` wiring the service, guarded by `requireAuth` +
-   `requireTenantRole`, added to the production route allowlist, with signed-token integration tests.
-3. **Register `registerTenantResolution`** in `buildApp` once a runtime `MembershipStore` is composed.
-4. On login, ensure the personal membership (`ensurePersonalMembership`) and optionally auto-claim
-   pending invites that match the verified email.
+Deferred (not required for the feature): auto-claiming pending invites on login for a matching
+verified email (today acceptance is an explicit `POST /accept`), and a per-tenant audit-log scope.

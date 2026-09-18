@@ -71,6 +71,26 @@ model User {
   @@index([userId])
 }
 
+/// Cross-tenant access grant, the authority a verified token is checked against. A verified OIDC
+/// token proves WHO the caller is; only an active Membership row proves WHICH shared tenant they
+/// may act in. `role`/`status` are plain text (not the UserRole enum) so the runtime raw-SQL
+/// adapter reads them as `text`. `user_id` is null only while an email invitation is pending.
+model Membership {
+  id              String   @id
+  tenantId        String   @map("tenant_id")
+  userId          String?  @map("user_id")
+  role            String
+  status          String
+  invitedEmail    String?  @map("invited_email")
+  invitedByUserId String?  @map("invited_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([userId, status], map: "memberships_user_status_idx")
+  @@index([tenantId], map: "memberships_tenant_idx")
+  @@map("memberships")
+}
+
 model Artist {
   id        String   @id @default(cuid())
   userId    String

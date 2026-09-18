@@ -6,7 +6,7 @@ import {
   verifyEnvelopeEncryptor,
   type AuditSqlClient,
 } from '@sentinel/security';
-import { createDistributorLinkRepository } from '@sentinel/db';
+import { createDistributorLinkRepository, PostgresMembershipStore, type PgPoolLike } from '@sentinel/db';
 import { createPgPool } from '@sentinel/search-store';
 import { buildApp } from './app';
 import { DistributorLinkService } from './distributor-link';
@@ -34,6 +34,10 @@ async function start(): Promise<void> {
   }
   const auditPool = createPgPool(process.env.DATABASE_URL);
   const audit = new PostgresAuditLogger(auditPool as unknown as AuditSqlClient);
+  // Shared multi-tenancy: the durable authority for cross-tenant access. Reuses the same pool; the
+  // store asserts the migrated `memberships` contract once before its first write. Its presence is
+  // what turns on tenant resolution + the /api/tenants routes (see buildApp).
+  const membershipStore = new PostgresMembershipStore(auditPool as unknown as PgPoolLike);
   const distributorLink = new DistributorLinkService(audit, {
     repo,
   });
@@ -42,6 +46,7 @@ async function start(): Promise<void> {
     distributorLink,
     auditLogger: audit,
     envelopeEncryptor,
+    membershipStore,
     closeAudit: async () => {
       await auditPool.end();
     },
