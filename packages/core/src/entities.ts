@@ -7,6 +7,7 @@ import type {
   DSPPlatform,
   IssueStatus,
   LyricsState,
+  MembershipStatus,
   PresenceStatus,
   ScanStatus,
   StoreDeliveryStatus,
@@ -27,6 +28,7 @@ import type {
   DSPAccountId,
   EvidenceId,
   IssueId,
+  MembershipId,
   ReleaseId,
   ScanJobId,
   ScanRunId,
@@ -69,6 +71,29 @@ export interface Workspace extends Timestamps {
   name: string;
   /** The primary artist this workspace audits (workspaces are per-artist in MVP). */
   primaryArtistId: ArtistId | null;
+}
+
+/**
+ * A user's membership of a tenant (organization). Membership is the ONLY thing
+ * that grants access to a tenant's data: the verified Keycloak token proves WHO
+ * the caller is (the subject), never WHICH tenant they may act in. A signed
+ * `tenant_id` claim (or a chosen-tenant header) is validated against an active
+ * membership before it is honored.
+ *
+ * A personal tenant (`tenantId === userId`) is bootstrapped for every user, so a
+ * solo artist always has exactly one owner membership and existing per-user data
+ * (already keyed by the subject) keeps resolving without a migration.
+ */
+export interface Membership extends Timestamps {
+  id: MembershipId;
+  tenantId: TenantId;
+  /** The member's Keycloak subject. Null only while an email invitation is pending. */
+  userId: UserId | null;
+  role: UserRole;
+  status: MembershipStatus;
+  /** Set for a pending email invitation; cleared once claimed by a verified account. */
+  invitedEmail: string | null;
+  invitedByUserId: UserId | null;
 }
 
 export interface Artist extends Timestamps {

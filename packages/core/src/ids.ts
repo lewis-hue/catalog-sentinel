@@ -25,6 +25,7 @@ export type ScanRunId = Branded<string, 'ScanRunId'>;
 export type AuditLogId = Branded<string, 'AuditLogId'>;
 export type ConsentGrantId = Branded<string, 'ConsentGrantId'>;
 export type CredentialReferenceId = Branded<string, 'CredentialReferenceId'>;
+export type MembershipId = Branded<string, 'MembershipId'>;
 
 /** Mint a fresh, prefixed unique id, e.g. `id('trk') -> "trk_9f8c…"`. */
 export function id<T extends string>(prefix: string): Branded<string, T> {

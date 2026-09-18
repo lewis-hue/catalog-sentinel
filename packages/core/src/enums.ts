@@ -134,3 +134,11 @@ export type ConsentScope = (typeof CONSENT_SCOPES)[number];
 
 export const USER_ROLES = ['owner', 'admin', 'manager', 'analyst', 'viewer'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
+
+/**
+ * State of a tenant Membership. `active` grants access; `invited` is a pending
+ * email invitation not yet claimed by a verified account; `suspended` is retained
+ * for audit but grants nothing.
+ */
+export const MEMBERSHIP_STATUSES = ['active', 'invited', 'suspended'] as const;
+export type MembershipStatus = (typeof MEMBERSHIP_STATUSES)[number];

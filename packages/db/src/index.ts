@@ -7,6 +7,7 @@
 export * from './repository';
 export * from './in-memory';
 export * from './tenant-repo';
+export * from './membership-store';
 export * from './distributor-link-repo';
 export * from './prisma-distributor-link-repo';
 export * from './distributor-link-repo-factory';
