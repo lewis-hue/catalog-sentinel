@@ -1,37 +1,39 @@
 :root {
   /* ============================================================================
-     Catalog Sentinel, enterprise design system.
-     Light workspace + dark navigation rail. Color is SEMANTIC and evidence-graded:
-     green = confirmed live, amber = not confirmed, red = wrong profile,
-     slate = unverifiable/needs review, indigo = brand/interactive.
+     Catalog Sentinel, refined editorial design system (2026-09-18).
+     A catalogue is a typeset record, so the app reads like one: warm alabaster
+     paper, a pen-ink indigo hand, and Fraunces set the register. Color stays
+     SEMANTIC and evidence-graded, retinted as inks:
+     green = confirmed live, ochre = not confirmed, oxblood = wrong profile,
+     warm grey = unverifiable, indigo = brand/interactive.
      ========================================================================== */
 
-  /* Neutrals, a cool clean-SaaS workspace. NOTE: `--paper` is the foreground INK and `--ink` is the
-     page ground; the names are legacy, the values are the modern tech-dashboard scheme. */
-  --paper: #1a2338;        /* primary foreground / deep cool navy-ink */
-  --ink: #f4f6fa;          /* page background, cool off-white */
-  --ink-2: #eef1f7;        /* inset / subtle raised */
-  --panel: #ffffff;        /* card surface, clean white */
-  --panel-2: #f5f7fb;      /* secondary surface */
-  --line: #e4e8f0;         /* cool hairline border */
-  --line-soft: #eef1f6;    /* softer divider */
-  --mist: #5a6478;         /* muted cool text (AA on the light ground) */
-  --mist-2: #646d82;       /* fainter captions, meets WCAG AA on the light ground */
+  /* Neutrals, warm archival paper. NOTE: `--paper` is the foreground INK and `--ink` is the page
+     ground; the names are legacy, the values are the alabaster-and-ink scheme. */
+  --paper: #242320;        /* primary foreground / warm near-black ink */
+  --ink: #f3efe5;          /* page ground, warm alabaster */
+  --ink-2: #ece6d8;        /* inset / subtle raised */
+  --panel: #fbf9f3;        /* card surface, warm paper-white */
+  --panel-2: #f5f1e7;      /* secondary surface */
+  --line: #e2dccb;         /* warm hairline border */
+  --line-soft: #ece6d8;    /* softer divider */
+  --mist: #66625a;         /* muted warm-grey text (AA on the alabaster ground) */
+  --mist-2: #6b6659;       /* fainter captions, held to WCAG AA (>=4.5:1) on paper surfaces */
 
-  /* Brand, a confident blue primary; teal is the secondary accent (active/highlight, used sparingly) */
-  --brand: #2563eb;
-  --brand-dim: #1d4ed8;
-  --brand-tint: #e8f0fe;
-  --ring: rgba(37, 99, 235, 0.30);
-  --teal: #0d9488;
-  --teal-tint: #e2f7f4;
+  /* Brand, a pen-ink indigo hand; used with restraint as the one accent. */
+  --brand: #3b3a7a;
+  --brand-dim: #2d2c61;
+  --brand-tint: #e8e7f1;
+  --ring: rgba(59, 58, 122, 0.32);
+  --teal: #3b3a7a;         /* legacy alias, folded onto the single indigo accent */
+  --teal-tint: #e8e7f1;
 
-  /* Status colors (text / tint / edge), soft-fill pill palette, all AA-legible */
-  --live: #0e875a;      --live-tint: #e7f6ef;      --live-edge: #b6e3cd;
-  --gap: #b7791f;       --gap-tint: #fdf3e2;       --gap-edge: #f0d5a2;   /* not confirmed / missing */
-  --wrong: #cf2d1f;     --wrong-tint: #fdeceb;     --wrong-edge: #f5c2bd;
-  --unk: #5a6478;       --unk-tint: #eef1f6;       --unk-edge: #dbe1ea;   /* unverifiable */
-  --info: #2563eb;      --info-tint: #e8f0fe;      --info-edge: #bdd4fb;  /* delivered / informational */
+  /* Status colors (text / tint / edge), retinted as soft printer's inks, all AA-legible */
+  --live: #3f6b4e;      --live-tint: #e6ede2;      --live-edge: #c7d6c3;
+  --gap: #8a6420;       --gap-tint: #f2ebd8;       --gap-edge: #e3d3a6;   /* not confirmed / missing */
+  --wrong: #9e3b2e;     --wrong-tint: #f1e0da;     --wrong-edge: #e0bcb2;
+  --unk: #66625a;       --unk-tint: #ece7db;       --unk-edge: #d9d2c1;   /* unverifiable */
+  --info: #3b3a7a;      --info-tint: #e8e7f1;      --info-edge: #c8c6e0;  /* delivered / informational */
 
   /* Semantic aliases used across pages */
   --bg: var(--ink);
@@ -44,21 +46,26 @@
   --signal: var(--gap);
   --danger: var(--wrong);
 
-  /* Dark navigation rail, deep navy that anchors the cool light workspace */
-  --rail-bg: #1a2340;
-  --rail-bg-2: #151c34;
-  --rail-fg: #e7eaf3;
-  --rail-muted: #8791a8;
-  --rail-line: #2a3350;
-  --rail-active: rgba(37, 99, 235, 0.22);
+  /* Navigation rail, kept as tokens for any legacy reference; the editorial shell renders on paper
+     surfaces (see the App shell block) rather than a dark rail. */
+  --rail-bg: #efeade;
+  --rail-bg-2: #e8e2d4;
+  --rail-fg: #242320;
+  --rail-muted: #66625a;
+  --rail-line: #e2dccb;
+  --rail-active: rgba(59, 58, 122, 0.12);
 
-  --radius: 10px;
-  --radius-sm: 7px;
-  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.04);
-  --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.09), 0 2px 6px rgba(16, 24, 40, 0.05);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --shadow-xs: 0 1px 2px rgba(60, 50, 28, 0.05);
+  --shadow-sm: 0 1px 3px rgba(60, 50, 28, 0.07), 0 1px 2px rgba(60, 50, 28, 0.04);
+  --shadow-md: 0 6px 18px rgba(60, 50, 28, 0.10), 0 2px 6px rgba(60, 50, 28, 0.05);
 
-  --font-display: var(--font-space, "Plus Jakarta Sans"), system-ui, sans-serif;
+  /* Fraunces is the editorial display face (brand, headings, catalogue letter-marks); Inter carries
+     running text; IBM Plex Mono sets eyebrows, data, and keyboard hints. */
+  --font-display: var(--font-fraunces, "Fraunces", Georgia, "Times New Roman", serif);
   --font-body: var(--font-inter, "Inter"), system-ui, sans-serif;
   --font-mono: var(--font-plex-mono, "IBM Plex Mono"), ui-monospace, monospace;
 }
@@ -75,7 +82,7 @@ body {
 }
 a { color: var(--brand); text-decoration: none; }
 a:hover { text-decoration: underline; }
-::selection { background: rgba(37, 99, 235, 0.15); }
+::selection { background: rgba(59, 58, 122, 0.16); }
 
 /* ===== Authentication entry ============================================= */
 .auth-entry {
@@ -84,8 +91,8 @@ a:hover { text-decoration: underline; }
   place-items: center;
   padding: 32px 20px;
   background:
-    radial-gradient(circle at 15% 10%, rgba(37, 99, 235, 0.12), transparent 34rem),
-    radial-gradient(circle at 90% 90%, rgba(15, 122, 82, 0.08), transparent 28rem),
+    radial-gradient(circle at 15% 10%, rgba(59, 58, 122, 0.10), transparent 34rem),
+    radial-gradient(circle at 90% 90%, rgba(138, 100, 32, 0.07), transparent 28rem),
     var(--ink);
 }
 .auth-card {
@@ -589,4 +596,195 @@ input.filter { min-width: 240px; }
   .history-stats { flex: 0 0 100%; flex-wrap: wrap; }
   .history-actions .btn { flex: 1 1 auto; text-align: center; }
   .history-delete { margin-left: 0; }
+}
+
+/* ==========================================================================
+   Editorial shell (chrome) — header · catalogue rail · ⌘K · inspector.
+   Border-led on warm paper; Fraunces sets the brand and the rail letter-marks
+   (this project uses no icon set, so the marks ARE the rail's visual language).
+   Namespaced `ed-`. Reads the design tokens above; hardcodes nothing.
+   ========================================================================== */
+.ed-shell {
+  --ed-header-h: 56px;
+  --ed-rail-w: 60px;
+  --ed-rail-w-open: 236px;
+  --ed-inspector-w: 320px;
+  display: flex; flex-direction: column;
+  height: 100vh; overflow: hidden;
+  background: var(--ink); color: var(--paper);
+}
+
+/* ---- header ---- */
+.ed-header {
+  display: flex; align-items: center; flex-shrink: 0;
+  height: var(--ed-header-h); border-bottom: 1px solid var(--line);
+  background: var(--panel); padding-right: 16px; position: relative; z-index: 60;
+}
+.ed-brand {
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: var(--ed-rail-w); height: var(--ed-header-h);
+  border-right: 1px solid var(--line); text-decoration: none;
+}
+.ed-brand:hover { text-decoration: none; background: var(--panel-2); }
+.ed-brand-mark {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: var(--radius-sm);
+  background: var(--brand); color: #f6f4ec;
+  font-family: var(--font-display); font-weight: 600; font-size: 14px; letter-spacing: 0.01em;
+}
+.ed-header-main { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 24px; min-width: 0; padding-left: 12px; }
+.ed-header-left { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.ed-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.ed-divider { color: var(--line); font-size: 15px; margin: 0 4px; user-select: none; }
+.ed-crumbs { display: flex; align-items: center; min-width: 0; }
+.ed-crumb-link { color: var(--mist); font-size: 13.5px; text-decoration: none; white-space: nowrap; }
+.ed-crumb-link:hover { color: var(--paper); text-decoration: none; }
+.ed-crumb-link.is-current, .ed-crumb-current { color: var(--paper); }
+.ed-crumb-current { font-size: 13.5px; font-weight: 500; white-space: nowrap; }
+
+/* tenant switcher */
+.ed-switch {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 9px;
+  border: none; background: transparent; color: var(--paper); cursor: pointer;
+  border-radius: var(--radius-sm); font-family: inherit; font-size: 13.5px; max-width: 240px;
+  transition: background 0.12s ease;
+}
+.ed-switch:hover { background: var(--panel-2); }
+.ed-switch-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-switch-badge {
+  font-family: var(--font-mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--brand-dim); background: var(--brand-tint); border-radius: 999px; padding: 2px 7px;
+}
+.ed-caret { color: var(--mist); font-size: 12px; }
+
+.ed-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 32px; min-width: 32px; padding: 0 9px; border: none; background: transparent;
+  color: var(--mist); border-radius: var(--radius-sm); cursor: pointer; font-family: inherit; font-size: 13px;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.ed-iconbtn:hover { background: var(--panel-2); color: var(--paper); }
+.ed-iconbtn.is-active { color: var(--brand-dim); background: var(--brand-tint); }
+.ed-iconbtn-outline { border: 1px solid var(--line); box-shadow: var(--shadow-xs); }
+.ed-search-glyph { font-size: 15px; line-height: 1; }
+.ed-kbd { font-family: var(--font-mono); font-size: 10px; color: var(--mist); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; background: var(--panel); }
+
+/* ---- body + rail ---- */
+.ed-body { display: flex; flex: 1; min-height: 0; position: relative; }
+.ed-rail-spacer { width: var(--ed-rail-w); flex-shrink: 0; }
+.ed-rail {
+  display: flex; flex-direction: column; justify-content: space-between;
+  width: var(--ed-rail-w); flex-shrink: 0; padding: 8px;
+  border-right: 1px solid var(--line); background: var(--panel);
+  transition: width 0.16s ease; overflow: visible; z-index: 40;
+}
+.ed-rail.is-expanded { width: var(--ed-rail-w-open); }
+.ed-rail.is-overlay { position: absolute; top: 0; bottom: 0; left: 0; box-shadow: var(--shadow-md); }
+.ed-rail-groups { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+.ed-rail-groups::-webkit-scrollbar { display: none; }
+.ed-rail-scope {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--mist-2); padding: 6px 8px 8px; white-space: nowrap; opacity: 0; transition: opacity 0.12s ease;
+}
+.ed-rail-grouplabel {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--mist-2); padding: 8px 8px 4px; white-space: nowrap; opacity: 0; transition: opacity 0.12s ease;
+}
+.ed-rail-grouplabel.is-section { color: var(--paper); }
+.ed-rail.is-expanded .ed-rail-scope, .ed-rail.is-expanded .ed-rail-grouplabel { opacity: 1; }
+.ed-rail-group { display: flex; flex-direction: column; gap: 2px; }
+.ed-rail-sep { height: 1px; background: var(--line); margin: 8px 6px 2px; }
+.ed-railitem {
+  display: flex; align-items: center; gap: 11px; padding: 5px 6px; border-radius: var(--radius-sm);
+  color: var(--mist); text-decoration: none; white-space: nowrap; cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.ed-railitem:hover { background: var(--panel-2); color: var(--paper); text-decoration: none; }
+.ed-railitem.is-active { color: var(--paper); }
+.ed-mark {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--panel);
+  font-family: var(--font-display); font-weight: 500; font-size: 12.5px; letter-spacing: 0.01em;
+  color: var(--mist); transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.ed-railitem:hover .ed-mark { color: var(--paper); border-color: var(--mist-2); }
+.ed-railitem.is-active .ed-mark { background: var(--brand); border-color: var(--brand); color: #f6f4ec; }
+.ed-mark-quiet { font-family: var(--font-body); font-size: 14px; }
+.ed-railitem-label { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; opacity: 0; transition: opacity 0.12s ease; }
+.ed-railitem-label > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.ed-rail.is-expanded .ed-railitem-label { opacity: 1; }
+.ed-flag { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mist-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.ed-rail-footer { display: flex; flex-direction: column; gap: 2px; padding-top: 8px; }
+.ed-rail-account { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* account trigger */
+.ed-account { display: flex; align-items: center; gap: 11px; width: 100%; padding: 4px 6px; border: none; background: transparent; border-radius: var(--radius-sm); cursor: pointer; text-align: left; transition: background 0.12s ease; }
+.ed-account:hover { background: var(--panel-2); }
+.ed-avatar { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 999px; background: var(--brand-tint); color: var(--brand-dim); font-family: var(--font-display); font-weight: 600; font-size: 13px; }
+.ed-account-id { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.ed-account-name { font-size: 13px; color: var(--paper); overflow: hidden; text-overflow: ellipsis; }
+.ed-account-role { font-size: 10.5px; color: var(--mist-2); text-transform: capitalize; }
+
+/* ---- popover ---- */
+.ed-pop-wrap { position: relative; }
+.ed-pop {
+  position: absolute; top: calc(100% + 6px); left: 0; min-width: 232px; max-height: min(70vh, 440px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+  padding: 5px; z-index: 200;
+}
+.ed-pop-up { top: auto; bottom: calc(100% + 6px); }
+.ed-pop-right { left: auto; right: 0; }
+.ed-pop-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mist-2); padding: 6px 8px 4px; }
+.ed-pop-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 7px 8px; border: none; background: transparent; color: var(--paper); border-radius: var(--radius-sm); font-family: inherit; font-size: 13.5px; cursor: pointer; text-decoration: none; transition: background 0.12s ease; }
+.ed-pop-item:hover { background: var(--panel-2); text-decoration: none; }
+.ed-pop-item-desc { display: block; font-size: 11.5px; color: var(--mist-2); margin-top: 2px; }
+.ed-pop-sep { height: 1px; background: var(--line); margin: 5px -5px; }
+.ed-check { color: var(--brand); font-size: 13px; }
+.ed-account-head { padding: 8px 8px 10px; }
+.ed-account-head-name { font-size: 13.5px; font-weight: 500; }
+.ed-account-head-sub { font-size: 11.5px; color: var(--mist-2); margin-top: 3px; }
+.ed-account-role-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px 8px; font-size: 11.5px; color: var(--mist); }
+.ed-role-badge { font-family: var(--font-mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--brand-dim); background: var(--brand-tint); border-radius: 999px; padding: 2px 7px; }
+.ed-signout-form { margin: 0; }
+
+/* ---- content ---- */
+.ed-content { flex: 1; min-width: 0; overflow-y: auto; }
+
+/* ---- inspector ---- */
+.ed-inspector { width: var(--ed-inspector-w); flex-shrink: 0; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.ed-inspector-head { display: flex; align-items: center; justify-content: space-between; min-height: var(--ed-header-h); padding: 0 8px 0 16px; border-bottom: 1px solid var(--line); }
+.ed-inspector-title { font-family: var(--font-display); font-size: 15px; font-weight: 500; }
+.ed-inspector-body { flex: 1; overflow-y: auto; padding: 18px 16px; font-size: 13.5px; line-height: 1.6; color: var(--paper); }
+.ed-inspector-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mist-2); margin-bottom: 8px; }
+.ed-inspector-body p { margin: 0 0 16px; color: var(--mist); }
+.ed-inspector-fact { display: flex; flex-direction: column; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--ink); margin-bottom: 16px; }
+.ed-inspector-fact-label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mist-2); }
+.ed-inspector-fact code { font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
+.ed-inspector-hint { font-size: 12.5px; color: var(--mist-2); }
+
+/* ---- command menu (⌘K) ---- */
+.ed-cmd-overlay { position: fixed; inset: 0; background: rgba(36, 35, 32, 0.34); display: flex; align-items: flex-start; justify-content: center; padding-top: 13vh; z-index: 500; }
+.ed-cmd { width: 560px; max-width: calc(100vw - 32px); max-height: 60vh; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-xl); box-shadow: var(--shadow-md); overflow: hidden; }
+.ed-cmd-input { display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); color: var(--mist); }
+.ed-cmd-input input { flex: 1; height: 48px; border: none; outline: none; background: transparent; font-family: inherit; font-size: 15px; color: var(--paper); }
+.ed-cmd-list { overflow-y: auto; padding: 6px; }
+.ed-cmd-grouplabel { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mist-2); padding: 9px 10px 4px; }
+.ed-cmd-item { display: flex; align-items: center; gap: 11px; width: 100%; padding: 7px 10px; border: none; background: transparent; text-align: left; font-family: inherit; font-size: 13.5px; color: var(--paper); border-radius: var(--radius-sm); cursor: pointer; }
+.ed-cmd-item:hover { background: var(--panel-2); }
+.ed-mark-sm { width: 24px; height: 24px; font-size: 10.5px; }
+.ed-cmd-item-path { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--mist-2); }
+.ed-cmd-empty { padding: 24px; text-align: center; font-size: 13px; color: var(--mist-2); }
+
+/* Visible keyboard focus across every interactive part of the chrome. */
+.ed-shell a:focus-visible,
+.ed-shell button:focus-visible,
+.ed-cmd input:focus-visible,
+.ed-cmd-item:focus-visible,
+.ed-pop-item:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+@media (max-width: 720px) {
+  .ed-inspector { display: none; }
+  .ed-header-right .ed-iconbtn-outline span:not(.ed-search-glyph):not(.ed-kbd) { display: none; }
 }

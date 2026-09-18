@@ -17,6 +17,8 @@ type RouteContext = { params: Promise<{ path: string[] }> };
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const REQUEST_HEADERS = new Set([
   'accept', 'accept-language', 'content-type', 'if-match', 'if-none-match', 'range',
+  // Tenant scope selected in the UI; the API's resolver validates membership before honoring it.
+  'x-sentinel-tenant',
 ]);
 const DEFAULT_MAX_BODY_BYTES = 5 * 1024 * 1024;
 
