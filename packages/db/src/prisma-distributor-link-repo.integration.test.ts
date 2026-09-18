@@ -126,14 +126,15 @@ describe.skipIf(!hasDb)('PrismaDistributorLinkRepository, Postgres integration',
       new Date().toISOString(),
     )).toBe(true);
 
-    // The migration constraint rejects this malformed legacy row. Since revoke + outbox is one
-    // SQL statement, the JSON UPDATE preceding the rejected INSERT must roll back as well.
-    await repo.consents.put(A, { ...consent('c-atomic-rollback', A.tenantId), artistWorkspaceId: '' });
+    // A revocation intent must reference a real consent id; the migration CHECK
+    // (ConsentRevocationIntent_consentId_nonempty) rejects an empty one. Since revoke + outbox is
+    // one SQL statement, the JSON UPDATE preceding the rejected INSERT must roll back as well.
+    await repo.consents.put(A, consent('', A.tenantId));
     await expect(
-      repo.revokeConsentAndCreateIntent(A, 'c-atomic-rollback', new Date().toISOString(), { actorUserId: 'alice', allowTenantAdmin: false }),
+      repo.revokeConsentAndCreateIntent(A, '', new Date().toISOString(), { actorUserId: 'alice', allowTenantAdmin: false }),
     ).rejects.toThrow();
-    expect((await repo.consents.get(A, 'c-atomic-rollback'))?.revokedAt).toBeNull();
-    expect(await repo.getConsentRevocationIntent(A, 'c-atomic-rollback')).toBeNull();
+    expect((await repo.consents.get(A, ''))?.revokedAt).toBeNull();
+    expect(await repo.getConsentRevocationIntent(A, '')).toBeNull();
   });
 
   it('authorizes owner/admin revocation inside the same atomic SQL statement', async () => {
