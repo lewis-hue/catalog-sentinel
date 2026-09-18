@@ -681,8 +681,13 @@ input.filter { min-width: 240px; }
 }
 .ed-rail.is-expanded { width: var(--ed-rail-w-open); }
 .ed-rail.is-overlay { position: absolute; top: 0; bottom: 0; left: 0; box-shadow: var(--shadow-md); }
-.ed-rail-groups { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
-.ed-rail-groups::-webkit-scrollbar { display: none; }
+.ed-rail-groups { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+/* Thin, always-usable scrollbars on every scrollable shell panel (rail, inspector, content, ⌘K). */
+.ed-rail-groups, .ed-inspector-body, .ed-content, .ed-cmd-list, .ed-pop { scrollbar-width: thin; scrollbar-color: var(--line-soft) transparent; }
+.ed-rail-groups::-webkit-scrollbar, .ed-inspector-body::-webkit-scrollbar, .ed-content::-webkit-scrollbar, .ed-cmd-list::-webkit-scrollbar, .ed-pop::-webkit-scrollbar { width: 10px; height: 10px; }
+.ed-rail-groups::-webkit-scrollbar-thumb, .ed-inspector-body::-webkit-scrollbar-thumb, .ed-content::-webkit-scrollbar-thumb, .ed-cmd-list::-webkit-scrollbar-thumb, .ed-pop::-webkit-scrollbar-thumb { background: var(--line); border: 3px solid var(--panel); border-radius: 999px; }
+.ed-rail-groups::-webkit-scrollbar-thumb:hover, .ed-inspector-body::-webkit-scrollbar-thumb:hover, .ed-content::-webkit-scrollbar-thumb:hover, .ed-cmd-list::-webkit-scrollbar-thumb:hover, .ed-pop::-webkit-scrollbar-thumb:hover { background: var(--mist-2); }
+.ed-rail-groups::-webkit-scrollbar-track, .ed-inspector-body::-webkit-scrollbar-track, .ed-content::-webkit-scrollbar-track, .ed-cmd-list::-webkit-scrollbar-track, .ed-pop::-webkit-scrollbar-track { background: transparent; }
 .ed-rail-scope {
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
   color: var(--mist-2); padding: 6px 8px 8px; white-space: nowrap; opacity: 0; transition: opacity 0.12s ease;
