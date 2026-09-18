@@ -263,6 +263,12 @@ services:
       ENABLE_KEYCLOAK_AUTH: 'true'
       ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?Set ENCRYPTION_MASTER_KEY}
       GOVERNANCE_HMAC_LOCAL_KEY: ${GOVERNANCE_HMAC_LOCAL_KEY:?Set GOVERNANCE_HMAC_LOCAL_KEY}
+      # Catalogue assistant (inspector chat). Grounded in the caller's own audits. Set ANTHROPIC_API_KEY
+      # to enable it; without a key the assistant reports itself disabled and nothing else breaks.
+      # ANTHROPIC_MODEL defaults to the latest Opus; ASSISTANT_MAX_TOKENS bounds each reply.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-}
     # Wait for HEALTHY, not merely started: Postgres rejects connections with FATAL 57P03
     # ("the database system is starting up") during boot, which would crash this service on a
     # cold `docker compose up`.

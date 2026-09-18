@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { ALL_ITEMS, NAV_GROUPS, VIEW_NOTES, activeItem, contextualHref, type NavItem } from './nav-config';
 import { useTenant, type TenantSummary } from './tenant-context';
+import { apiFetch } from '@/lib/api-client';
 
 /* ------------------------------------------------------------------ dropdown primitive */
 function useOutside(open: boolean, onClose: () => void) {
@@ -306,29 +307,105 @@ function CommandMenu({ onClose }: { onClose: () => void }) {
   );
 }
 
-/* ------------------------------------------------------------------ inspector (right panel) */
+/* ------------------------------------------------------------------ inspector: catalogue assistant */
+interface ChatMessage { role: 'user' | 'assistant'; content: string }
+
+function AssistantPanel({ contextLabel }: { contextLabel: string }) {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    apiFetch('/api/assistant/status')
+      .then((r) => (r.ok ? (r.json() as Promise<{ enabled?: boolean }>) : { enabled: false }))
+      .then((d) => { if (active) setEnabled(Boolean(d.enabled)); })
+      .catch(() => { if (active) setEnabled(false); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }, [messages, sending]);
+
+  const send = async () => {
+    const question = input.trim();
+    if (!question || sending) return;
+    const next: ChatMessage[] = [...messages, { role: 'user', content: question }];
+    setMessages(next);
+    setInput('');
+    setSending(true);
+    try {
+      const res = await apiFetch('/api/assistant', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: next }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { answer?: string; error?: string };
+      const reply = res.ok && data.answer ? data.answer : data.error || 'The assistant is unavailable right now.';
+      setMessages((m) => [...m, { role: 'assistant', content: reply }]);
+    } catch {
+      setMessages((m) => [...m, { role: 'assistant', content: 'Something went wrong reaching the assistant. Try again.' }]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="ed-assistant">
+      <div className="ed-assistant-context">Grounded in your saved audits · viewing {contextLabel}</div>
+      <div className="ed-assistant-log" ref={scrollRef}>
+        {messages.length === 0 && (
+          <div className="ed-assistant-empty">
+            <p>Ask about your catalogue across every audit, or how to use a view.</p>
+            <ul>
+              <li>Which tracks aren&apos;t confirmed live?</li>
+              <li>What&apos;s my worst store?</li>
+              <li>How do I fix a wrong-profile match?</li>
+            </ul>
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className={`ed-msg ed-msg-${m.role}`}>{m.content}</div>
+        ))}
+        {sending && <div className="ed-msg ed-msg-assistant ed-msg-thinking">Thinking…</div>}
+      </div>
+      {enabled === false && (
+        <div className="ed-assistant-note">Set <code>ANTHROPIC_API_KEY</code> on the API service to enable the assistant.</div>
+      )}
+      <div className="ed-assistant-input">
+        <textarea
+          rows={2}
+          placeholder={enabled === false ? 'Assistant disabled' : 'Ask about your releases…'}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
+          disabled={enabled === false || sending}
+          aria-label="Ask the catalogue assistant"
+        />
+        <button type="button" className="ed-assistant-send" onClick={() => void send()} disabled={!input.trim() || sending || enabled === false}>
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InspectorView({ pathname, auditId, onClose }: { pathname: string; auditId: string | null; onClose: () => void }) {
   const active = activeItem(pathname);
   const note = active ? VIEW_NOTES[active.key] : undefined;
   return (
-    <aside className="ed-inspector" aria-label="About this view">
+    <aside className="ed-inspector" aria-label="Catalogue assistant">
       <div className="ed-inspector-head">
-        <span className="ed-inspector-title">About this view</span>
+        <span className="ed-inspector-title">Assistant</span>
         <button type="button" className="ed-iconbtn" onClick={onClose} aria-label="Close panel"><span aria-hidden>✕</span></button>
       </div>
-      <div className="ed-inspector-body">
-        <div className="ed-inspector-eyebrow">{active ? active.label : 'Catalogue'}</div>
+      <div className="ed-inspector-about">
+        <div className="ed-inspector-eyebrow">About {active ? active.label : 'Catalogue'}</div>
         <p>{note ?? 'Select a view from the rail to see what it does.'}</p>
-        {auditId && (
-          <div className="ed-inspector-fact">
-            <span className="ed-inspector-fact-label">Active audit</span>
-            <code>{auditId}</code>
-          </div>
-        )}
-        <div className="ed-inspector-hint">
-          Press <kbd className="ed-kbd">⌘K</kbd> to jump to any view.
-        </div>
+        {auditId && <div className="ed-inspector-fact"><span className="ed-inspector-fact-label">Active audit</span><code>{auditId}</code></div>}
       </div>
+      <AssistantPanel contextLabel={active ? active.label : 'Catalogue'} />
     </aside>
   );
 }

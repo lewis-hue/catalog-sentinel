@@ -43,6 +43,7 @@ import {
 import { ScanCandidateStore } from './endpoint-candidates';
 import { registerAuth, requireAuth, requireRole, registerTenantResolution } from './auth';
 import { registerTenantRoutes } from './tenant-routes';
+import { registerAssistantRoutes } from './assistant-routes';
 import type { MembershipStore } from '@sentinel/db';
 import {
   deleteKeycloakUser,
@@ -144,7 +145,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     '/api/consent', '/api/searches', '/api/connect', '/api/distributor-imports',
     '/api/integrations/steel', '/api/search-provider', '/api/platforms/credential-status',
     '/api/queues/status', '/api/catalogue/engine', '/api/admin/distributor-scans',
-    '/api/account', '/api/tenants',
+    '/api/account', '/api/tenants', '/api/assistant',
   ];
   app.addHook('preHandler', async (req, reply) => {
     const production = isProductionEnvironment(process.env);
@@ -420,6 +421,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   }
   const built = buildSearchStore(process.env, (m, e) => app.log.warn({ ...e }, `[search-store] ${m}`));
   const searchStore: SearchStore = deps.searchStore ?? built.store;
+  // Catalogue assistant, grounded in the caller's own audits from this store.
+  registerAssistantRoutes(app, searchStore);
   let connectRecoveryTimer: ReturnType<typeof setInterval> | null = null;
   let consentRevocationTimer: ReturnType<typeof setInterval> | null = null;
   let consentRevocationRecovery: Promise<void> | null = null;
