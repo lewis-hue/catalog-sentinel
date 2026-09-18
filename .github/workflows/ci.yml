@@ -103,7 +103,13 @@ jobs:
         run: npm run build --workspace apps/web
 
       - name: Build production image (Steel-only runtime)
-        run: docker build --provenance=mode=max --sbom=true -f Dockerfile.production -t sentinel-production-ci:${{ github.sha }} .
+        # This is a verify build: it loads the image into the local daemon so the hardening
+        # inspection below can `docker image inspect`/`docker run` it. Build attestations
+        # (--provenance/--sbom) cannot attach to a daemon-loaded image without the containerd image
+        # store, and add nothing to a CI image that is never pushed - provenance + SBOM belong to the
+        # publish pipeline. So build plain here; the earlier default-driver flags failed with
+        # "Attestation is not supported for the docker driver".
+        run: docker build -f Dockerfile.production -t sentinel-production-ci:${{ github.sha }} .
 
       - name: Inspect production image hardening
         run: |
