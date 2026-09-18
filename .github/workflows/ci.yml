@@ -59,6 +59,20 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The Prisma schema lives at a non-default path (packages/db/prisma), so @prisma/client's
+      # own postinstall cannot find it and never generates the client. Without this, every test
+      # that instantiates PrismaClient throws "did not initialize yet" (the Postgres integration
+      # suites), which read as functional failures. Generate explicitly against the real schema.
+      - name: Generate Prisma client
+        run: npm run --workspace @sentinel/db db:generate
+
+      # The browser integration suites (scanner, browser-assist, browser-link, worker deep-scan)
+      # launch real Chromium against local fixtures. npm ci does NOT download browsers, so without
+      # this step they fail with "Executable doesn't exist" - the same green-tick-that-proves-nothing
+      # problem the Redis/Postgres services solve. Install the browser so those tests actually run.
+      - name: Install Playwright browser (Chromium)
+        run: npx playwright install --with-deps chromium
+
       # The workflow was named "Lint · …" while never running lint. It does now.
       - name: Lint
         run: npm run lint
