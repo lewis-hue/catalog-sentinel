@@ -1,26 +1,30 @@
 import type { SearchStore } from '@sentinel/search-store';
 
 /**
- * Catalogue assistant: a Claude-backed helper that answers navigation questions and questions about
+ * Catalogue assistant: an OpenAI-backed helper that answers navigation questions and questions about
  * the user's own scan results. It is grounded ONLY in the user's saved audits (scope key
  * `req.auth.sub`), summarised compactly so a large catalogue stays within a sensible token budget.
- * Fails closed and clearly when no ANTHROPIC_API_KEY is configured.
+ * Uses the OpenAI-compatible chat-completions API (the katiba.ai integration pattern). Fails closed
+ * and clearly when no OPENAI_API_KEY is configured.
  */
 
 export interface AssistantConfig {
   apiKey: string;
   model: string;
+  baseUrl: string;
   maxTokens: number;
 }
 
 /** Read the assistant configuration from the environment. `null` when it is not configured. */
 export function assistantConfigFromEnv(env: NodeJS.ProcessEnv): AssistantConfig | null {
-  const apiKey = env.ANTHROPIC_API_KEY?.trim();
+  const apiKey = env.OPENAI_API_KEY?.trim();
   if (!apiKey) return null;
   return {
     apiKey,
-    // Default to the latest Opus; overridable so the model can be tuned without a code change.
-    model: env.ANTHROPIC_MODEL?.trim() || 'claude-opus-5',
+    // Overridable so the model can be tuned without a code change (katiba uses o4-mini / o3).
+    model: env.OPENAI_MODEL?.trim() || 'gpt-4o-mini',
+    // OpenAI by default; any OpenAI-compatible base URL works.
+    baseUrl: (env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1').replace(/\/+$/, ''),
     maxTokens: Number(env.ASSISTANT_MAX_TOKENS) > 0 ? Number(env.ASSISTANT_MAX_TOKENS) : 1024,
   };
 }
@@ -141,19 +145,18 @@ export async function openAssistantStream(
   grounding: string,
   messages: AssistantMessage[],
 ): Promise<Response> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetch(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
+      authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify({
       model: config.model,
-      max_tokens: config.maxTokens,
-      system: `${APP_KNOWLEDGE}\n\n${grounding}`,
-      messages,
+      // max_completion_tokens (not max_tokens) so gpt-4o and the o-series both accept it.
+      max_completion_tokens: config.maxTokens,
       stream: true,
+      messages: [{ role: 'system', content: `${APP_KNOWLEDGE}\n\n${grounding}` }, ...messages],
     }),
     signal: AbortSignal.timeout(120_000),
   });
@@ -164,7 +167,7 @@ export async function openAssistantStream(
   return response;
 }
 
-/** Parse Anthropic's message-stream SSE, yielding only the text deltas. */
+/** Parse OpenAI's chat-completions stream SSE, yielding only the text deltas. */
 export async function* parseSseDeltas(response: Response): AsyncGenerator<string> {
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
@@ -182,15 +185,14 @@ export async function* parseSseDeltas(response: Response): AsyncGenerator<string
         if (!trimmed.startsWith('data:')) continue;
         const data = trimmed.slice(5).trim();
         if (!data || data === '[DONE]') continue;
-        let evt: { type?: string; delta?: { type?: string; text?: string } };
+        let evt: { choices?: Array<{ delta?: { content?: string } }> };
         try {
           evt = JSON.parse(data);
         } catch {
           continue;
         }
-        if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && typeof evt.delta.text === 'string') {
-          yield evt.delta.text;
-        }
+        const delta = evt.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string' && delta) yield delta;
       }
     }
   }

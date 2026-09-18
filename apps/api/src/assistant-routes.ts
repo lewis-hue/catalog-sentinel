@@ -16,7 +16,7 @@ export function registerAssistantRoutes(app: FastifyInstance, searchStore: Searc
   app.post('/api/assistant', { preHandler: requireAuth() }, async (req, reply) => {
     const config = assistantConfigFromEnv(process.env);
     if (!config) {
-      return reply.status(503).send({ error: 'The assistant is not configured. Set ANTHROPIC_API_KEY to enable it.' });
+      return reply.status(503).send({ error: 'The assistant is not configured. Set OPENAI_API_KEY to enable it.' });
     }
     const messages = normalizeMessages((req.body as { messages?: unknown } | undefined)?.messages);
     if (messages.length === 0) return reply.status(400).send({ error: 'Ask a question to start.' });
