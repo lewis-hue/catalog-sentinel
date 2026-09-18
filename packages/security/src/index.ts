@@ -12,4 +12,5 @@ export * from './signed-url';
 export * from './headers';
 export * from './screenshot-redaction';
 export * from './keycloak-auth';
+export * from './tenant-resolution';
 export * from './compliance-approval';

@@ -19,11 +19,14 @@ export const SENTINEL_INTERACTIVE_ROLES = ['user', 'platform_admin'] as const;
 export interface AuthIdentity {
   sub: string;
   /**
-   * Per-user isolation: there is no organization/workspace tenancy. This is always the Keycloak
-   * `sub`; it is retained equal to `sub` only so existing structural consumers keep compiling, and
-   * no code derives authority from it. The sole scope key everywhere is the subject itself.
+   * The tenant this request acts in. From the token it defaults to the caller's personal tenant
+   * (equal to `sub`). A request may select a shared tenant, which is honored ONLY after
+   * {@link resolveTenant} validates an active Membership. Downstream stores scope every query by
+   * this value, so it must never be a tenant the caller is not a validated member of.
    */
   tenantId: string;
+  /** The caller's role WITHIN {@link tenantId} (owner|admin|manager|analyst|viewer). Personal tenant = owner. */
+  tenantRole: string;
   roles: string[];
   username?: string;
   /**
@@ -42,6 +45,7 @@ export interface AuthIdentity {
 export const ANONYMOUS_IDENTITY: AuthIdentity = {
   sub: 'anonymous',
   tenantId: 'default',
+  tenantRole: 'viewer',
   roles: [],
   emailVerified: false,
   authenticated: false,
@@ -113,9 +117,10 @@ export function identityFromPayload(p: JWTPayload): AuthIdentity {
     : undefined;
   return {
     sub,
-    // Per-user isolation: the subject is the only scope. A `tenant_id` claim, if present, is
-    // deliberately ignored so a caller cannot assert authority over anyone else's data.
+    // Default scope is the caller's personal tenant (equal to the subject). A `tenant_id` claim is
+    // NOT trusted here; selecting a shared tenant requires a validated Membership (see resolveTenant).
     tenantId: sub,
+    tenantRole: 'owner',
     roles,
     username: typeof p.preferred_username === 'string' ? p.preferred_username : undefined,
     ...(emailVerified ? { email: assertedEmail } : {}),

@@ -3,11 +3,15 @@ import {
   KeycloakVerifier,
   readKeycloakConfig,
   hasAnyRole,
+  resolveTenant,
+  requestedTenantFrom,
+  tenantRoleAtLeast,
   ANONYMOUS_IDENTITY,
   SENTINEL_INTERACTIVE_ROLES,
   type AuthIdentity,
   type KeycloakAuthConfig,
 } from '@sentinel/security';
+import type { MembershipStore } from '@sentinel/db';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -81,6 +85,43 @@ export function requireRole(...roles: string[]) {
     // tenant super-user; customer data access requires an explicit, audited support workflow.
     if (req.auth?.authenticated && !roles.some((role) => req.auth.roles.includes(role))) {
       return void reply.status(403).send({ error: `requires role: ${roles.join(' | ')}` });
+    }
+  };
+}
+
+/**
+ * Registers tenant resolution. MUST run after {@link registerAuth}. For every authenticated
+ * request it reads the chosen tenant (the `X-Sentinel-Tenant` header, defaulting to the caller's
+ * personal tenant), validates it against an active Membership, and pins `req.auth.tenantId` /
+ * `req.auth.tenantRole` to the validated tenant. A request for a tenant the caller is not a member
+ * of is rejected with 403, so a downstream tenant-scoped store can never be handed a tenant the
+ * caller lacks access to.
+ */
+export function registerTenantResolution(app: FastifyInstance, memberships: MembershipStore): void {
+  app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
+    // Anonymous requests (health probes, CORS preflight, public paths) carry no tenant scope.
+    if (!req.auth?.authenticated) return;
+    const requested = requestedTenantFrom(req.headers as Record<string, string | string[] | undefined>);
+    const resolution = await resolveTenant(req.auth, requested, async (userId, tenantId) => {
+      const m = await memberships.getActive(userId, tenantId);
+      return m ? { role: m.role } : null;
+    });
+    if (!resolution.ok) {
+      return void reply.status(resolution.status).send({ error: resolution.error });
+    }
+    req.auth.tenantId = resolution.tenantId;
+    req.auth.tenantRole = resolution.tenantRole;
+  });
+}
+
+/** preHandler guard: require the caller to hold at least `minimum` role WITHIN the resolved tenant. */
+export function requireTenantRole(minimum: string) {
+  return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!req.auth?.authenticated && isAuthEnforced()) {
+      return void reply.status(401).send({ error: 'authentication required' });
+    }
+    if (req.auth?.authenticated && !tenantRoleAtLeast(req.auth.tenantRole, minimum)) {
+      return void reply.status(403).send({ error: `requires tenant role: ${minimum} or higher` });
     }
   };
 }
