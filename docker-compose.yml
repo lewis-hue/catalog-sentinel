@@ -23,6 +23,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # Dedicated database for the catalogue assistant, SEPARATE from the main catalogue Postgres.
+  # Holds only tenant-scoped assistant conversations; the API bootstraps its single table.
+  assistant-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: assistant
+      POSTGRES_PASSWORD: ${ASSISTANT_DB_PASSWORD:?Set ASSISTANT_DB_PASSWORD}
+      POSTGRES_DB: assistant
+    volumes: [assistantdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U assistant']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     command: ['redis-server', '--appendonly', 'yes']
@@ -272,12 +287,15 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       ASSISTANT_MAX_TOKENS: ${ASSISTANT_MAX_TOKENS:-}
+      # Dedicated, tenant-scoped assistant database (separate container from the catalogue Postgres).
+      ASSISTANT_DATABASE_URL: postgresql://assistant:${ASSISTANT_DB_PASSWORD:?Set ASSISTANT_DB_PASSWORD}@assistant-db:5432/assistant
     # Wait for HEALTHY, not merely started: Postgres rejects connections with FATAL 57P03
     # ("the database system is starting up") during boot, which would crash this service on a
     # cold `docker compose up`.
     depends_on:
       redis: { condition: service_healthy }
       postgres: { condition: service_healthy }
+      assistant-db: { condition: service_healthy }
       migrate: { condition: service_completed_successfully }
     # The API is reachable only through the web BFF. No local browser or VNC port is
     # published; attended real-browser use always goes through a Steel session.
@@ -415,3 +433,4 @@ volumes:
   pgdata:
   redisdata:
   keycloakdata:
+  assistantdata:

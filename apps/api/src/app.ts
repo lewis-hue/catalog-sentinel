@@ -23,6 +23,7 @@ import {
   type ManualReviewDecision,
   type SearchStore,
   assertStandaloneRedisTopology,
+  createPgPool,
 } from '@sentinel/search-store';
 import {
   createDistroKidProducer,
@@ -44,7 +45,8 @@ import { ScanCandidateStore } from './endpoint-candidates';
 import { registerAuth, requireAuth, requireRole, registerTenantResolution } from './auth';
 import { registerTenantRoutes } from './tenant-routes';
 import { registerAssistantRoutes } from './assistant-routes';
-import type { MembershipStore } from '@sentinel/db';
+import { PostgresAssistantConversationStore, type AssistantConversationStore } from './assistant-store';
+import type { MembershipStore, PgPoolLike } from '@sentinel/db';
 import {
   deleteKeycloakUser,
   fetchKeycloakUsername,
@@ -110,6 +112,8 @@ export interface AppDeps {
   authConfig?: Partial<KeycloakAuthConfig>;
   /** Membership store enabling shared multi-tenancy; when present, tenant resolution + routes are wired. */
   membershipStore?: MembershipStore;
+  /** Dedicated tenant-scoped store for assistant conversations; defaults to ASSISTANT_DATABASE_URL. */
+  assistantStore?: AssistantConversationStore | null;
 }
 
 /** Build the Fastify app. Exported so tests can inject/inspect without listening. */
@@ -422,7 +426,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const built = buildSearchStore(process.env, (m, e) => app.log.warn({ ...e }, `[search-store] ${m}`));
   const searchStore: SearchStore = deps.searchStore ?? built.store;
   // Catalogue assistant, grounded in the caller's own audits from this store.
-  registerAssistantRoutes(app, searchStore);
+  // The catalogue assistant persists tenant-scoped conversations to its OWN database, kept separate
+  // from the main catalogue Postgres. Disabled (no persistence) when ASSISTANT_DATABASE_URL is unset.
+  const assistantStore = deps.assistantStore
+    ?? (process.env.ASSISTANT_DATABASE_URL?.trim()
+      ? new PostgresAssistantConversationStore(createPgPool(process.env.ASSISTANT_DATABASE_URL) as unknown as PgPoolLike)
+      : null);
+  registerAssistantRoutes(app, searchStore, assistantStore);
   let connectRecoveryTimer: ReturnType<typeof setInterval> | null = null;
   let consentRevocationTimer: ReturnType<typeof setInterval> | null = null;
   let consentRevocationRecovery: Promise<void> | null = null;
