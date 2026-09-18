@@ -18,6 +18,10 @@ const allowedPackageExternals = [
   // Optional native acceleration used only when callers explicitly request
   // `pg.native`; this service always uses the portable pg client.
   /^pg-native$/,
+  // BullMQ ships an optional Valkey Glide client alongside its default ioredis
+  // one; this service only ever constructs the ioredis-based client, so the
+  // glide import is never executed. Externalise it, exactly like pg-native.
+  /^@valkey\/valkey-glide$/,
 ];
 const nodeBuiltins = new Set([
   ...builtinModules,
@@ -55,6 +59,7 @@ async function bundle(name, entryPoint) {
       '@prisma/client',
       '@opentelemetry/*',
       'pg-native',
+      '@valkey/valkey-glide',
     ],
   });
 
