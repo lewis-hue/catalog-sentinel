@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { ALL_ITEMS, NAV_GROUPS, activeItem, contextualHref, type NavItem } from './nav-config';
+import { NAV_GROUPS, activeItem, contextualHref, type NavItem } from './nav-config';
 import { useTenant, type TenantSummary } from './tenant-context';
 import { apiFetch } from '@/lib/api-client';
 
@@ -43,7 +43,7 @@ function Dropdown({ trigger, label, children, up, right }: {
   );
 }
 
-/* ------------------------------------------------------------------ tenant switcher (header) */
+/* ------------------------------------------------------------------ switcher chain (header) */
 function TenantSwitcher() {
   const { tenants, currentTenant, setCurrent } = useTenant();
   if (tenants.length < 2) return null; // nothing to switch between
@@ -70,69 +70,29 @@ function TenantSwitcher() {
   );
 }
 
-/* ------------------------------------------------------------------ sidebar control (Expanded / Collapsed / Expand on hover) */
-type RailMode = 'expanded' | 'collapsed' | 'hover';
-const RAIL_MODE_KEY = 'sentinel:rail-mode';
-const RAIL_MODES: Array<{ value: RailMode; label: string; hint: string }> = [
-  { value: 'expanded', label: 'Expanded', hint: 'Always show the navigation' },
-  { value: 'collapsed', label: 'Collapsed', hint: 'Hide it to free up width' },
-  { value: 'hover', label: 'Expand on hover', hint: 'Reveal it from the left edge' },
-];
-
-function SidebarControl({ mode, onChange }: { mode: RailMode; onChange: (m: RailMode) => void }) {
-  return (
-    <Dropdown
-      label="Sidebar control"
-      trigger={(p) => (
-        <button type="button" className="ed-iconbtn ed-menu-btn" aria-haspopup="menu" aria-label="Sidebar control" title="Sidebar control" {...p}>
-          <span aria-hidden>◧</span>
-        </button>
-      )}
-    >
-      {RAIL_MODES.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          role="menuitemradio"
-          aria-checked={mode === opt.value}
-          className="ed-pop-item ed-mode-item"
-          onClick={() => onChange(opt.value)}
-        >
-          <span>
-            {opt.label}
-            <span className="ed-pop-item-desc">{opt.hint}</span>
-          </span>
-          <span className={`ed-radio${mode === opt.value ? ' is-on' : ''}`} aria-hidden />
-        </button>
-      ))}
-    </Dropdown>
-  );
-}
-
 /* ------------------------------------------------------------------ header */
-function Header({ onOpenCmd, inspectorOpen, onToggleInspector, railMode, onRailMode }: {
+function Header({ onOpenCmd, inspectorOpen, onToggleInspector, railInFlow }: {
   onOpenCmd: () => void;
   inspectorOpen: boolean;
   onToggleInspector: () => void;
-  railMode: RailMode;
-  onRailMode: (m: RailMode) => void;
+  railInFlow: boolean;
 }) {
   const pathname = usePathname() || '/';
   const active = activeItem(pathname);
-  const railInFlow = railMode === 'expanded';
+  const { tenants } = useTenant();
+  const hasSwitcher = tenants.length >= 2;
+  const onHome = pathname === '/';
   return (
-    <header className={`ed-header${railInFlow ? '' : ' is-collapsed'}`}>
-      <div className="ed-header-lead">
-        <SidebarControl mode={railMode} onChange={onRailMode} />
-      </div>
-      <Link href="/" className="ed-brand" title="Catalog Sentinel home">
+    <header className="ed-header">
+      <Link href="/" className={`ed-brand${railInFlow ? '' : ' is-compact'}`} title="Catalog Sentinel home">
         <span className="ed-brand-mark">CS</span>
       </Link>
       <div className="ed-header-main">
         <div className="ed-header-left">
           <TenantSwitcher />
-          <nav className="ed-crumbs" aria-label="Breadcrumb">
-            <Link href="/" className={`ed-crumb-link${pathname === '/' ? ' is-current' : ''}`} aria-current={pathname === '/' ? 'page' : undefined}>
+          <nav className="ed-crumbrow" aria-label="Breadcrumb">
+            {hasSwitcher && <span className="ed-divider" aria-hidden>/</span>}
+            <Link href="/" className={`ed-crumb-link${onHome ? ' is-current' : ''}`} aria-current={onHome ? 'page' : undefined}>
               Catalogue
             </Link>
             {active && active.href !== '/' && (
@@ -149,58 +109,95 @@ function Header({ onOpenCmd, inspectorOpen, onToggleInspector, railMode, onRailM
             <span>Search</span>
             <kbd className="ed-kbd">⌘K</kbd>
           </button>
+          <Link href="/support" className="ed-iconbtn" title="Help center" aria-label="Help center">
+            <span aria-hidden>?</span>
+          </Link>
           <button
             type="button"
-            className={`ed-iconbtn ed-iconbtn-outline ed-assistant-btn${inspectorOpen ? ' is-active' : ''}`}
+            className={`ed-iconbtn${inspectorOpen ? ' is-active' : ''}`}
             aria-pressed={inspectorOpen}
             title="Catalogue assistant"
+            aria-label="Catalogue assistant"
             onClick={onToggleInspector}
           >
-            <span className="ed-assistant-glyph" aria-hidden>✦</span>
-            <span>Assistant</span>
+            <span aria-hidden>✦</span>
           </button>
-          <AccountMenu />
         </div>
       </div>
     </header>
   );
 }
 
-/* ------------------------------------------------------------------ account menu (header) */
-function AccountMenu() {
+/* ------------------------------------------------------------------ rail (text-only) + footer controls */
+type RailMode = 'expanded' | 'hover';
+const RAIL_MODE_KEY = 'sentinel:rail-mode';
+const RAIL_MODES: Array<{ value: RailMode; label: string }> = [
+  { value: 'expanded', label: 'Expanded' },
+  { value: 'hover', label: 'Expand on hover' },
+];
+
+function SidebarControl({ mode, onChange }: { mode: RailMode; onChange: (m: RailMode) => void }) {
+  return (
+    <Dropdown
+      up
+      label="Sidebar control"
+      trigger={(p) => (
+        <button type="button" className="ed-raillink" aria-haspopup="menu" {...p}>
+          <span className="ed-raillink-label"><span>Sidebar control</span></span>
+        </button>
+      )}
+    >
+      {RAIL_MODES.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="menuitemradio"
+          aria-checked={mode === opt.value}
+          className="ed-pop-item"
+          onClick={() => onChange(opt.value)}
+        >
+          <span>{opt.label}</span>
+          {mode === opt.value && <span className="ed-check" aria-hidden>✓</span>}
+        </button>
+      ))}
+    </Dropdown>
+  );
+}
+
+function AccountFooter() {
   const { displayName, account, currentTenant } = useTenant();
   const name = displayName || account?.username || 'Signed-in user';
   const initial = name.trim().charAt(0).toUpperCase() || '?';
   const role = currentTenant?.role;
   return (
-    <Dropdown
-      right
-      label="Account"
-      trigger={(p) => (
-        <button type="button" className="ed-header-account" aria-haspopup="menu" aria-label="Account menu" title={name} {...p}>
-          <span className="ed-avatar">{initial}</span>
-        </button>
-      )}
-    >
-      <div className="ed-account-head">
-        <div className="ed-account-head-name">{name}</div>
-        {account?.email && <div className="ed-account-head-sub">{account.email}</div>}
-      </div>
-      {role && (
-        <div className="ed-account-role-line">
-          Role in this workspace<span className="ed-role-badge">{role}</span>
+    <div className="ed-rail-footer-account">
+      <Dropdown
+        up
+        label="Account"
+        trigger={(p) => (
+          <button type="button" className="ed-raillink ed-user-raillink" aria-haspopup="menu" title={name} {...p}>
+            <span className="ed-user-avatar" aria-hidden>{initial}</span>
+            <span className="ed-raillink-label ed-user-raillabel">
+              <span>{name}</span>
+              {role && <span className="ed-user-role-mini">{role}</span>}
+            </span>
+          </button>
+        )}
+      >
+        <div className="ed-user-principal">
+          <div className="ed-user-name">{name}</div>
+          {account?.email && <div className="ed-user-sub">{account.email}</div>}
         </div>
-      )}
-      <div className="ed-pop-sep" />
-      <Link role="menuitem" className="ed-pop-item" href="/profile"><span>Profile</span></Link>
-      <form action="/auth/logout" method="post" className="ed-signout-form">
-        <button role="menuitem" type="submit" className="ed-pop-item"><span>Sign out</span></button>
-      </form>
-    </Dropdown>
+        <div className="ed-pop-sep" />
+        <Link role="menuitem" className="ed-pop-item" href="/profile"><span>Profile</span></Link>
+        <form action="/auth/logout" method="post" className="ed-signout-form">
+          <button role="menuitem" type="submit" className="ed-pop-item"><span>Sign out</span></button>
+        </form>
+      </Dropdown>
+    </div>
   );
 }
 
-/* ------------------------------------------------------------------ rail (text-only, collapsible) */
 function RailGroup({ group, active, auditId }: { group: (typeof NAV_GROUPS)[number]; active: NavItem | null; auditId: string | null }) {
   return (
     <div className="ed-rail-group-wrap">
@@ -212,10 +209,10 @@ function RailGroup({ group, active, auditId }: { group: (typeof NAV_GROUPS)[numb
             <Link
               key={it.key}
               href={contextualHref(it.href, auditId)}
-              className={`ed-railitem${isActive ? ' is-active' : ''}`}
+              className={`ed-raillink${isActive ? ' is-active' : ''}`}
               aria-current={isActive ? 'page' : undefined}
             >
-              <span>{it.label}</span>
+              <span className="ed-raillink-label"><span>{it.label}</span></span>
               {it.flag && <span className="ed-flag">{it.flag}</span>}
             </Link>
           );
@@ -225,11 +222,12 @@ function RailGroup({ group, active, auditId }: { group: (typeof NAV_GROUPS)[numb
   );
 }
 
-function RailView({ pathname, auditId }: { pathname: string; auditId: string | null }) {
+function RailView({ pathname, auditId, railMode, onRailMode }: {
+  pathname: string; auditId: string | null; railMode: RailMode; onRailMode: (m: RailMode) => void;
+}) {
   const active = activeItem(pathname);
-  // Main groups scroll; the last group (Account) is pinned to the bottom of the rail.
-  const mainGroups = NAV_GROUPS.slice(0, -1);
-  const footerGroup = NAV_GROUPS[NAV_GROUPS.length - 1];
+  // Account is not a nav group in the rail body; it lives in the footer menu (with Profile + Sign out).
+  const mainGroups = NAV_GROUPS.filter((g) => g.label !== 'Account');
   return (
     <nav className="ed-rail" aria-label="Primary">
       <div className="ed-rail-groups">
@@ -237,26 +235,25 @@ function RailView({ pathname, auditId }: { pathname: string; auditId: string | n
           <RailGroup key={g.label} group={g} active={active} auditId={auditId} />
         ))}
       </div>
-      {footerGroup && (
-        <div className="ed-rail-footer">
-          <RailGroup group={footerGroup} active={active} auditId={auditId} />
-        </div>
-      )}
+      <div className="ed-rail-footer">
+        <SidebarControl mode={railMode} onChange={onRailMode} />
+        <AccountFooter />
+      </div>
     </nav>
   );
 }
 
-function RailContextual() {
+function RailContextual({ railMode, onRailMode }: { railMode: RailMode; onRailMode: (m: RailMode) => void }) {
   const pathname = usePathname() || '/';
   const auditId = useSearchParams().get('id');
-  return <RailView pathname={pathname} auditId={auditId} />;
+  return <RailView pathname={pathname} auditId={auditId} railMode={railMode} onRailMode={onRailMode} />;
 }
 
-function Rail() {
+function Rail({ railMode, onRailMode }: { railMode: RailMode; onRailMode: (m: RailMode) => void }) {
   const pathname = usePathname() || '/';
   return (
-    <Suspense fallback={<RailView pathname={pathname} auditId={null} />}>
-      <RailContextual />
+    <Suspense fallback={<RailView pathname={pathname} auditId={null} railMode={railMode} onRailMode={onRailMode} />}>
+      <RailContextual railMode={railMode} onRailMode={onRailMode} />
     </Suspense>
   );
 }
@@ -301,7 +298,6 @@ function CommandMenu({ onClose }: { onClose: () => void }) {
               <div className="ed-cmd-grouplabel">{g.label}</div>
               {g.items.map((it) => (
                 <button key={it.key} type="button" className="ed-cmd-item" onClick={() => go(it)}>
-                  <span className="ed-mark ed-mark-sm" aria-hidden>{it.mark}</span>
                   <span>{it.label}</span>
                   <span className="ed-cmd-item-path">{g.label}</span>
                 </button>
@@ -380,6 +376,11 @@ function AssistantPanel() {
   return (
     <div className="ed-assistant">
       <div className="ed-assistant-log" ref={scrollRef}>
+        {messages.length === 0 && (
+          <div className="ed-assistant-empty">
+            <p>Ask about your catalogue — a missing song on a store, missing lyrics, or how to get around a view.</p>
+          </div>
+        )}
         {messages.map((m, i) => (
           <div key={i} className={`ed-msg ed-msg-${m.role}`}>{m.content}</div>
         ))}
@@ -409,7 +410,10 @@ function Inspector({ onClose }: { onClose: () => void }) {
   return (
     <aside className="ed-inspector" aria-label="Catalogue assistant">
       <div className="ed-inspector-head">
-        <span className="ed-inspector-title">Assistant</span>
+        <span className="ed-inspector-title">
+          <span className="ed-inspector-glyph" aria-hidden>✦</span>
+          <span>Assistant</span>
+        </span>
         <button type="button" className="ed-iconbtn" onClick={onClose} aria-label="Close panel"><span aria-hidden>✕</span></button>
       </div>
       <AssistantPanel />
@@ -428,8 +432,7 @@ export function EditorialShell({ children }: { children: ReactNode }) {
     try {
       setInspectorOpen(window.localStorage.getItem(INSPECTOR_KEY) === '1');
       const saved = window.localStorage.getItem(RAIL_MODE_KEY);
-      if (saved === 'expanded' || saved === 'collapsed' || saved === 'hover') setRailMode(saved);
-      else if (window.localStorage.getItem('sentinel:nav-collapsed') === '1') setRailMode('collapsed');
+      if (saved === 'expanded' || saved === 'hover') setRailMode(saved);
     } catch { /* defaults */ }
   }, []);
   const toggleInspector = useCallback(() => {
@@ -454,10 +457,10 @@ export function EditorialShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="ed-shell">
-      <Header onOpenCmd={() => setCmdOpen(true)} inspectorOpen={inspectorOpen} onToggleInspector={toggleInspector} railMode={railMode} onRailMode={changeRailMode} />
+      <Header onOpenCmd={() => setCmdOpen(true)} inspectorOpen={inspectorOpen} onToggleInspector={toggleInspector} railInFlow={railMode === 'expanded'} />
       <div className="ed-body">
-        {railMode === 'expanded' && <Rail />}
-        {railMode === 'hover' && <div className="ed-rail-hover"><Rail /></div>}
+        {railMode === 'expanded' && <Rail railMode={railMode} onRailMode={changeRailMode} />}
+        {railMode === 'hover' && <div className="ed-rail-hover"><Rail railMode={railMode} onRailMode={changeRailMode} /></div>}
         <main className="ed-content main" id="main-content" tabIndex={-1}>{children}</main>
         {inspectorOpen && <Inspector onClose={toggleInspector} />}
       </div>
