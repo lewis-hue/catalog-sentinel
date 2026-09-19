@@ -15,6 +15,15 @@ interface Payload { scanId: string; artist: string; open: number; items: Item[] 
 
 const DECISION_LABEL: Record<Decision, string> = { CONFIRMED_PRESENT: 'confirmed present', CONFIRMED_MISSING: 'confirmed missing', WRONG_PROFILE: 'wrong profile', DISMISSED: 'dismissed' };
 
+// The decision statuses a resolved cell can carry, used as the resolved-view filter chips.
+const DECISION_FILTERS: Array<{ value: 'all' | Decision; label: string; cls: string }> = [
+  { value: 'all', label: 'All resolved', cls: '' },
+  { value: 'CONFIRMED_PRESENT', label: 'Present', cls: 'ok' },
+  { value: 'CONFIRMED_MISSING', label: 'Missing', cls: 'warn' },
+  { value: 'WRONG_PROFILE', label: 'Wrong profile', cls: 'bad' },
+  { value: 'DISMISSED', label: 'Dismiss', cls: 'ghost' },
+];
+
 export function ManualReview() {
   const savedId = useSearchParams().get('id');
   const [data, setData] = useState<Payload | null>(null);
@@ -22,6 +31,7 @@ export function ManualReview() {
   const [platform, setPlatform] = useState('all');
   const [q, setQ] = useState('');
   const [showResolved, setShowResolved] = useState(false);
+  const [decision, setDecision] = useState<'all' | Decision>('all');
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [resolvedThisSession, setResolvedThisSession] = useState(0);
   const [error, setError] = useState('');
@@ -62,12 +72,20 @@ export function ManualReview() {
   const filtered = useMemo(() => {
     if (!data) return [];
     const n = q.trim().toLowerCase();
-    return data.items.filter((i) =>
-      (showResolved ? true : !i.resolved) &&
-      (platform === 'all' || i.platform === platform) &&
-      (!n || i.trackTitle.toLowerCase().includes(n) || (i.isrc ?? '').toLowerCase().includes(n)),
-    );
-  }, [data, q, platform, showResolved]);
+    return data.items.filter((i) => {
+      // Resolved view shows ONLY resolved cells (each carries a Present/Missing/Wrong profile/Dismiss
+      // decision), optionally narrowed to one decision; the open view shows only unresolved cells.
+      if (showResolved) {
+        if (!i.resolved) return false;
+        if (decision !== 'all' && i.reviewDecision !== decision) return false;
+      } else if (i.resolved) {
+        return false;
+      }
+      if (platform !== 'all' && i.platform !== platform) return false;
+      if (n && !i.trackTitle.toLowerCase().includes(n) && !(i.isrc ?? '').toLowerCase().includes(n)) return false;
+      return true;
+    });
+  }, [data, q, platform, showResolved, decision]);
 
   async function decide(item: Item, decision: Decision) {
     if (!data || busy.has(item.id)) return;
@@ -126,6 +144,19 @@ export function ManualReview() {
           <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} /> Show resolved
         </label>
       </div>
+
+      {showResolved && (
+        <div className="row" style={{ gap: 8, marginBottom: 18 }} role="group" aria-label="Filter resolved decisions">
+          {DECISION_FILTERS.map((f) => {
+            const count = f.value === 'all' ? resolvedCount : data.items.filter((i) => i.resolved && i.reviewDecision === f.value).length;
+            return (
+              <button key={f.value} type="button" className={`chip ${f.cls} ${decision === f.value ? 'on' : ''}`.trim()} onClick={() => setDecision(f.value)}>
+                {f.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="rv-list">
         {filtered.slice(0, WINDOW).map((item) => (
