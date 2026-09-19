@@ -8,11 +8,11 @@ import type { AssistantConversationStore } from './assistant-store';
 /** Turn an upstream failure into an honest, non-leaky user message. */
 function assistantErrorMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : '';
-  if (/\b429\b|insufficient_quota|\bquota\b|\bcredit/i.test(message)) {
-    return 'The assistant’s AI provider has no credits. Add billing to the OpenAI account to enable it.';
+  if (/\b429\b|insufficient_quota|\bquota\b|\bcredit|overloaded|rate.?limit/i.test(message)) {
+    return 'The assistant’s AI provider is rate-limited or out of credits. Try again shortly, or check the provider account.';
   }
-  if (/\b401\b|invalid_api_key|unauthor/i.test(message)) {
-    return 'The assistant’s API key was rejected. Check OPENAI_API_KEY on the API service.';
+  if (/\b401\b|invalid_api_key|invalid x-api-key|unauthor|authentication/i.test(message)) {
+    return 'The assistant’s API key was rejected. Check ANTHROPIC_API_KEY on the API service.';
   }
   return 'The assistant is temporarily unavailable. Try again in a moment.';
 }
@@ -34,7 +34,7 @@ export function registerAssistantRoutes(
   app.post('/api/assistant', { preHandler: requireAuth() }, async (req, reply) => {
     const config = assistantConfigFromEnv(process.env);
     if (!config) {
-      return reply.status(503).send({ error: 'The assistant is not configured. Set OPENAI_API_KEY to enable it.' });
+      return reply.status(503).send({ error: 'The assistant is not configured. Set ANTHROPIC_API_KEY to enable it.' });
     }
     const messages = normalizeMessages((req.body as { messages?: unknown } | undefined)?.messages);
     if (messages.length === 0) return reply.status(400).send({ error: 'Ask a question to start.' });
@@ -61,7 +61,7 @@ export function registerAssistantRoutes(
     reply.raw.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
     let answer = '';
     try {
-      for await (const delta of parseSseDeltas(stream)) {
+      for await (const delta of parseSseDeltas(stream, config.provider)) {
         answer += delta;
         reply.raw.write(delta);
       }

@@ -278,11 +278,20 @@ services:
       ENABLE_KEYCLOAK_AUTH: 'true'
       ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?Set ENCRYPTION_MASTER_KEY}
       GOVERNANCE_HMAC_LOCAL_KEY: ${GOVERNANCE_HMAC_LOCAL_KEY:?Set GOVERNANCE_HMAC_LOCAL_KEY}
-      # Catalogue assistant (inspector chat). Grounded in the caller's own audits. Uses the
-      # OpenAI-compatible chat-completions API. Set OPENAI_API_KEY to enable it; without a key the
-      # assistant reports itself disabled and nothing else breaks. OPENAI_MODEL defaults to
-      # gpt-4o-mini (set o4-mini / o3 etc. to match katiba); OPENAI_BASE_URL points at an
-      # OpenAI-compatible endpoint; ASSISTANT_MAX_TOKENS bounds each reply.
+      # Catalogue assistant (inspector chat). Grounded ONLY in the caller's own audits, centred on
+      # their latest audit. Claude (Anthropic Messages API) is used when ANTHROPIC_API_KEY is set;
+      # ASSISTANT_MODEL overrides the model (default claude-sonnet-5, an "anthropic/..." prefix is
+      # accepted). Without any key the assistant reports itself disabled and nothing else breaks.
+      # An OpenAI-compatible fallback remains for backward compatibility (OPENAI_* below); set
+      # LLM_PROVIDER=openai to force it. ASSISTANT_MAX_TOKENS bounds each reply.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # OpenRouter (OpenAI-compatible gateway) routes to Claude when OPENROUTER_API_KEY is set.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      ASSISTANT_MODEL: ${ASSISTANT_MODEL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
