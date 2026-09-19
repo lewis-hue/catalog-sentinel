@@ -71,10 +71,12 @@ function TenantSwitcher() {
 }
 
 /* ------------------------------------------------------------------ header */
-function Header({ onOpenCmd, inspectorOpen, onToggleInspector }: {
+function Header({ onOpenCmd, inspectorOpen, onToggleInspector, collapsed, onToggleCollapse }: {
   onOpenCmd: () => void;
   inspectorOpen: boolean;
   onToggleInspector: () => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
   const pathname = usePathname() || '/';
   const active = activeItem(pathname);
@@ -83,6 +85,16 @@ function Header({ onOpenCmd, inspectorOpen, onToggleInspector }: {
       <Link href="/" className="ed-brand" title="Catalog Sentinel home">
         <span className="ed-brand-mark">CS</span>
       </Link>
+      <button
+        type="button"
+        className="ed-iconbtn ed-collapse-btn"
+        onClick={onToggleCollapse}
+        aria-label={collapsed ? 'Show navigation' : 'Hide navigation'}
+        aria-expanded={!collapsed}
+        title={collapsed ? 'Show navigation' : 'Hide navigation'}
+      >
+        <span aria-hidden>{collapsed ? '»' : '«'}</span>
+      </button>
       <div className="ed-header-main">
         <div className="ed-header-left">
           <TenantSwitcher />
@@ -114,31 +126,26 @@ function Header({ onOpenCmd, inspectorOpen, onToggleInspector }: {
           >
             <span aria-hidden>ⓘ</span>
           </button>
+          <AccountMenu />
         </div>
       </div>
     </header>
   );
 }
 
-/* ------------------------------------------------------------------ account menu (rail footer) */
-function AccountMenu({ collapsed }: { collapsed: boolean }) {
+/* ------------------------------------------------------------------ account menu (header) */
+function AccountMenu() {
   const { displayName, account, currentTenant } = useTenant();
   const name = displayName || account?.username || 'Signed-in user';
   const initial = name.trim().charAt(0).toUpperCase() || '?';
   const role = currentTenant?.role;
   return (
     <Dropdown
-      up
+      right
       label="Account"
       trigger={(p) => (
-        <button type="button" className="ed-account" aria-haspopup="menu" title={name} {...p}>
+        <button type="button" className="ed-header-account" aria-haspopup="menu" aria-label="Account menu" title={name} {...p}>
           <span className="ed-avatar">{initial}</span>
-          {!collapsed && (
-            <span className="ed-account-id">
-              <span className="ed-account-name">{name}</span>
-              {role && <span className="ed-account-role">{role}</span>}
-            </span>
-          )}
         </button>
       )}
     >
@@ -160,86 +167,36 @@ function AccountMenu({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-/* ------------------------------------------------------------------ rail */
-const RAIL_BEHAVIOR_KEY = 'sentinel:rail-behavior';
-type RailBehavior = 'open' | 'collapsed' | 'expandable';
-
+/* ------------------------------------------------------------------ rail (text-only, collapsible) */
 function RailView({ pathname, auditId }: { pathname: string; auditId: string | null }) {
-  const [behavior, setBehavior] = useState<RailBehavior>('expandable');
-  const [hovered, setHovered] = useState(false);
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(RAIL_BEHAVIOR_KEY) as RailBehavior | null;
-      if (saved === 'open' || saved === 'collapsed' || saved === 'expandable') setBehavior(saved);
-    } catch { /* stay expandable */ }
-  }, []);
-  const choose = (b: RailBehavior) => {
-    setBehavior(b);
-    try { window.localStorage.setItem(RAIL_BEHAVIOR_KEY, b); } catch { /* ignore */ }
-  };
-  const expanded = behavior === 'open' || (behavior === 'expandable' && hovered);
-  const overlay = behavior === 'expandable' && hovered;
   const active = activeItem(pathname);
-
-  const tile = (it: NavItem) => {
-    const isActive = active?.key === it.key;
-    return (
-      <Link
-        key={it.key}
-        href={contextualHref(it.href, auditId)}
-        className={`ed-railitem${isActive ? ' is-active' : ''}`}
-        aria-current={isActive ? 'page' : undefined}
-        title={expanded ? undefined : it.label}
-      >
-        <span className="ed-mark" aria-hidden>{it.mark}</span>
-        <span className="ed-railitem-label">
-          <span>{it.label}</span>
-          {it.flag && <span className="ed-flag">{it.flag}</span>}
-        </span>
-      </Link>
-    );
-  };
-
   return (
-    <>
-      {overlay && <div className="ed-rail-spacer" aria-hidden />}
-      <nav
-        className={`ed-rail${expanded ? ' is-expanded' : ''}${overlay ? ' is-overlay' : ''}`}
-        aria-label="Primary"
-        onMouseEnter={() => behavior === 'expandable' && setHovered(true)}
-        onMouseLeave={() => behavior === 'expandable' && setHovered(false)}
-      >
-        <div className="ed-rail-groups">
-          <div className="ed-rail-scope">Catalogue</div>
-          {NAV_GROUPS.map((g, i) => (
-            <div key={g.label} className="ed-rail-group-wrap">
-              {i > 0 && <div className="ed-rail-sep" />}
-              <div className={`ed-rail-grouplabel${g.section ? ' is-section' : ''}`}>{g.label}</div>
-              <div className="ed-rail-group">{g.items.map(tile)}</div>
+    <nav className="ed-rail" aria-label="Primary">
+      <div className="ed-rail-groups">
+        {NAV_GROUPS.map((g, i) => (
+          <div key={g.label} className="ed-rail-group-wrap">
+            {i > 0 && <div className="ed-rail-sep" />}
+            <div className={`ed-rail-grouplabel${g.section ? ' is-section' : ''}`}>{g.label}</div>
+            <div className="ed-rail-group">
+              {g.items.map((it) => {
+                const isActive = active?.key === it.key;
+                return (
+                  <Link
+                    key={it.key}
+                    href={contextualHref(it.href, auditId)}
+                    className={`ed-railitem${isActive ? ' is-active' : ''}`}
+                    aria-current={isActive ? 'page' : undefined}
+                  >
+                    <span>{it.label}</span>
+                    {it.flag && <span className="ed-flag">{it.flag}</span>}
+                  </Link>
+                );
+              })}
             </div>
-          ))}
-        </div>
-        <div className="ed-rail-footer">
-          <Dropdown
-            up
-            label="Rail"
-            trigger={(p) => (
-              <button type="button" className="ed-railitem ed-rail-control" title="Rail display" {...p}>
-                <span className="ed-mark ed-mark-quiet" aria-hidden>☰</span>
-                <span className="ed-railitem-label"><span>Rail display</span></span>
-              </button>
-            )}
-          >
-            {([['open', 'Always expanded'], ['collapsed', 'Always collapsed'], ['expandable', 'Expand on hover']] as const).map(([b, l]) => (
-              <button key={b} type="button" role="menuitem" className="ed-pop-item" onClick={() => choose(b)}>
-                <span>{l}</span>{behavior === b && <span className="ed-check" aria-hidden>✓</span>}
-              </button>
-            ))}
-          </Dropdown>
-          <div className="ed-rail-account"><AccountMenu collapsed={!expanded} /></div>
-        </div>
-      </nav>
-    </>
+          </div>
+        ))}
+      </div>
+    </nav>
   );
 }
 
@@ -416,17 +373,29 @@ function Inspector({ onClose }: { onClose: () => void }) {
 
 /* ------------------------------------------------------------------ shell orchestrator */
 const INSPECTOR_KEY = 'sentinel:inspector-open';
+const NAV_COLLAPSED_KEY = 'sentinel:nav-collapsed';
 
 export function EditorialShell({ children }: { children: ReactNode }) {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
-    try { setInspectorOpen(window.localStorage.getItem(INSPECTOR_KEY) === '1'); } catch { /* closed */ }
+    try {
+      setInspectorOpen(window.localStorage.getItem(INSPECTOR_KEY) === '1');
+      setCollapsed(window.localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
+    } catch { /* defaults */ }
   }, []);
   const toggleInspector = useCallback(() => {
     setInspectorOpen((o) => {
       const next = !o;
       try { window.localStorage.setItem(INSPECTOR_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+  const toggleCollapse = useCallback(() => {
+    setCollapsed((c) => {
+      const next = !c;
+      try { window.localStorage.setItem(NAV_COLLAPSED_KEY, next ? '1' : '0'); } catch { /* ignore */ }
       return next;
     });
   }, []);
@@ -441,9 +410,9 @@ export function EditorialShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="ed-shell">
-      <Header onOpenCmd={() => setCmdOpen(true)} inspectorOpen={inspectorOpen} onToggleInspector={toggleInspector} />
+      <Header onOpenCmd={() => setCmdOpen(true)} inspectorOpen={inspectorOpen} onToggleInspector={toggleInspector} collapsed={collapsed} onToggleCollapse={toggleCollapse} />
       <div className="ed-body">
-        <Rail />
+        {!collapsed && <Rail />}
         <main className="ed-content main" id="main-content" tabIndex={-1}>{children}</main>
         {inspectorOpen && <Inspector onClose={toggleInspector} />}
       </div>
