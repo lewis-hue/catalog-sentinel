@@ -616,7 +616,7 @@ input.filter { min-width: 240px; }
 }
 
 /* ==========================================================================
-   Shell (chrome) — ported from the katibaAI shell-kit: header · text rail ·
+   Shell (chrome), ported from the katibaAI shell-kit: header · text rail ·
    rail-footer account + sidebar control · ⌘K · assistant inspector.
    Border-led and flat; hairlines carry structure, shadows only on popovers and
    the ⌘K dialog. Text-only rail (no icon set). Namespaced `ed-`; reads our

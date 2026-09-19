@@ -378,7 +378,7 @@ function AssistantPanel() {
       <div className="ed-assistant-log" ref={scrollRef}>
         {messages.length === 0 && (
           <div className="ed-assistant-empty">
-            <p>Ask about your catalogue — a missing song on a store, missing lyrics, or how to get around a view.</p>
+            <p>Ask about your catalogue: a missing song on a store, missing lyrics, or how to get around a view.</p>
           </div>
         )}
         {messages.map((m, i) => (

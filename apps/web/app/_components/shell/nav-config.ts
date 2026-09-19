@@ -1,10 +1,9 @@
 // ============================================================================
-// Editorial shell — navigation described as data.
+// Navigation described as data.
 //
 // The chrome holds no labels or routes of its own; it renders entirely from this
-// file. Each item carries a two-letter `mark` — a typeset catalogue initial set
-// in Fraunces in the rail tiles (this project uses no icon set; the marks are the
-// rail's visual language). `href` is a real Next route, not a hash.
+// file. `href` is a real Next route, not a hash. Each item also carries a legacy
+// two-letter `mark`; the rail is text-only now, so the shell no longer uses it.
 // ============================================================================
 
 export interface NavItem {

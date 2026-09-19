@@ -2,7 +2,7 @@ import type { PgPoolLike } from '@sentinel/db';
 
 /**
  * Durable store for the catalogue assistant, on its OWN database (separate from the main catalogue
- * Postgres). Every row is tenant-scoped: (tenant_id, user_id) — the same membership-validated
+ * Postgres). Every row is tenant-scoped: (tenant_id, user_id), the same membership-validated
  * tenancy the rest of the app uses, so one workspace never sees another's conversations.
  *
  * This database is dedicated to the assistant and is not part of the Prisma-owned migration chain,
