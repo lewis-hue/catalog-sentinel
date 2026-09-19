@@ -285,7 +285,7 @@ function CommandMenu({ onClose }: { onClose: () => void }) {
         <div className="ed-cmd-input">
           <span className="ed-search-glyph" aria-hidden>⌕</span>
           <input ref={inputRef} placeholder="Jump to a view…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <kbd className="ed-kbd">esc</kbd>
+          <button type="button" className="ed-kbd ed-cmd-esc" onClick={onClose} aria-label="Close search">esc</button>
         </div>
         <div className="ed-cmd-list">
           {groups.length === 0 && <div className="ed-cmd-empty">No matching views.</div>}
