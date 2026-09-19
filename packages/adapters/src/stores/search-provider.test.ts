@@ -74,6 +74,26 @@ describe('createSerperSearch (request + parse)', () => {
     await createSerperSearch('k', fetchImpl, { endpoint: '' })('q');
     expect(calledUrl).toBe('https://google.serper.dev/search');
   });
+
+  it('downgrades to num:10 and retries once when a free account rejects num>10, then stays at 10', async () => {
+    const nums: number[] = [];
+    const fetchImpl: FetchLike = async (_url, init) => {
+      const num = JSON.parse((init as { body?: string })?.body ?? '{}').num as number;
+      nums.push(num);
+      if (num > 10) return { ok: false, status: 400, json: async () => ({}), text: async () => '{"message":"Query pattern not allowed for free accounts.","statusCode":400}' };
+      return { ok: true, status: 200, json: async () => ({ organic: [{ link: 'https://x.com/a', title: 'A', snippet: 'B' }] }), text: async () => '' };
+    };
+    const search = createSerperSearch('k', fetchImpl, { num: 30 });
+    expect(await search('"a" "b"')).toHaveLength(1); // recovered via retry at num:10
+    expect(nums).toEqual([30, 10]);                  // one 400 at 30, retried at 10
+    await search('"c" "d"');
+    expect(nums).toEqual([30, 10, 10]);              // session downgrade sticks: no second 400
+  });
+
+  it('does not downgrade on a 400 that is not a free-account pattern error', async () => {
+    const fetchImpl: FetchLike = async () => ({ ok: false, status: 400, json: async () => ({}), text: async () => '{"message":"bad request"}' });
+    await expect(createSerperSearch('k', fetchImpl, { num: 30 })('q')).rejects.toThrow(/Serper 400/);
+  });
 });
 
 describe('ResilientSearchProvider (rate limit + breaker + cache)', () => {

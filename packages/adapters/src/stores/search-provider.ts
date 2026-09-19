@@ -141,22 +141,40 @@ export function createSerperSearch(apiKey: string, fetchImpl: FetchLike = defaul
   // passthrough) must fall back to the default, or fetch('') throws "Failed to parse URL from ".
   const endpoint = opts.endpoint || 'https://google.serper.dev/search';
   const timeoutMs = opts.timeoutMs ?? 8000;
-  return async (query: string) => {
+  // Free Serper accounts reject num>10 on advanced-operator queries (quoted phrases / `site:` — the
+  // exact shapes the store + lyric resolvers use) with a 400 "Query pattern not allowed for free
+  // accounts", which would silently zero out the whole web-verification tier. Detect that once, then
+  // downgrade to num:10 for the rest of the session; paid keys keep the requested num.
+  const FREE_NUM_CAP = 10;
+  let effectiveNum = opts.num ?? 10;
+
+  const fetchOnce = async (query: string, num: number) => {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
-      const resp = await fetchImpl(endpoint, {
+      return await fetchImpl(endpoint, {
         method: 'POST',
         headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q: query, num: opts.num ?? 10, gl: opts.gl ?? 'us', hl: opts.hl ?? 'en' }),
+        body: JSON.stringify({ q: query, num, gl: opts.gl ?? 'us', hl: opts.hl ?? 'en' }),
         ...(controller ? { signal: controller.signal } : {}),
       } as Parameters<FetchLike>[1]);
-      if (!resp.ok) throw new Error(`Serper ${resp.status}`);
-      const data = (await resp.json()) as { organic?: Array<{ link?: string; title?: string; snippet?: string }> };
-      return (data.organic ?? []).filter((r) => r.link).map((r) => ({ url: r.link!, title: r.title ?? '', description: r.snippet ?? '' }));
     } finally {
       if (timer) clearTimeout(timer);
     }
+  };
+
+  return async (query: string) => {
+    let resp = await fetchOnce(query, effectiveNum);
+    if (!resp.ok && resp.status === 400 && effectiveNum > FREE_NUM_CAP) {
+      const body = await (resp.text?.() ?? Promise.resolve('')).catch(() => '');
+      if (/free account/i.test(body)) {
+        effectiveNum = FREE_NUM_CAP; // remember for the rest of this session, then retry once
+        resp = await fetchOnce(query, effectiveNum);
+      }
+    }
+    if (!resp.ok) throw new Error(`Serper ${resp.status}`);
+    const data = (await resp.json()) as { organic?: Array<{ link?: string; title?: string; snippet?: string }> };
+    return (data.organic ?? []).filter((r) => r.link).map((r) => ({ url: r.link!, title: r.title ?? '', description: r.snippet ?? '' }));
   };
 }
 
