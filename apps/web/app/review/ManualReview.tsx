@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { platformCode, NoAudit, Readout, type ReadoutStat } from '@sentinel/shared-ui';
+import { platformCode, NoAudit, Readout, humanizeToken, type ReadoutStat } from '@sentinel/shared-ui';
 import { apiErrorMessage, apiFetch } from '@/lib/api-client';
 const WINDOW = 120;
 
@@ -169,7 +169,7 @@ export function ManualReview() {
                 <span className="status unk">{item.status === 'unverifiable' ? 'Unverifiable' : 'Low confidence'}</span>
                 <span className="rv-query">conf {item.confidence.toFixed(2)}</span>
                 {item.isrc && <span className="rv-query">· {item.isrc}</span>}
-                {item.resolved && item.reviewDecision && <span className="status live">✓ {DECISION_LABEL[item.reviewDecision as Decision] ?? item.reviewDecision}</span>}
+                {item.resolved && item.reviewDecision && <span className="status live">✓ {DECISION_LABEL[item.reviewDecision as Decision] ?? humanizeToken(item.reviewDecision)}</span>}
               </div>
               <div className="rv-reason">
                 {item.reason}

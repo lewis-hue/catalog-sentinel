@@ -117,7 +117,7 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-display);
   font-optical-sizing: auto;
   font-weight: 420;
-  font-size: clamp(28px, 5vw, 36px);
+  font-size: clamp(25px, 4vw, 31px);
   line-height: 1.12;
   letter-spacing: -0.012em;
   text-wrap: balance;
@@ -220,7 +220,7 @@ a:hover { text-decoration: underline; }
 /* ===== Page primitives ==================================================== */
 /* Plus Jakarta Sans is the display face, a clean modern sans, it wants bold weight (600-700) and
    tight tracking for headings. `font-optical-sizing: auto` is inert here but harmless. */
-.page-title { font-family: var(--font-display); font-optical-sizing: auto; font-size: 27px; letter-spacing: -0.01em; margin: 0 0 5px; font-weight: 700; text-wrap: balance; }
+.page-title { font-family: var(--font-display); font-optical-sizing: auto; font-size: 23px; letter-spacing: -0.005em; margin: 0 0 5px; font-weight: 600; text-wrap: balance; }
 .page-sub { color: var(--mist); margin: 0 0 24px; font-size: 14px; max-width: 74ch; }
 .eyebrow { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--mist-2); font-weight: 500; }
 .row { display: flex; gap: 14px; flex-wrap: wrap; }
@@ -329,7 +329,7 @@ input.filter { min-width: 240px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
 
-.hero-num { font-family: var(--font-display); font-optical-sizing: auto; font-weight: 700; font-size: 62px; line-height: 0.92; letter-spacing: -0.015em; font-variant-numeric: tabular-nums; }
+.hero-num { font-family: var(--font-display); font-optical-sizing: auto; font-weight: 600; font-size: 44px; line-height: 0.98; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 
 /* Editorial catalogue-health hero (Overview) */
 .health-hero { display: grid; grid-template-columns: minmax(230px, 0.95fr) minmax(260px, 1.15fr) auto; gap: 30px; align-items: center; position: relative; overflow: hidden; }
@@ -380,7 +380,7 @@ input.filter { min-width: 240px; }
 /* Stat tiles */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
 .stat { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; background: var(--panel); box-shadow: var(--shadow-sm); }
-.stat .n { font-family: var(--font-display); font-optical-sizing: auto; font-size: 31px; line-height: 1; letter-spacing: -0.01em; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat .n { font-family: var(--font-display); font-optical-sizing: auto; font-size: 25px; line-height: 1; letter-spacing: -0.005em; font-weight: 600; font-variant-numeric: tabular-nums; }
 .stat .n.warn { color: var(--gap); }
 .stat .n.ok { color: var(--live); }
 .stat .n.bad { color: var(--wrong); }
@@ -407,13 +407,13 @@ input.filter { min-width: 240px; }
 .cat-empty p { max-width: 520px; margin: 0 auto; font-size: 14px; }
 
 .cat-identity { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; padding: 4px 0 16px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
-.cat-name { font-family: var(--font-display); font-optical-sizing: auto; font-size: 30px; letter-spacing: -0.01em; margin: 2px 0 6px; font-weight: 700; text-wrap: balance; }
+.cat-name { font-family: var(--font-display); font-optical-sizing: auto; font-size: 24px; letter-spacing: -0.005em; margin: 2px 0 6px; font-weight: 600; text-wrap: balance; }
 .cat-profiles { display: flex; gap: 14px; flex-wrap: wrap; }
 .cat-profile-link { font-family: var(--font-mono); font-size: 12px; color: var(--mist); }
 .cat-profile-link:hover { color: var(--brand); }
 .cat-readout { display: flex; gap: 22px; }
 .cat-stat { text-align: right; }
-.cat-stat-n { font-family: var(--font-display); font-optical-sizing: auto; font-size: 26px; line-height: 1; letter-spacing: -0.005em; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cat-stat-n { font-family: var(--font-display); font-optical-sizing: auto; font-size: 21px; line-height: 1; letter-spacing: -0.003em; font-weight: 600; font-variant-numeric: tabular-nums; }
 .cat-stat-n.ok { color: var(--live); }
 .cat-stat-n.warn { color: var(--gap); }
 .cat-stat-n.bad { color: var(--wrong); }
@@ -436,7 +436,7 @@ input.filter { min-width: 240px; }
 .art-tile { position: relative; margin: 0; border-radius: 12px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); aspect-ratio: 1 / 1.18; display: flex; flex-direction: column; transition: box-shadow 0.14s, transform 0.14s; box-shadow: var(--shadow-xs); }
 .art-tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .art-tile img, .art-fallback { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; }
-.art-fallback { display: grid; place-items: center; font-family: var(--font-display); font-size: 32px; color: var(--mist-2); background: var(--ink-2); }
+.art-fallback { display: grid; place-items: center; font-family: var(--font-display); font-size: 27px; color: var(--mist-2); background: var(--ink-2); }
 .art-tile.flag-gap { border-color: var(--gap-edge); }
 .art-tile.flag-wrong { border-color: var(--wrong-edge); }
 

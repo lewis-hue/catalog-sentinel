@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { humanizeToken } from '@sentinel/shared-ui';
 import { apiFetch } from '@/lib/api-client';
 import { mergeHistoryRows, SEARCH_HISTORY_NEXT_CURSOR_HEADER } from './history-pagination';
 
@@ -162,7 +163,7 @@ export function HistoryList() {
                 <div className="history-meta">
                   {cap(row.distributor)} · {row.stores.length} stores{row.song?.title ? ` · song: ${row.song.title}` : ''} · {when(row.createdAt)}
                   {row.sourceSearchId ? ' · saved-snapshot recheck' : ''}
-                  {active ? ` · ${row.deepScan?.status}` : ''}
+                  {active && row.deepScan?.status ? ` · ${humanizeToken(row.deepScan.status)}` : ''}
                 </div>
               </div>
               <div className="history-stats" aria-label="Audit summary">

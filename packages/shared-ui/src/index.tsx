@@ -130,6 +130,26 @@ export type StatusClass = 'live' | 'gap' | 'wrong' | 'unk';
 export const statusClass = (status: string): StatusClass =>
   status === 'live' ? 'live' : status === 'not-live' ? 'gap' : status === 'wrong-profile' ? 'wrong' : 'unk';
 
+/**
+ * Turn any raw backend token (UPPER_SNAKE, snake_case, kebab-case) into a clean sentence-case label,
+ * so internal enum names never leak to the UI. The safety net behind every specific label map.
+ */
+export const humanizeToken = (value: string | null | undefined): string => {
+  const s = (value ?? '').replace(/[_-]+/g, ' ').trim().toLowerCase();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+};
+
+/** Coverage verdict → human label (never the raw status token). */
+export const verdictLabel = (status: string): string => {
+  switch (status) {
+    case 'live': return 'Confirmed live';
+    case 'not-live': return 'Not confirmed';
+    case 'wrong-profile': return 'Wrong profile';
+    case 'unverifiable': return 'Unverifiable';
+    default: return humanizeToken(status);
+  }
+};
+
 /** Quote a CSV field if it contains a comma, quote, or newline. */
 export const csvEscape = (v: unknown): string => {
   const s = String(v ?? '');

@@ -1,7 +1,7 @@
 'use client';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { platformCode, statusClass, downloadCsv, NoAudit, Readout } from '@sentinel/shared-ui';
+import { platformCode, statusClass, downloadCsv, NoAudit, Readout, humanizeToken, verdictLabel } from '@sentinel/shared-ui';
 import { apiErrorMessage, apiFetch } from '@/lib/api-client';
 import { failureReasonSummary } from './failure-reasons';
 import { useStorePresence, StoreCheckBar, deliveredMapFrom } from '../catalogue/store-presence';
@@ -110,7 +110,7 @@ function evidenceText(value: string | null | undefined, evidence?: MetadataField
 
 function evidenceTitle(evidence?: MetadataField): string | undefined {
   if (!evidence) return 'Field-level capture evidence was not retained for this record.';
-  return `${evidence.status} · ${evidence.source} · parser ${evidence.parserVersion} · ${evidence.capturedAt}`;
+  return `${humanizeToken(evidence.status)} · ${humanizeToken(evidence.source)} · parser ${evidence.parserVersion} · ${evidence.capturedAt}`;
 }
 
 function MetadataValue({ value, evidence, format }: { value?: string | null; evidence?: MetadataField; format?: (value: string) => string }) {
@@ -543,7 +543,7 @@ export function CatalogOps() {
                                 const pip = (
                                   <span
                                     className={`pip ${isDelivered ? 'delivered' : statusClass(c.status)}`}
-                                    title={isDelivered ? `${c.store}: Delivered by DistroKid (not independently verified)` : `${c.store}: ${c.status}${c.foundArtist ? ` (${c.foundArtist})` : ''}`}
+                                    title={isDelivered ? `${c.store}: Delivered by DistroKid (not independently verified)` : `${c.store}: ${verdictLabel(c.status)}${c.foundArtist ? ` (${c.foundArtist})` : ''}`}
                                   >{platformCode(c.store)}</span>
                                 );
                                 return url
