@@ -638,11 +638,10 @@ input.filter { min-width: 240px; }
   background: var(--panel); padding-right: 16px; position: relative; z-index: 60;
 }
 .ed-brand {
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  width: var(--ed-rail-w); height: var(--ed-header-h);
-  border-right: 1px solid var(--line); text-decoration: none;
+  display: flex; align-items: center; flex-shrink: 0;
+  height: var(--ed-header-h); padding: 0 6px 0 6px; text-decoration: none;
 }
-.ed-brand:hover { text-decoration: none; background: var(--panel-2); }
+.ed-brand:hover { text-decoration: none; }
 .ed-brand-mark {
   display: flex; align-items: center; justify-content: center;
   width: 32px; height: 32px; border-radius: var(--radius-sm);
@@ -703,12 +702,12 @@ input.filter { min-width: 240px; }
 .ed-rail-groups::-webkit-scrollbar-thumb:hover, .ed-inspector-body::-webkit-scrollbar-thumb:hover, .ed-content::-webkit-scrollbar-thumb:hover, .ed-cmd-list::-webkit-scrollbar-thumb:hover, .ed-pop::-webkit-scrollbar-thumb:hover { background: var(--mist-2); }
 .ed-rail-groups::-webkit-scrollbar-track, .ed-inspector-body::-webkit-scrollbar-track, .ed-content::-webkit-scrollbar-track, .ed-cmd-list::-webkit-scrollbar-track, .ed-pop::-webkit-scrollbar-track { background: transparent; }
 .ed-rail-grouplabel {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase;
-  color: var(--mist-2); padding: 10px 12px 6px;
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--mist-2); padding: 18px 12px 7px;
 }
-.ed-rail-grouplabel.is-section { color: var(--paper); }
+.ed-rail-group-wrap:first-child .ed-rail-grouplabel { padding-top: 4px; }
 .ed-rail-group { display: flex; flex-direction: column; gap: 3px; }
-.ed-rail-sep { height: 1px; background: var(--line); margin: 12px 10px 4px; }
 .ed-railitem {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 8px 12px; border-radius: var(--radius-sm);
@@ -731,9 +730,12 @@ input.filter { min-width: 240px; }
 .ed-railitem-label > span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .ed-rail.is-expanded .ed-railitem-label { opacity: 1; }
 .ed-flag { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mist-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
-/* header collapse toggle + account avatar */
-.ed-collapse-btn { flex-shrink: 0; font-size: 16px; line-height: 1; margin-left: 4px; }
-.ed-header-account { display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; cursor: pointer; padding: 2px; margin-left: 2px; border-radius: 999px; transition: background 0.12s ease; }
+/* header: menu toggle, assistant button, account avatar */
+.ed-menu-btn { flex-shrink: 0; font-size: 15px; line-height: 1; margin-left: 10px; color: var(--mist); }
+.ed-menu-btn:hover { color: var(--paper); }
+.ed-assistant-glyph { color: var(--brand); font-size: 12px; }
+.ed-assistant-btn.is-active .ed-assistant-glyph { color: var(--brand-dim); }
+.ed-header-account { display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; cursor: pointer; padding: 2px; margin-left: 4px; border-radius: 999px; transition: background 0.12s ease; }
 .ed-header-account:hover { background: var(--panel-2); }
 .ed-avatar { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 30px; height: 30px; border-radius: 999px; background: var(--brand-tint); color: var(--brand-dim); font-family: var(--font-display); font-weight: 600; font-size: 13px; }
 .ed-account-id { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
@@ -830,5 +832,5 @@ input.filter { min-width: 240px; }
 
 @media (max-width: 720px) {
   .ed-inspector { display: none; }
-  .ed-header-right .ed-iconbtn-outline span:not(.ed-search-glyph):not(.ed-kbd) { display: none; }
+  .ed-header-right .ed-iconbtn-outline span:not(.ed-search-glyph):not(.ed-assistant-glyph):not(.ed-kbd) { display: none; }
 }

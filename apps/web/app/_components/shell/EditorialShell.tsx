@@ -82,24 +82,23 @@ function Header({ onOpenCmd, inspectorOpen, onToggleInspector, collapsed, onTogg
   const active = activeItem(pathname);
   return (
     <header className="ed-header">
-      <Link href="/" className="ed-brand" title="Catalog Sentinel home">
-        <span className="ed-brand-mark">CS</span>
-      </Link>
       <button
         type="button"
-        className="ed-iconbtn ed-collapse-btn"
+        className="ed-iconbtn ed-menu-btn"
         onClick={onToggleCollapse}
         aria-label={collapsed ? 'Show navigation' : 'Hide navigation'}
         aria-expanded={!collapsed}
         title={collapsed ? 'Show navigation' : 'Hide navigation'}
       >
-        <span aria-hidden>{collapsed ? '»' : '«'}</span>
+        <span aria-hidden>◧</span>
       </button>
+      <Link href="/" className="ed-brand" title="Catalog Sentinel home">
+        <span className="ed-brand-mark">CS</span>
+      </Link>
       <div className="ed-header-main">
         <div className="ed-header-left">
           <TenantSwitcher />
           <nav className="ed-crumbs" aria-label="Breadcrumb">
-            <span className="ed-divider" aria-hidden>/</span>
             <Link href="/" className={`ed-crumb-link${pathname === '/' ? ' is-current' : ''}`} aria-current={pathname === '/' ? 'page' : undefined}>
               Catalogue
             </Link>
@@ -119,12 +118,13 @@ function Header({ onOpenCmd, inspectorOpen, onToggleInspector, collapsed, onTogg
           </button>
           <button
             type="button"
-            className={`ed-iconbtn${inspectorOpen ? ' is-active' : ''}`}
+            className={`ed-iconbtn ed-iconbtn-outline ed-assistant-btn${inspectorOpen ? ' is-active' : ''}`}
             aria-pressed={inspectorOpen}
-            title="About this view"
+            title="Catalogue assistant"
             onClick={onToggleInspector}
           >
-            <span aria-hidden>ⓘ</span>
+            <span className="ed-assistant-glyph" aria-hidden>✦</span>
+            <span>Assistant</span>
           </button>
           <AccountMenu />
         </div>
@@ -173,10 +173,9 @@ function RailView({ pathname, auditId }: { pathname: string; auditId: string | n
   return (
     <nav className="ed-rail" aria-label="Primary">
       <div className="ed-rail-groups">
-        {NAV_GROUPS.map((g, i) => (
+        {NAV_GROUPS.map((g) => (
           <div key={g.label} className="ed-rail-group-wrap">
-            {i > 0 && <div className="ed-rail-sep" />}
-            <div className={`ed-rail-grouplabel${g.section ? ' is-section' : ''}`}>{g.label}</div>
+            <div className="ed-rail-grouplabel">{g.label}</div>
             <div className="ed-rail-group">
               {g.items.map((it) => {
                 const isActive = active?.key === it.key;

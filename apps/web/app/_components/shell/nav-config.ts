@@ -19,8 +19,6 @@ export interface NavItem {
 
 export interface NavGroup {
   label: string;
-  /** Render the label as a bold administrative section divider. */
-  section?: boolean;
   items: NavItem[];
 }
 
@@ -48,7 +46,6 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Account',
-    section: true,
     items: [
       { key: 'profile', label: 'Profile', href: '/profile', mark: 'Pr' },
     ],
