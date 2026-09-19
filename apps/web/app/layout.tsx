@@ -2,6 +2,7 @@ import './globals.css';
 import type { ReactNode } from 'react';
 import { Fraunces, Inter, IBM_Plex_Mono } from 'next/font/google';
 import { AppShell } from './_components/AppShell';
+import { isAuthenticated } from '@/lib/auth/is-authed';
 
 // Fraunces, an editorial serif with optical sizing, is the display face (brand, headings, and the
 // catalogue letter-marks in the rail). Exposed as `--font-fraunces`, which `--font-display` resolves
@@ -21,11 +22,12 @@ export const metadata = {
   description: 'Verify where every distributed track is live across music platforms, find gaps, and generate distributor-ready evidence. Read-only, confidence-scored.',
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const authed = await isAuthenticated();
   return (
     <html lang="en" className={`${fraunces.variable} ${inter.variable} ${plexMono.variable}`}>
       <body>
-        <AppShell>{children}</AppShell>
+        <AppShell authed={authed}>{children}</AppShell>
       </body>
     </html>
   );

@@ -6,7 +6,7 @@
  * every other UI route is protected.
  */
 
-const PUBLIC_PAGES = new Set(['/sign-in']);
+const PUBLIC_PAGES = new Set(['/', '/sign-in', '/sign-up']);
 const PUBLIC_MACHINE_ROUTES = new Set([
   '/health',
   '/openapi.json',
