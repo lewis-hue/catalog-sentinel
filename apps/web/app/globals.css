@@ -636,10 +636,15 @@ input.filter { min-width: 240px; }
   height: var(--ed-header-h); border-bottom: 1px solid var(--line);
   background: var(--panel); padding-right: 16px; position: relative; z-index: 60;
 }
+/* Toggle sits in a rail-width lead zone so the brand + breadcrumb begin exactly
+   at the content column (rail width + the content's own left inset). */
+.ed-header-lead { display: flex; align-items: center; flex-shrink: 0; width: var(--ed-side-w); height: var(--ed-header-h); padding-left: 10px; }
+.ed-header.is-collapsed .ed-header-lead { width: auto; }
 .ed-brand {
   display: flex; align-items: center; flex-shrink: 0;
-  height: var(--ed-header-h); padding: 0 6px 0 6px; text-decoration: none;
+  height: var(--ed-header-h); padding: 0 6px 0 32px; text-decoration: none;
 }
+.ed-header.is-collapsed .ed-brand { padding-left: 12px; }
 .ed-brand:hover { text-decoration: none; }
 .ed-brand-mark {
   display: flex; align-items: center; justify-content: center;
@@ -647,7 +652,7 @@ input.filter { min-width: 240px; }
   background: var(--brand); color: #f6f4ec;
   font-family: var(--font-display); font-weight: 600; font-size: 14px; letter-spacing: 0.01em;
 }
-.ed-header-main { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 24px; min-width: 0; padding-left: 12px; }
+.ed-header-main { display: flex; align-items: center; justify-content: space-between; flex: 1; gap: 24px; min-width: 0; padding-left: 8px; }
 .ed-header-left { display: flex; align-items: center; gap: 2px; min-width: 0; }
 .ed-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
@@ -730,7 +735,7 @@ input.filter { min-width: 240px; }
 .ed-rail.is-expanded .ed-railitem-label { opacity: 1; }
 .ed-flag { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mist-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 /* header: menu toggle, assistant button, account avatar */
-.ed-menu-btn { flex-shrink: 0; font-size: 15px; line-height: 1; margin-left: 10px; color: var(--mist); }
+.ed-menu-btn { flex-shrink: 0; font-size: 15px; line-height: 1; color: var(--mist); }
 .ed-menu-btn:hover { color: var(--paper); }
 .ed-assistant-glyph { color: var(--brand); font-size: 12px; }
 .ed-assistant-btn.is-active .ed-assistant-glyph { color: var(--brand-dim); }

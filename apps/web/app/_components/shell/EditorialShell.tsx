@@ -81,17 +81,19 @@ function Header({ onOpenCmd, inspectorOpen, onToggleInspector, collapsed, onTogg
   const pathname = usePathname() || '/';
   const active = activeItem(pathname);
   return (
-    <header className="ed-header">
-      <button
-        type="button"
-        className="ed-iconbtn ed-menu-btn"
-        onClick={onToggleCollapse}
-        aria-label={collapsed ? 'Show navigation' : 'Hide navigation'}
-        aria-expanded={!collapsed}
-        title={collapsed ? 'Show navigation' : 'Hide navigation'}
-      >
-        <span aria-hidden>◧</span>
-      </button>
+    <header className={`ed-header${collapsed ? ' is-collapsed' : ''}`}>
+      <div className="ed-header-lead">
+        <button
+          type="button"
+          className="ed-iconbtn ed-menu-btn"
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? 'Show navigation' : 'Hide navigation'}
+          aria-expanded={!collapsed}
+          title={collapsed ? 'Show navigation' : 'Hide navigation'}
+        >
+          <span aria-hidden>◧</span>
+        </button>
+      </div>
       <Link href="/" className="ed-brand" title="Catalog Sentinel home">
         <span className="ed-brand-mark">CS</span>
       </Link>
