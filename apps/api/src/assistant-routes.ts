@@ -8,8 +8,8 @@ import type { AssistantConversationStore } from './assistant-store';
 /** Turn an upstream failure into an honest, non-leaky user message. */
 function assistantErrorMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : '';
-  if (/\b429\b|insufficient_quota|\bquota\b|\bcredit|overloaded|rate.?limit/i.test(message)) {
-    return 'The assistant’s AI provider is rate-limited or out of credits. Try again shortly, or check the provider account.';
+  if (/\b402\b|\b429\b|insufficient_quota|\bquota\b|\bcredit|depleted|overloaded|rate.?limit/i.test(message)) {
+    return 'The assistant’s AI provider is rate-limited or out of credits. Try again shortly, or top up the provider account.';
   }
   if (/\b401\b|invalid_api_key|invalid x-api-key|unauthor|authentication/i.test(message)) {
     return 'The assistant’s API key was rejected. Check ANTHROPIC_API_KEY on the API service.';

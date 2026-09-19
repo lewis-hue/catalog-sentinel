@@ -16,6 +16,10 @@ describe('assistantConfigFromEnv', () => {
     expect(cfg?.provider).toBe('openai');
     expect(cfg?.apiKey).toBe('sk-or-y');
   });
+  it('uses Gemini via its OpenAI-compatible endpoint when GEMINI_API_KEY is set', () => {
+    const cfg = assistantConfigFromEnv({ GEMINI_API_KEY: 'g-key', GEMINI_MODEL: 'gemini-2.5-flash' } as NodeJS.ProcessEnv);
+    expect(cfg).toMatchObject({ provider: 'openai', apiKey: 'g-key', model: 'gemini-2.5-flash', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai' });
+  });
   it('falls back to OpenAI when only OPENAI_API_KEY is set', () => {
     expect(assistantConfigFromEnv({ OPENAI_API_KEY: 'sk-o' } as NodeJS.ProcessEnv)?.provider).toBe('openai');
   });

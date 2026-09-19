@@ -22,6 +22,7 @@ export function assistantConfigFromEnv(env: NodeJS.ProcessEnv): AssistantConfig 
   const forced = (env.LLM_PROVIDER ?? '').trim().toLowerCase();
   const anthropicKey = env.ANTHROPIC_API_KEY?.trim();
   const openrouterKey = env.OPENROUTER_API_KEY?.trim();
+  const geminiKey = env.GEMINI_API_KEY?.trim() || env.GOOGLE_API_KEY?.trim();
   const openaiKey = env.OPENAI_API_KEY?.trim();
   const maxTokens =
     Number(env.ASSISTANT_MAX_TOKENS) > 0 ? Number(env.ASSISTANT_MAX_TOKENS)
@@ -50,6 +51,17 @@ export function assistantConfigFromEnv(env: NodeJS.ProcessEnv): AssistantConfig 
           maxTokens,
         }
       : null;
+  // Google Gemini via its OpenAI-compatible endpoint (API key sent as a Bearer token).
+  const gemini = (): AssistantConfig | null =>
+    geminiKey
+      ? {
+          provider: 'openai',
+          apiKey: geminiKey,
+          model: env.GEMINI_MODEL?.trim() || env.ASSISTANT_MODEL?.trim() || 'gemini-2.5-flash',
+          baseUrl: (env.GEMINI_BASE_URL?.trim() || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, ''),
+          maxTokens,
+        }
+      : null;
   // Direct OpenAI, or any other OpenAI-compatible endpoint.
   const openai = (): AssistantConfig | null =>
     openaiKey
@@ -67,8 +79,9 @@ export function assistantConfigFromEnv(env: NodeJS.ProcessEnv): AssistantConfig 
   // silently disables a working key.
   if (forced === 'anthropic' && anthropicKey) return anthropic();
   if (forced === 'openrouter' && openrouterKey) return openrouter();
+  if ((forced === 'gemini' || forced === 'google') && geminiKey) return gemini();
   if (forced === 'openai' && openaiKey) return openai();
-  return openrouter() ?? anthropic() ?? openai();
+  return openrouter() ?? gemini() ?? anthropic() ?? openai();
 }
 
 export interface AssistantMessage {
