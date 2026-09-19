@@ -263,11 +263,14 @@ function CommandMenu({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [q, setQ] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onDown = (e: MouseEvent) => { if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) onClose(); };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => { document.removeEventListener('keydown', onKey); document.removeEventListener('mousedown', onDown); };
   }, [onClose]);
 
   const groups = useMemo(() => {
@@ -280,12 +283,13 @@ function CommandMenu({ onClose }: { onClose: () => void }) {
   const go = (it: NavItem) => { router.push(it.href); onClose(); };
 
   return (
-    <div className="ed-cmd-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="ed-cmd" role="dialog" aria-modal="true" aria-label="Search navigation">
+    <div className="ed-cmd-overlay">
+      <div className="ed-cmd" role="dialog" aria-modal="true" aria-label="Search navigation" ref={dialogRef}>
         <div className="ed-cmd-input">
-          <span className="ed-search-glyph" aria-hidden>⌕</span>
-          <input ref={inputRef} placeholder="Jump to a view…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <button type="button" className="ed-kbd ed-cmd-esc" onClick={onClose} aria-label="Close search">esc</button>
+          <span className="ed-cmd-field">
+            <span className="ed-search-glyph" aria-hidden>⌕</span>
+            <input ref={inputRef} placeholder="Jump to a view…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </span>
         </div>
         <div className="ed-cmd-list">
           {groups.length === 0 && <div className="ed-cmd-empty">No matching views.</div>}
