@@ -6,6 +6,7 @@ import { apiErrorMessage, apiFetch } from '@/lib/api-client';
 import { failureReasonSummary } from './failure-reasons';
 import { useStorePresence, StoreCheckBar, deliveredMapFrom } from '../catalogue/store-presence';
 import { useLyricsCheck, LyricsCheckBar, computeLyricsCoverage, type TrackLyrics } from '../catalogue/lyrics-check';
+import { CoverageLegend } from '../_components/CoverageLegend';
 
 // Matches READING_SENTINEL in apps/api/src/distributor-connect.ts, marks a record whose
 // catalogue is still being read in the background so the page polls until it fills in.
@@ -581,7 +582,7 @@ export function CatalogOps() {
         </div>
       </div>
       {shown.length > RENDER_CAP && <p className="cat-note">Showing the first {RENDER_CAP.toLocaleString()} of {shown.length.toLocaleString()} matching tracks. Refine with search or filters (CSV export includes all {shown.length.toLocaleString()}).</p>}
-      <p className="cat-note">Coverage codes: {rec.result.stores.map((s2) => `${platformCode(s2)} ${s2}`).join(' · ')}. Green = confirmed live, amber = not confirmed, red = wrong profile, grey = unverifiable.</p>
+      <CoverageLegend stores={rec.result.stores} />
     </>
   );
 }

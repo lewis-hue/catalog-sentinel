@@ -469,6 +469,20 @@ input.filter { min-width: 240px; }
 /* Links inside note/caption text must be distinguishable without relying on color (WCAG 1.4.1). */
 .cat-note a, .rail-sub a, .page-sub a { text-decoration: underline; }
 
+/* ---- coverage legend: verdict key + store-code chip grid ---- */
+.cov-legend { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 14px 16px; margin-top: 20px; display: flex; flex-direction: column; gap: 12px; }
+.cov-legend-status { display: flex; flex-wrap: wrap; gap: 8px 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); }
+.cov-key { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--mist); }
+.cov-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.cov-dot.live { background: var(--live); }
+.cov-dot.gap { background: var(--gap); }
+.cov-dot.wrong { background: var(--wrong); }
+.cov-dot.unk { background: var(--unk); }
+.cov-legend-codes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 7px 14px; }
+.cov-code-item { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--mist); min-width: 0; }
+.cov-code { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 20px; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--ink-2); color: var(--paper); font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; }
+.cov-code-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .report-panel { margin-top: 24px; border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; background: var(--panel); box-shadow: var(--shadow-xs); }
 .report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
 .report-head h3 { font-family: var(--font-display); font-size: 16px; margin: 3px 0 0; font-optical-sizing: auto; font-weight: 700; }
