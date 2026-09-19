@@ -70,29 +70,60 @@ function TenantSwitcher() {
   );
 }
 
+/* ------------------------------------------------------------------ sidebar control (Expanded / Collapsed / Expand on hover) */
+type RailMode = 'expanded' | 'collapsed' | 'hover';
+const RAIL_MODE_KEY = 'sentinel:rail-mode';
+const RAIL_MODES: Array<{ value: RailMode; label: string; hint: string }> = [
+  { value: 'expanded', label: 'Expanded', hint: 'Always show the navigation' },
+  { value: 'collapsed', label: 'Collapsed', hint: 'Hide it to free up width' },
+  { value: 'hover', label: 'Expand on hover', hint: 'Reveal it from the left edge' },
+];
+
+function SidebarControl({ mode, onChange }: { mode: RailMode; onChange: (m: RailMode) => void }) {
+  return (
+    <Dropdown
+      label="Sidebar control"
+      trigger={(p) => (
+        <button type="button" className="ed-iconbtn ed-menu-btn" aria-haspopup="menu" aria-label="Sidebar control" title="Sidebar control" {...p}>
+          <span aria-hidden>◧</span>
+        </button>
+      )}
+    >
+      {RAIL_MODES.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          role="menuitemradio"
+          aria-checked={mode === opt.value}
+          className="ed-pop-item ed-mode-item"
+          onClick={() => onChange(opt.value)}
+        >
+          <span>
+            {opt.label}
+            <span className="ed-pop-item-desc">{opt.hint}</span>
+          </span>
+          <span className={`ed-radio${mode === opt.value ? ' is-on' : ''}`} aria-hidden />
+        </button>
+      ))}
+    </Dropdown>
+  );
+}
+
 /* ------------------------------------------------------------------ header */
-function Header({ onOpenCmd, inspectorOpen, onToggleInspector, collapsed, onToggleCollapse }: {
+function Header({ onOpenCmd, inspectorOpen, onToggleInspector, railMode, onRailMode }: {
   onOpenCmd: () => void;
   inspectorOpen: boolean;
   onToggleInspector: () => void;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
+  railMode: RailMode;
+  onRailMode: (m: RailMode) => void;
 }) {
   const pathname = usePathname() || '/';
   const active = activeItem(pathname);
+  const railInFlow = railMode === 'expanded';
   return (
-    <header className={`ed-header${collapsed ? ' is-collapsed' : ''}`}>
+    <header className={`ed-header${railInFlow ? '' : ' is-collapsed'}`}>
       <div className="ed-header-lead">
-        <button
-          type="button"
-          className="ed-iconbtn ed-menu-btn"
-          onClick={onToggleCollapse}
-          aria-label={collapsed ? 'Show navigation' : 'Hide navigation'}
-          aria-expanded={!collapsed}
-          title={collapsed ? 'Show navigation' : 'Hide navigation'}
-        >
-          <span aria-hidden>◧</span>
-        </button>
+        <SidebarControl mode={railMode} onChange={onRailMode} />
       </div>
       <Link href="/" className="ed-brand" title="Catalog Sentinel home">
         <span className="ed-brand-mark">CS</span>
@@ -170,33 +201,47 @@ function AccountMenu() {
 }
 
 /* ------------------------------------------------------------------ rail (text-only, collapsible) */
+function RailGroup({ group, active, auditId }: { group: (typeof NAV_GROUPS)[number]; active: NavItem | null; auditId: string | null }) {
+  return (
+    <div className="ed-rail-group-wrap">
+      <div className="ed-rail-grouplabel">{group.label}</div>
+      <div className="ed-rail-group">
+        {group.items.map((it) => {
+          const isActive = active?.key === it.key;
+          return (
+            <Link
+              key={it.key}
+              href={contextualHref(it.href, auditId)}
+              className={`ed-railitem${isActive ? ' is-active' : ''}`}
+              aria-current={isActive ? 'page' : undefined}
+            >
+              <span>{it.label}</span>
+              {it.flag && <span className="ed-flag">{it.flag}</span>}
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function RailView({ pathname, auditId }: { pathname: string; auditId: string | null }) {
   const active = activeItem(pathname);
+  // Main groups scroll; the last group (Account) is pinned to the bottom of the rail.
+  const mainGroups = NAV_GROUPS.slice(0, -1);
+  const footerGroup = NAV_GROUPS[NAV_GROUPS.length - 1];
   return (
     <nav className="ed-rail" aria-label="Primary">
       <div className="ed-rail-groups">
-        {NAV_GROUPS.map((g) => (
-          <div key={g.label} className="ed-rail-group-wrap">
-            <div className="ed-rail-grouplabel">{g.label}</div>
-            <div className="ed-rail-group">
-              {g.items.map((it) => {
-                const isActive = active?.key === it.key;
-                return (
-                  <Link
-                    key={it.key}
-                    href={contextualHref(it.href, auditId)}
-                    className={`ed-railitem${isActive ? ' is-active' : ''}`}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    <span>{it.label}</span>
-                    {it.flag && <span className="ed-flag">{it.flag}</span>}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
+        {mainGroups.map((g) => (
+          <RailGroup key={g.label} group={g} active={active} auditId={auditId} />
         ))}
       </div>
+      {footerGroup && (
+        <div className="ed-rail-footer">
+          <RailGroup group={footerGroup} active={active} auditId={auditId} />
+        </div>
+      )}
     </nav>
   );
 }
@@ -374,16 +419,17 @@ function Inspector({ onClose }: { onClose: () => void }) {
 
 /* ------------------------------------------------------------------ shell orchestrator */
 const INSPECTOR_KEY = 'sentinel:inspector-open';
-const NAV_COLLAPSED_KEY = 'sentinel:nav-collapsed';
 
 export function EditorialShell({ children }: { children: ReactNode }) {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [railMode, setRailMode] = useState<RailMode>('expanded');
   useEffect(() => {
     try {
       setInspectorOpen(window.localStorage.getItem(INSPECTOR_KEY) === '1');
-      setCollapsed(window.localStorage.getItem(NAV_COLLAPSED_KEY) === '1');
+      const saved = window.localStorage.getItem(RAIL_MODE_KEY);
+      if (saved === 'expanded' || saved === 'collapsed' || saved === 'hover') setRailMode(saved);
+      else if (window.localStorage.getItem('sentinel:nav-collapsed') === '1') setRailMode('collapsed');
     } catch { /* defaults */ }
   }, []);
   const toggleInspector = useCallback(() => {
@@ -393,12 +439,9 @@ export function EditorialShell({ children }: { children: ReactNode }) {
       return next;
     });
   }, []);
-  const toggleCollapse = useCallback(() => {
-    setCollapsed((c) => {
-      const next = !c;
-      try { window.localStorage.setItem(NAV_COLLAPSED_KEY, next ? '1' : '0'); } catch { /* ignore */ }
-      return next;
-    });
+  const changeRailMode = useCallback((mode: RailMode) => {
+    setRailMode(mode);
+    try { window.localStorage.setItem(RAIL_MODE_KEY, mode); } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
@@ -411,9 +454,10 @@ export function EditorialShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="ed-shell">
-      <Header onOpenCmd={() => setCmdOpen(true)} inspectorOpen={inspectorOpen} onToggleInspector={toggleInspector} collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+      <Header onOpenCmd={() => setCmdOpen(true)} inspectorOpen={inspectorOpen} onToggleInspector={toggleInspector} railMode={railMode} onRailMode={changeRailMode} />
       <div className="ed-body">
-        {!collapsed && <Rail />}
+        {railMode === 'expanded' && <Rail />}
+        {railMode === 'hover' && <div className="ed-rail-hover"><Rail /></div>}
         <main className="ed-content main" id="main-content" tabIndex={-1}>{children}</main>
         {inspectorOpen && <Inspector onClose={toggleInspector} />}
       </div>

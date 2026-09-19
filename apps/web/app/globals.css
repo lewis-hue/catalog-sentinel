@@ -698,7 +698,7 @@ input.filter { min-width: 240px; }
   border-right: 1px solid var(--line); background: var(--panel);
   overflow: visible; z-index: 40;
 }
-.ed-rail-groups { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.ed-rail-groups { display: flex; flex-direction: column; gap: 2px; min-height: 0; flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; }
 /* Thin, always-usable scrollbars on every scrollable shell panel (rail, inspector, content, ⌘K). */
 .ed-rail-groups, .ed-inspector-body, .ed-content, .ed-cmd-list, .ed-pop { scrollbar-width: thin; scrollbar-color: var(--line-soft) transparent; }
 .ed-rail-groups::-webkit-scrollbar, .ed-inspector-body::-webkit-scrollbar, .ed-content::-webkit-scrollbar, .ed-cmd-list::-webkit-scrollbar, .ed-pop::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -712,6 +712,20 @@ input.filter { min-width: 240px; }
 }
 .ed-rail-group-wrap:first-child .ed-rail-grouplabel { padding-top: 4px; }
 .ed-rail-group { display: flex; flex-direction: column; gap: 3px; }
+/* Account group pinned to the bottom of the rail (settings-anchored, dashboard convention). */
+.ed-rail-footer { flex-shrink: 0; margin-top: 8px; padding-top: 2px; border-top: 1px solid var(--line-soft); }
+.ed-rail-footer .ed-rail-grouplabel { padding-top: 12px; }
+/* Sidebar-control popover: mode chooser with radio marks. */
+.ed-mode-item { align-items: center; }
+.ed-radio { flex-shrink: 0; width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--line); position: relative; }
+.ed-radio.is-on { border-color: var(--brand); }
+.ed-radio.is-on::after { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--brand); }
+/* Expand-on-hover: a thin left-edge strip reveals the rail as an overlay. */
+.ed-rail-hover { position: relative; width: 5px; flex-shrink: 0; z-index: 45; }
+.ed-rail-hover::after { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 3px; background: var(--line); opacity: 0.7; }
+.ed-rail-hover .ed-rail { position: absolute; top: 0; left: 0; height: 100%; transform: translateX(-102%); transition: transform 0.16s ease; box-shadow: var(--shadow-md); }
+.ed-rail-hover:hover .ed-rail { transform: translateX(0); }
+@media (prefers-reduced-motion: reduce) { .ed-rail-hover .ed-rail { transition: none; } }
 .ed-railitem {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 8px 12px; border-radius: var(--radius-sm);
