@@ -190,7 +190,7 @@ function AccountFooter() {
         </div>
         <div className="ed-pop-sep" />
         <Link role="menuitem" className="ed-pop-item" href="/profile"><span>Profile</span></Link>
-        <form action="/auth/logout" method="post" className="ed-signout-form">
+        <form action="/auth/logout" method="post" className="ed-signout-form" onClick={(e) => e.stopPropagation()}>
           <button role="menuitem" type="submit" className="ed-pop-item"><span>Sign out</span></button>
         </form>
       </Dropdown>
